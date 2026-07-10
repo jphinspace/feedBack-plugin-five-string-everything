@@ -1,0 +1,10 @@
+{
+    "id": "five_string_everything",
+    "name": "Five-String Everything",
+    "version": "0.1.0",
+    "type": "visualization",
+    "script": "screen.js",
+    "styles": "assets/plugin.css",
+    "settings": { "html": "settings.html", "category": "graphics", "server_files": ["plugin_uploads/five_string_everything/current.mp4", "plugin_uploads/five_string_everything/current.webm"] },
+    "routes": "routes.py"
+}
