@@ -31,23 +31,10 @@ feedBack install's `plugins/` directory, e.g.:
 git clone <this-repo-url> /path/to/feedBack/plugins/feedBack-plugin-five-string-everything
 ```
 
-Either way, **the installed directory name must sort alphabetically before
-`highway_3d`** (e.g. `feedBack-plugin-five-string-everything` — starts with
-`f`, before `h`). Auto-mode's viz picker resolves ties between plugins that
-both claim a song by directory name, first-match-wins; if the name sorts
-after `highway_3d`, Auto-mode will keep picking `highway_3d` for bass songs
-and you'll have to select this plugin manually every time from the viz
-picker instead.
-
 Restart feedBack (or reload plugins) after installing.
 
-## Use
-
-Auto-mode (the default viz picker setting) picks this plugin automatically
-for bass arrangements once installed correctly — see the naming note above.
-To use it manually instead, pick "Five-String Everything" from the 3D
-highway viz picker. There's no enabled/disabled setting: to stop using it,
-pick a different renderer from the viz picker, or uninstall the plugin.
+After installing, `highway_3d` may continue to be selected by default for bass
+arrangements. You may need to select `five string everything` manually.
 
 ## Build
 
