@@ -305,4 +305,53 @@ function songContext(sourceStringCount, tuning, capo) {
         bySourceString.get(2).entry, { s: 3, f: 0 });
 }
 
+// Anchor remapping (feedback: the "hand position" highlight band tracked
+// the chart's original fret numbers, not the remapped ones). Mirrors the
+// FSE.remapAnchors added to screen.js.
+function remapAnchors(anchors, remappedNotes) {
+    if (!Array.isArray(anchors) || anchors.length === 0) return anchors || [];
+    if (!Array.isArray(remappedNotes) || remappedNotes.length === 0) return anchors.slice();
+    const out = [];
+    let ptr = 0;
+    for (const a of anchors) {
+        while (ptr < remappedNotes.length - 1 && remappedNotes[ptr].t < a.time) ptr++;
+        const note = remappedNotes[ptr];
+        const adjustment = note.f - note._origNote.f;
+        const fret = Math.max(0, Math.min(TARGET_MAX_FRET, a.fret + adjustment));
+        out.push({ time: a.time, fret, width: a.width });
+    }
+    return out;
+}
+{
+    // Drop-D dropped string (adjustment +3 for its low notes, -2 for its
+    // "natural E" notes from fret 2 up — see test 1 above) drives two
+    // anchors: one aligned with a low note (uses the +3 shift), one aligned
+    // with a note past the crossover (uses the -2 shift). A third anchor
+    // sits after the last note entirely and must fall back to that last
+    // note's shift instead of going unremapped.
+    const remappedNotes = [
+        { t: 0, f: 4, _origNote: { t: 0, f: 1 } },   // Eb open-string-drop note, adjustment +3
+        { t: 1, f: 5, _origNote: { t: 1, f: 7 } },   // past crossover, adjustment -2
+    ];
+    const anchors = [
+        { time: 0, fret: 1, width: 4 },   // aligns with the first note (adjustment +3)
+        { time: 1, fret: 7, width: 4 },   // aligns with the second note (adjustment -2)
+        { time: 5, fret: 10, width: 4 },  // after the last note — falls back to its shift (-2)
+    ];
+    const remapped = remapAnchors(anchors, remappedNotes);
+    check('anchor aligned with a low-note-shift note', remapped[0], { time: 0, fret: 4, width: 4 });
+    check('anchor aligned with a natural-target-shift note', remapped[1], { time: 1, fret: 5, width: 4 });
+    check('anchor after the last note falls back to its shift', remapped[2], { time: 5, fret: 8, width: 4 });
+
+    // Clamped rather than going negative/over 20.
+    const clampLow = remapAnchors([{ time: 0, fret: 0, width: 4 }], [{ t: 0, f: 0, _origNote: { t: 0, f: 3 } }]);
+    check('anchor clamps at fret 0', clampLow[0], { time: 0, fret: 0, width: 4 });
+    const clampHigh = remapAnchors([{ time: 0, fret: 19, width: 4 }], [{ t: 0, f: 20, _origNote: { t: 0, f: 0 } }]);
+    check('anchor clamps at fret 20', clampHigh[0], { time: 0, fret: 20, width: 4 });
+
+    // No notes survived at all — pass through unchanged rather than throw.
+    const passthrough = remapAnchors([{ time: 0, fret: 5, width: 4 }], []);
+    check('anchor passes through unchanged with no surviving notes', passthrough[0], { time: 0, fret: 5, width: 4 });
+}
+
 console.log(`OK - ${passed} assertions passed`);

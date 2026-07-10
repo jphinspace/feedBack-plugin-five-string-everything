@@ -213,6 +213,48 @@
             return Array.from(bySlot.values()).map(c => ({ entry: c.entry, note: c.note }));
         }
 
+        // Remaps the chart's `anchors` array (RS2014 "fret hand position"
+        // markers — { time, fret, width }, no string field, per
+        // lib/song.py's Anchor dataclass) so the highway's hand-position
+        // highlight band tracks the remapped fretboard instead of the
+        // chart's original (now-inaccurate) fret numbers.
+        //
+        // An anchor has no string of its own, so there's no way to remap
+        // one independently the way a note is remapped — different
+        // strings can carry different adjustments (Drop C# gives every
+        // string a different one), so there's no single "the" adjustment
+        // for a bare fret number. The well-defined choice: `getChartAnchorAt`
+        // (screen.js) treats an anchor's fret/width as governing the
+        // passage of notes from its own time onward until the next anchor
+        // — i.e. it's authored to describe the hand position for whatever
+        // notes come next — so borrow the adjustment of the first
+        // ALREADY-REMAPPED note at or after the anchor's time (falling back
+        // to the nearest note before it if the anchor is after the last
+        // note, or leaving the anchor unchanged if the chart has no
+        // surviving notes at all).
+        //
+        // `remappedNotes` must be time-sorted with each entry carrying `t`
+        // (unchanged from the original), `f` (remapped), and `_origNote.f`
+        // (original fret) to diff against — exactly the shape the note
+        // substitution shim already builds. `anchors` must be time-sorted
+        // (chart invariant). Single shared forward-scanning pointer over
+        // both time-sorted arrays — O(anchors + notes), not O(anchors *
+        // notes) — compute once per song, not per frame.
+        function remapAnchors(anchors, remappedNotes) {
+            if (!Array.isArray(anchors) || anchors.length === 0) return anchors || [];
+            if (!Array.isArray(remappedNotes) || remappedNotes.length === 0) return anchors.slice();
+            const out = [];
+            let ptr = 0;
+            for (const a of anchors) {
+                while (ptr < remappedNotes.length - 1 && remappedNotes[ptr].t < a.time) ptr++;
+                const note = remappedNotes[ptr];
+                const adjustment = note.f - note._origNote.f;
+                const fret = Math.max(0, Math.min(TARGET_MAX_FRET, a.fret + adjustment));
+                out.push({ time: a.time, fret, width: a.width });
+            }
+            return out;
+        }
+
         return {
             TARGET_MAX_FRET,
             TARGET_STRING_COUNT,
@@ -225,6 +267,7 @@
             noteHalfstepRank,
             remapNoteEntry,
             resolveChordCollisions,
+            remapAnchors,
         };
     })();
 
@@ -15436,20 +15479,23 @@
         // Per-instance cache (declared inside createFactory(), not at module
         // scope) so splitscreen panels showing different songs don't thrash
         // or cross-contaminate each other's cached remap.
-        let _fseCacheNotesRef = null, _fseCacheChordsRef = null;
+        let _fseCacheNotesRef = null, _fseCacheChordsRef = null, _fseCacheAnchorsRef = null;
         let _fseCacheTuningRef = null, _fseCacheCapo = null, _fseCacheStringCount = null;
-        let _fseRemappedNotes = [], _fseRemappedChords = [];
+        let _fseRemappedNotes = [], _fseRemappedChords = [], _fseRemappedAnchors = [];
         function _fseApplyRetune(bundle) {
-            const rawNotes = bundle.notes, rawChords = bundle.chords;
+            const rawNotes = bundle.notes, rawChords = bundle.chords, rawAnchors = bundle.anchors;
             const tuning = bundle.tuning, capo = bundle.capo | 0, sc = bundle.stringCount;
             if (rawNotes === _fseCacheNotesRef && rawChords === _fseCacheChordsRef
+                && rawAnchors === _fseCacheAnchorsRef
                 && tuning === _fseCacheTuningRef && capo === _fseCacheCapo && sc === _fseCacheStringCount) {
                 bundle.notes = _fseRemappedNotes;
                 bundle.chords = _fseRemappedChords;
+                bundle.anchors = _fseRemappedAnchors;
                 return;
             }
             _fseCacheNotesRef = rawNotes;
             _fseCacheChordsRef = rawChords;
+            _fseCacheAnchorsRef = rawAnchors;
             _fseCacheTuningRef = tuning;
             _fseCacheCapo = capo;
             _fseCacheStringCount = sc;
@@ -15459,8 +15505,10 @@
                 // throw) — pass the untouched chart through unremapped.
                 _fseRemappedNotes = Array.isArray(rawNotes) ? rawNotes : [];
                 _fseRemappedChords = Array.isArray(rawChords) ? rawChords : [];
+                _fseRemappedAnchors = Array.isArray(rawAnchors) ? rawAnchors : [];
                 bundle.notes = _fseRemappedNotes;
                 bundle.chords = _fseRemappedChords;
+                bundle.anchors = _fseRemappedAnchors;
                 return;
             }
             // Arrangement-wide natural string shift (PLANNING.md Phase 2):
@@ -15499,8 +15547,15 @@
             }
             _fseRemappedNotes = remappedNotes;
             _fseRemappedChords = remappedChords;
+            // PATCH POINT (feedback: the hand-position highlight band tracked
+            // the chart's original, now-inaccurate fret numbers). Anchors
+            // have no string of their own, so they borrow the remap
+            // adjustment of whichever already-remapped note they're
+            // authored to align with — see FSE.remapAnchors.
+            _fseRemappedAnchors = FSE.remapAnchors(rawAnchors, remappedNotes);
             bundle.notes = _fseRemappedNotes;
             bundle.chords = _fseRemappedChords;
+            bundle.anchors = _fseRemappedAnchors;
         }
 
         /* ── setRenderer contract ────────────────────────────────────────── */
