@@ -419,9 +419,30 @@ regenerated to match — per the scope guardrails, document this as a known
 cosmetic gap for chord ghosting/hand-shape overlays specifically (the actual
 note gems remain correct).
 
+**Correction (feedback found this in manual testing): this collision
+resolution must ALSO apply to `bundle.notes`, not just `bundle.chords`' own
+`.notes` array.** `arr.notes` and `arr.chords` are separate lists in
+`lib/song.py` — nothing requires two genuinely-simultaneous notes (a bass
+"double stop" in particular is often encoded this way rather than wrapped in
+a `Chord` object) to appear as one `Chord`. The original Phase 4/5
+implementation remapped `bundle.notes` one note at a time with no awareness
+of other notes sharing the same onset, so two independently-remapped flat
+notes could still land on the same target string — the exact "same chord,
+same string, different frets" symptom this phase exists to prevent, just via
+a path that bypassed it. Fixed by grouping `bundle.notes` by exact onset
+time before remapping and running every group — including ordinary
+singleton groups, which pass through unchanged — through the same
+collision-resolution function used for real `Chord` objects, rather than
+maintaining two separate code paths for what is structurally the same
+problem (one or more notes sharing an instant, needing distinct target
+strings).
+
 **Verify:** a synthetic chord (3+ notes at the same `t`, chosen so two of them
 collide onto the same target string after remap) shows only the lower-pitched
 of the colliding pair surviving; the third, non-colliding note is untouched.
+Separately, the same scenario constructed as plain `bundle.notes` entries
+(no `Chord` wrapper) must resolve identically — verified as its own test
+case, not just inferred from the chord case.
 
 ---
 

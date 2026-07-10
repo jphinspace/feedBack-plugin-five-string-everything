@@ -354,4 +354,47 @@ function remapAnchors(anchors, remappedNotes) {
     check('anchor passes through unchanged with no surviving notes', passthrough[0], { time: 0, fret: 5, width: 4 });
 }
 
+// Collision resolution for simultaneous notes that AREN'T wrapped in a
+// Chord object (feedback: a bass "double stop" is often encoded as two
+// independent Note entries sharing an onset time, not a Chord — arr.notes
+// and arr.chords are separate lists in lib/song.py). Mirrors the grouping
+// _fseApplyRetune applies to bundle.notes: group by exact onset time, run
+// each group (including ordinary singletons) through
+// resolveChordCollisions, exactly like a real chord's own `.notes` array.
+{
+    const offsetsByString = [33, 33, 38]; // same fixture as the chord collision test
+    const naturalTargetByString = [2, 2, 3];
+    const noteA = { t: 5, s: 0, f: 5 };  // collides with noteB, higher pitch -> dropped
+    const noteB = { t: 5, s: 1, f: 2 };  // collides with noteA, lower pitch -> survives
+    const noteC = { t: 5, s: 2, f: 0 };  // same instant, non-colliding -> untouched
+    const noteD = { t: 6, s: 2, f: 3 };  // different instant, its own singleton group
+
+    const byTime = new Map();
+    for (const n of [noteA, noteB, noteC, noteD]) {
+        let bucket = byTime.get(n.t);
+        if (!bucket) byTime.set(n.t, bucket = []);
+        bucket.push(n);
+    }
+    const remapped = [];
+    for (const bucket of byTime.values()) {
+        for (const { entry, note } of resolveChordCollisions(offsetsByString, naturalTargetByString, bucket)) {
+            remapped.push({ t: note.t, s: entry.s, f: entry.f, origS: note.s });
+        }
+    }
+    remapped.sort((a, b) => a.t - b.t);
+
+    check('flat-notes collision: only 3 of 4 notes survive', remapped.length, 3);
+    const atT5 = remapped.filter(n => n.t === 5);
+    const atT6 = remapped.filter(n => n.t === 6);
+    check('flat-notes collision: exactly 2 of the 3 same-instant notes survive', atT5.length, 2);
+    assert.ok(!atT5.some(n => n.origS === 0), 'colliding higher-pitched flat note (source string 0) should be dropped');
+    passed++;
+    check('flat-notes collision: lower-pitched note keeps its own remap',
+        atT5.find(n => n.origS === 1), { t: 5, s: 2, f: 2, origS: 1 });
+    check('flat-notes collision: non-colliding same-instant note is untouched',
+        atT5.find(n => n.origS === 2), { t: 5, s: 3, f: 0, origS: 2 });
+    check('flat-notes collision: a different-instant singleton is unaffected',
+        atT6[0], { t: 6, s: 3, f: 3, origS: 2 });
+}
+
 console.log(`OK - ${passed} assertions passed`);

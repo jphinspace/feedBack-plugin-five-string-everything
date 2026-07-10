@@ -15520,17 +15520,43 @@
                 offsetsByString.push(FSE.sourceOpenStringOffset(sc, tuning, capo, s));
                 naturalTargetByString.push(s + shiftK);
             }
+            // PATCH POINT (feedback: chords could still show two notes on the
+            // same target string, different frets). Root cause: a bass
+            // "double stop" is often encoded as two independent Note
+            // entries in bundle.notes sharing the same onset time, rather
+            // than wrapped in a Chord object — arr.notes and arr.chords are
+            // separate lists in lib/song.py, nothing requires simultaneous
+            // notes to be chord-wrapped. Remapping bundle.notes one note at
+            // a time (as before) never checked a note against OTHER notes
+            // at the same instant, so two such notes could independently
+            // land on the same target string. Group by exact onset time
+            // first and run every group — including ordinary
+            // singleton-note groups, which come back unchanged — through
+            // the same FSE.resolveChordCollisions used for real Chord
+            // objects below, rather than maintaining two separate
+            // collision-handling paths.
             const remappedNotes = [];
             if (Array.isArray(rawNotes)) {
+                const byTime = new Map();
                 for (const n of rawNotes) {
-                    const off = offsetsByString[n.s];
-                    if (off === null || off === undefined) continue; // string not in tuning range, drop
-                    const entry = FSE.remapNoteEntry(off, naturalTargetByString[n.s], n);
-                    if (!entry) continue; // unplayable on the target, drop
-                    const copy = Object.assign({}, n, entry);
-                    copy._origNote = n; // PLANNING.md Phase 5: keyed against by the note-state provider
-                    remappedNotes.push(copy);
+                    let bucket = byTime.get(n.t);
+                    if (!bucket) byTime.set(n.t, bucket = []);
+                    bucket.push(n);
                 }
+                for (const bucket of byTime.values()) {
+                    const survivors = FSE.resolveChordCollisions(offsetsByString, naturalTargetByString, bucket);
+                    for (const { entry, note } of survivors) {
+                        const copy = Object.assign({}, note, entry);
+                        copy._origNote = note; // PLANNING.md Phase 5: keyed against by the note-state provider
+                        remappedNotes.push(copy);
+                    }
+                }
+                // byTime iterates in first-insertion order, which already
+                // matches rawNotes' time order (chart invariant) — but sort
+                // explicitly rather than depending on that Map-ordering
+                // detail, since every downstream consumer assumes
+                // bundle.notes is time-sorted (binary searches, etc.).
+                remappedNotes.sort((a, b) => a.t - b.t);
             }
             const remappedChords = [];
             if (Array.isArray(rawChords)) {
