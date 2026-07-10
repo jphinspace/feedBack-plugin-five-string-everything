@@ -95,10 +95,6 @@ files live at the repo root, not nested under a `plugins/` directory.
 - `cent_offset` (RS2014 global pitch-shift field) is ignored, same as it's
   excluded from `lib/song.py`'s own note-pitch formula. Songs with a nonzero
   `cent_offset` will remap incorrectly; document as a known limitation.
-- Chord finger-diagram/hand-shape ghosting metadata (`chordTemplates`) will
-  not be regenerated for remapped chords — it may show a stale fingering
-  inconsistent with the remapped notes. Acceptable for MVP since bass charts
-  are mostly monophonic; document as a known cosmetic limitation.
 - Settings UI is a static placeholder (plugin name + version only, no
   controls).
 
@@ -565,11 +561,47 @@ patch points (identified from the earlier research pass over
      computed server-side from the note's actual sounding pitch
      (`lib/song.py`'s `note_pitch_midi`), which our remap always preserves
      exactly, so it stays correct unmodified. `chordTemplates[chord.id]`
-     (finger-diagram fret arrays, used for chord-ghost/hand-shape rendering)
-     remains the one known, already-documented exception (Phase 3) — fixing
-     it would mean synthesizing new templates matching the remapped chord
-     notes, out of scope for MVP given bass charts are mostly monophonic.
-6. Everything else in the copied file — themes, video backgrounds, camera,
+     was flagged here as a known, accepted exception (Phase 3) — **since
+     superseded by patch point 6 below**, which fixes it properly rather
+     than leaving it as a documented gap.
+6. **Chord templates** (feedback found this in manual testing — "chords can
+   have multiple notes on the same string... same chord same string
+   different frets" — traced with a real chart the user supplied for
+   testing, Black Veil Brides "In the End"). Two compounding findings:
+   - That chart has **zero real `Chord` objects** — every bass note is a
+     flat `Note`. The visible "chord indicator" is entirely synthesized by
+     `mergeHandShapeSynthChords`/`chordNotesFromTemplate` from a hand-shape
+     span + a `chordTemplates` entry (`frets: [6, 7, -1, -1, -1, -1]`,
+     `si` = original string index used directly as `{s: si, f}`) — a path
+     that reads `chordTemplates` directly and had never gone through our
+     remap at all. Confirmed by extracting the chart's own `bass.json`:
+     `num chords: 0`, one template `[6, 7, -1, -1, -1, -1]`, and real notes
+     `(s:0,f:6)`/`(s:1,f:7)` at the same moment the hand-shape covers — under
+     Drop C# (`tuning=[-3,-1,-1,-1]`), the REAL note `(s:0,f:6)` correctly
+     remaps to `{s:1(E),f:3}` (Phase 2's test 1b), while the un-remapped
+     synth chord showed target string 1 (`si=1`, misread as our E slot) at
+     the *original* fret 7 — two gems, same target string, different frets,
+     exactly the reported symptom.
+   - Fix: `chordTemplates[id].frets`/`.fingers` are indexed by *original*
+     string, structurally identical in shape to a chord's own `.notes`
+     array (one fret per string, `-1` = unused) — so reuse
+     `resolveChordCollisions` verbatim: build a `{s, f}` list from the
+     non–`-1` frets, resolve collisions, scatter survivors into fresh
+     `TARGET_STRING_COUNT`-length `frets`/`fingers` arrays indexed by
+     *target* string (`chord_id` indexing into the `chordTemplates` array
+     itself is untouched — only each entry's own per-string content
+     changes). Fingers relocate to their note's new index unchanged in
+     value; there's no principled way to recompute "correct" fingering
+     when the remap can turn two adjacent frets on adjacent strings into a
+     wide stretch across different strings entirely, so this is a
+     best-effort carry-forward, not a claim of ergonomic accuracy.
+   - `bundle.chordTemplates` is read directly (no single local alias) from
+     ~15 call sites — reassigning it once in `_fseApplyRetune`, the same
+     pattern as notes/chords/anchors, fixes every one of them, including
+     `chordNotesFromTemplate` (the actual bug) and, as a direct consequence,
+     the chord-ghost/finger-diagram rendering this section previously
+     flagged as an accepted gap — no longer a known limitation.
+7. Everything else in the copied file — themes, video backgrounds, camera,
    lighting, particle effects, splitscreen support, hand-shape ghosting,
    lyrics, minimap, event listeners (`highway:visibility`,
    `highway:canvas-replaced`, `notedetect:hit`/`notedetect:skin`) — stays
@@ -577,7 +609,7 @@ patch points (identified from the earlier research pass over
 
 **Verify:** `diff` our patched `screen.js` against the untouched
 `highway_3d/screen.js` copy from Phase 1 and confirm every hunk maps to one
-of the five patch points above (plus the Phase 1 identity/route renames) —
+of the six patch points above (plus the Phase 1 identity/route renames) —
 nothing else should differ.
 
 ---

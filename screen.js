@@ -255,6 +255,58 @@
             return out;
         }
 
+        // Remaps one chord template's `frets`/`fingers` (both indexed by
+        // ORIGINAL string) into arrays indexed by TARGET string, so anything
+        // that reads `chordTemplates[id]` directly — chord-ghost/finger-
+        // diagram rendering, and critically `chordNotesFromTemplate` (which
+        // synthesizes actual chord-frame note gems from hand-shape spans,
+        // screen.js) — sees the same remapped positions as the real note
+        // gems, instead of raw original-tuning fret numbers misread as
+        // target-string indices (feedback: this is what produced two note
+        // gems on the same target string at different frets even though the
+        // chart has zero real Chord objects — the "chord" was entirely
+        // synthesized from a hand-shape + this template).
+        //
+        // A template's per-string entries are exactly a chord's notes in
+        // shape (one fret per string, `-1` = unused), so this reuses
+        // resolveChordCollisions verbatim: build a { s, f } list from the
+        // non–`-1` frets, resolve collisions, and scatter survivors into
+        // fresh TARGET_STRING_COUNT-length frets/fingers arrays (still `-1`
+        // for every string the template doesn't use, or that collided and
+        // lost). Fingers relocate to their note's new index unchanged in
+        // value — finger *assignment* is a display-only best-effort; our
+        // remap can change the physical hand shape entirely (e.g. two
+        // adjacent frets on adjacent strings becoming a wide stretch across
+        // different strings), so there's no principled way to recompute
+        // "correct" fingering, only to keep the original hint from going
+        // stale-indexed.
+        function remapChordTemplate(offsetsByString, naturalTargetByString, template) {
+            if (!template || !Array.isArray(template.frets)) return template;
+            const notes = [];
+            for (let si = 0; si < template.frets.length; si++) {
+                const f = template.frets[si];
+                if (f >= 0) notes.push({ s: si, f });
+            }
+            const survivors = resolveChordCollisions(offsetsByString, naturalTargetByString, notes);
+            const frets = new Array(TARGET_STRING_COUNT).fill(-1);
+            const hasFingers = Array.isArray(template.fingers);
+            const fingers = hasFingers ? new Array(TARGET_STRING_COUNT).fill(-1) : template.fingers;
+            for (const { entry, note } of survivors) {
+                frets[entry.s] = entry.f;
+                if (hasFingers) fingers[entry.s] = template.fingers[note.s] ?? -1;
+            }
+            return Object.assign({}, template, { frets, fingers });
+        }
+
+        // Remaps every template in `chordTemplates` (array indexed by
+        // chord_id — that indexing is untouched, only each entry's own
+        // frets/fingers change). Compute once per song alongside notes/
+        // chords/anchors, not per frame.
+        function remapChordTemplates(offsetsByString, naturalTargetByString, templates) {
+            if (!Array.isArray(templates)) return templates || [];
+            return templates.map(t => remapChordTemplate(offsetsByString, naturalTargetByString, t));
+        }
+
         return {
             TARGET_MAX_FRET,
             TARGET_STRING_COUNT,
@@ -268,6 +320,8 @@
             remapNoteEntry,
             resolveChordCollisions,
             remapAnchors,
+            remapChordTemplate,
+            remapChordTemplates,
         };
     })();
 
@@ -15479,23 +15533,26 @@
         // Per-instance cache (declared inside createFactory(), not at module
         // scope) so splitscreen panels showing different songs don't thrash
         // or cross-contaminate each other's cached remap.
-        let _fseCacheNotesRef = null, _fseCacheChordsRef = null, _fseCacheAnchorsRef = null;
+        let _fseCacheNotesRef = null, _fseCacheChordsRef = null, _fseCacheAnchorsRef = null, _fseCacheTemplatesRef = null;
         let _fseCacheTuningRef = null, _fseCacheCapo = null, _fseCacheStringCount = null;
-        let _fseRemappedNotes = [], _fseRemappedChords = [], _fseRemappedAnchors = [];
+        let _fseRemappedNotes = [], _fseRemappedChords = [], _fseRemappedAnchors = [], _fseRemappedTemplates = [];
         function _fseApplyRetune(bundle) {
             const rawNotes = bundle.notes, rawChords = bundle.chords, rawAnchors = bundle.anchors;
+            const rawTemplates = bundle.chordTemplates;
             const tuning = bundle.tuning, capo = bundle.capo | 0, sc = bundle.stringCount;
             if (rawNotes === _fseCacheNotesRef && rawChords === _fseCacheChordsRef
-                && rawAnchors === _fseCacheAnchorsRef
+                && rawAnchors === _fseCacheAnchorsRef && rawTemplates === _fseCacheTemplatesRef
                 && tuning === _fseCacheTuningRef && capo === _fseCacheCapo && sc === _fseCacheStringCount) {
                 bundle.notes = _fseRemappedNotes;
                 bundle.chords = _fseRemappedChords;
                 bundle.anchors = _fseRemappedAnchors;
+                bundle.chordTemplates = _fseRemappedTemplates;
                 return;
             }
             _fseCacheNotesRef = rawNotes;
             _fseCacheChordsRef = rawChords;
             _fseCacheAnchorsRef = rawAnchors;
+            _fseCacheTemplatesRef = rawTemplates;
             _fseCacheTuningRef = tuning;
             _fseCacheCapo = capo;
             _fseCacheStringCount = sc;
@@ -15506,9 +15563,11 @@
                 _fseRemappedNotes = Array.isArray(rawNotes) ? rawNotes : [];
                 _fseRemappedChords = Array.isArray(rawChords) ? rawChords : [];
                 _fseRemappedAnchors = Array.isArray(rawAnchors) ? rawAnchors : [];
+                _fseRemappedTemplates = Array.isArray(rawTemplates) ? rawTemplates : [];
                 bundle.notes = _fseRemappedNotes;
                 bundle.chords = _fseRemappedChords;
                 bundle.anchors = _fseRemappedAnchors;
+                bundle.chordTemplates = _fseRemappedTemplates;
                 return;
             }
             // Arrangement-wide natural string shift (PLANNING.md Phase 2):
@@ -15579,9 +15638,18 @@
             // adjustment of whichever already-remapped note they're
             // authored to align with — see FSE.remapAnchors.
             _fseRemappedAnchors = FSE.remapAnchors(rawAnchors, remappedNotes);
+            // PATCH POINT (feedback: two note gems on the same target
+            // string, different frets, inside what looked like a normal
+            // chord indicator — root cause traced to a real chart with ZERO
+            // authored Chord objects: the "chord" was entirely synthesized
+            // from a hand-shape + this chord template's raw, un-remapped
+            // frets, misread as target-string indices — see
+            // FSE.remapChordTemplates and chordNotesFromTemplate below).
+            _fseRemappedTemplates = FSE.remapChordTemplates(offsetsByString, naturalTargetByString, rawTemplates);
             bundle.notes = _fseRemappedNotes;
             bundle.chords = _fseRemappedChords;
             bundle.anchors = _fseRemappedAnchors;
+            bundle.chordTemplates = _fseRemappedTemplates;
         }
 
         /* ── setRenderer contract ────────────────────────────────────────── */

@@ -397,4 +397,85 @@ function remapAnchors(anchors, remappedNotes) {
         atT6[0], { t: 6, s: 3, f: 3, origS: 2 });
 }
 
+// Chord template remapping (feedback: two note gems on the same target
+// string, different frets, inside what looked like a normal chord
+// indicator — the actual chart had ZERO real Chord objects; the "chord"
+// was entirely synthesized from a hand-shape + this chord template's raw,
+// un-remapped frets, misread as target-string indices). Mirrors
+// FSE.remapChordTemplate/remapChordTemplates in screen.js.
+function remapChordTemplate(offsetsByString, naturalTargetByString, template) {
+    if (!template || !Array.isArray(template.frets)) return template;
+    const notes = [];
+    for (let si = 0; si < template.frets.length; si++) {
+        const f = template.frets[si];
+        if (f >= 0) notes.push({ s: si, f });
+    }
+    const survivors = resolveChordCollisions(offsetsByString, naturalTargetByString, notes);
+    const frets = new Array(TARGET_STRING_COUNT).fill(-1);
+    const hasFingers = Array.isArray(template.fingers);
+    const fingers = hasFingers ? new Array(TARGET_STRING_COUNT).fill(-1) : template.fingers;
+    for (const { entry, note } of survivors) {
+        frets[entry.s] = entry.f;
+        if (hasFingers) fingers[entry.s] = template.fingers[note.s] ?? -1;
+    }
+    return Object.assign({}, template, { frets, fingers });
+}
+function remapChordTemplates(offsetsByString, naturalTargetByString, templates) {
+    if (!Array.isArray(templates)) return templates || [];
+    return templates.map(t => remapChordTemplate(offsetsByString, naturalTargetByString, t));
+}
+
+{
+    // The EXACT real-world case: Black Veil Brides "In the End", bass.json,
+    // Drop C# tuning [-3,-1,-1,-1] (verified test 1b above: k=+1, string0's
+    // natural target E, adjustment +3 for its low notes / -3 past the
+    // crossover at fret 3; string1's natural target A, adjustment +4 / -1
+    // past its crossover at fret 1). Real notes at this moment: (s:0,f:6)
+    // and (s:1,f:7) — the SAME pair this chord template encodes.
+    const ctx = songContext(4, [-3, -1, -1, -1], 0);
+    const template = { name: '', displayName: '', frets: [6, 7, -1, -1, -1, -1], fingers: [1, 2, -1, -1, -1, -1] };
+    const remapped = remapChordTemplate(ctx.offsetsByString, ctx.naturalTargetByString, template);
+    // (s:0,f:6): natural target E (index1), f=6 >= crossover fret 3 -> stays on E, fret 6-3=3.
+    // (s:1,f:7): natural target A (index2), f=7 >= crossover fret 1 -> stays on A, fret 7-1=6.
+    check('real-chart chord template: fret array remapped to target indices', remapped.frets, [-1, 3, 6, -1, -1]);
+    check('real-chart chord template: fingers relocate to the same new indices', remapped.fingers, [-1, 1, 2, -1, -1]);
+    check('real-chart chord template: name/displayName pass through unchanged', {
+        name: remapped.name, displayName: remapped.displayName,
+    }, { name: '', displayName: '' });
+
+    // This is exactly what fixes the reported bug: the real note at
+    // (s:0,f:6) independently remaps (via the normal note path, test 1b)
+    // to { s: 1, f: 3 } — matching this template's frets[1] exactly, instead
+    // of the template showing a stale raw fret 7 on target string 1.
+    const off0 = ctx.offsetsByString[0], nat0 = ctx.naturalTargetByString[0];
+    check('template stays consistent with the real note it was authored from',
+        remapNote(off0, nat0, 6), { s: remapped.frets.indexOf(3), f: 3 });
+}
+
+{
+    // Collision within a single template: two original strings whose
+    // remapped frets land on the same target string — must resolve exactly
+    // like a real chord's notes (keep the lower-pitched one).
+    const offsetsByString = [33, 33, 38];
+    const naturalTargetByString = [2, 2, 3];
+    const template = { frets: [5, 2, 0, -1], fingers: null }; // s0->target2 f5 (rank38), s1->target2 f2 (rank35, lower), s2->target3 f0
+    const remapped = remapChordTemplate(offsetsByString, naturalTargetByString, template);
+    check('colliding template slots: only the lower-pitched survivor is kept', remapped.frets, [-1, -1, 2, 0, -1]);
+    check('colliding template with no fingers array passes fingers through as-is', remapped.fingers, null);
+}
+
+{
+    // Array wrapper preserves chord_id indexing (templates are looked up by
+    // array index elsewhere in the file, e.g. chordTemplates[ch.id]).
+    const ctx = songContext(4, [0, 0, 0, 0], 0); // EADG identity
+    const templates = [
+        { frets: [0, -1, -1, -1], fingers: null },
+        { frets: [-1, 2, -1, -1], fingers: null },
+    ];
+    const remapped = remapChordTemplates(ctx.offsetsByString, ctx.naturalTargetByString, templates);
+    check('remapChordTemplates keeps the array length/order (id indexing)', remapped.length, 2);
+    check('remapChordTemplates id 0 shifted per EADG identity (string+1, fret unchanged)', remapped[0].frets, [-1, 0, -1, -1, -1]);
+    check('remapChordTemplates id 1 shifted per EADG identity (string+1, fret unchanged)', remapped[1].frets, [-1, -1, 2, -1, -1]);
+}
+
 console.log(`OK - ${passed} assertions passed`);
