@@ -56,6 +56,22 @@
             return root + (tuningOffsets[s] | 0) + (capo | 0);
         }
 
+        // Every source string's open-note offset, indexed by string — the
+        // "compute once per distinct source string index" of
+        // sourceOpenStringOffset applied to the whole string family in one
+        // pass. Compute once per song; both computeArrangementShift (which
+        // otherwise re-derives every string's offset once per candidate k,
+        // ~10x redundant) and the per-string natural-target table in
+        // _fseApplyRetune read from this same array instead of each calling
+        // sourceOpenStringOffset independently.
+        function computeOffsetsByString(sourceStringCount, tuningOffsets, capo) {
+            const offsets = [];
+            for (let s = 0; s < sourceStringCount; s++) {
+                offsets.push(sourceOpenStringOffset(sourceStringCount, tuningOffsets, capo, s));
+            }
+            return offsets;
+        }
+
         // Per-arrangement "natural" string shift: the single k (target
         // string = source string + k) that best aligns the WHOLE source
         // string family with the target, preferring the k with the most
@@ -66,14 +82,18 @@
         // though both are "all-zero-offset" 4-string tunings — the
         // difference is which absolute pitches they actually sit at, not a
         // per-tuning special case. Compute once per song, not per note.
-        function computeArrangementShift(sourceStringCount, tuningOffsets, capo) {
+        // `offsetsByString` is optional (computed on demand if omitted) —
+        // pass computeOffsetsByString's result when the caller already has
+        // it, to avoid deriving every string's offset twice.
+        function computeArrangementShift(sourceStringCount, tuningOffsets, capo, offsetsByString) {
+            const offsets = offsetsByString || computeOffsetsByString(sourceStringCount, tuningOffsets, capo);
             let bestK = 0, bestExact = -1, bestTotalAbs = Infinity;
             for (let k = 1 - sourceStringCount; k <= TARGET_STRING_COUNT - 1; k++) {
                 let exact = 0, totalAbs = 0, counted = 0;
                 for (let s = 0; s < sourceStringCount; s++) {
                     const j = s + k;
                     if (j < 0 || j >= TARGET_STRING_COUNT) continue;
-                    const off = sourceOpenStringOffset(sourceStringCount, tuningOffsets, capo, s);
+                    const off = offsets[s];
                     if (off === null) continue;
                     const adjustment = off - TARGET_OPEN_STRING_HALFSTEPS[j];
                     counted++;
@@ -312,6 +332,7 @@
             TARGET_STRING_COUNT,
             standardOpenStringHalfsteps,
             sourceOpenStringOffset,
+            computeOffsetsByString,
             computeArrangementShift,
             resolveTargetForFret,
             remapNote,
@@ -15598,10 +15619,12 @@
             // Arrangement-wide natural string shift (PLANNING.md Phase 2):
             // computed once per song, not per note — see FSE.computeArrangementShift
             // for why a per-note global search was wrong (Drop C# regression).
-            const shiftK = FSE.computeArrangementShift(sc, tuning, capo);
-            const offsetsByString = [], naturalTargetByString = [];
+            // offsetsByString is derived once here and handed to
+            // computeArrangementShift so it isn't re-derived per candidate k.
+            const offsetsByString = FSE.computeOffsetsByString(sc, tuning, capo);
+            const shiftK = FSE.computeArrangementShift(sc, tuning, capo, offsetsByString);
+            const naturalTargetByString = [];
             for (let s = 0; s < sc; s++) {
-                offsetsByString.push(FSE.sourceOpenStringOffset(sc, tuning, capo, s));
                 naturalTargetByString.push(s + shiftK);
             }
             // PATCH POINT (feedback: chords could still show two notes on the

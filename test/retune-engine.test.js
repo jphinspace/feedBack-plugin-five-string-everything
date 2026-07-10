@@ -36,14 +36,22 @@ function sourceOpenStringOffset(sourceStringCount, tuningOffsets, capo, s) {
 // differently even though both are "all-zero-offset" 4-string tunings —
 // the difference is which absolute pitches they actually sit at, not a
 // per-tuning special case.
-function computeArrangementShift(sourceStringCount, tuningOffsets, capo) {
+function computeOffsetsByString(sourceStringCount, tuningOffsets, capo) {
+    const offsets = [];
+    for (let s = 0; s < sourceStringCount; s++) {
+        offsets.push(sourceOpenStringOffset(sourceStringCount, tuningOffsets, capo, s));
+    }
+    return offsets;
+}
+function computeArrangementShift(sourceStringCount, tuningOffsets, capo, offsetsByString) {
+    const offsets = offsetsByString || computeOffsetsByString(sourceStringCount, tuningOffsets, capo);
     let bestK = 0, bestExact = -1, bestTotalAbs = Infinity;
     for (let k = 1 - sourceStringCount; k <= TARGET_STRING_COUNT - 1; k++) {
         let exact = 0, totalAbs = 0, counted = 0;
         for (let s = 0; s < sourceStringCount; s++) {
             const j = s + k;
             if (j < 0 || j >= TARGET_STRING_COUNT) continue;
-            const off = sourceOpenStringOffset(sourceStringCount, tuningOffsets, capo, s);
+            const off = offsets[s];
             if (off === null) continue;
             const adjustment = off - TARGET_OPEN_STRING_HALFSTEPS[j];
             counted++;
@@ -145,10 +153,10 @@ function check(label, actual, expected) {
 // Helper mirroring what _fseApplyRetune does once per song: compute k, then
 // per-string offsets and natural targets.
 function songContext(sourceStringCount, tuning, capo) {
-    const k = computeArrangementShift(sourceStringCount, tuning, capo);
-    const offsetsByString = [], naturalTargetByString = [];
+    const offsetsByString = computeOffsetsByString(sourceStringCount, tuning, capo);
+    const k = computeArrangementShift(sourceStringCount, tuning, capo, offsetsByString);
+    const naturalTargetByString = [];
     for (let s = 0; s < sourceStringCount; s++) {
-        offsetsByString.push(sourceOpenStringOffset(sourceStringCount, tuning, capo, s));
         naturalTargetByString.push(s + k);
     }
     return { k, offsetsByString, naturalTargetByString };
