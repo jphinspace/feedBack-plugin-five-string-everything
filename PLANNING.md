@@ -689,3 +689,200 @@ non-standard-tuning) bass chart from load to a hit note, confirming Auto-mode
 pickup, correct gem positions and full visual parity with `highway_3d`
 throughout the song, and clean teardown when navigating back to the library
 and picking a different song.
+
+---
+
+## Phase 7 — Restore highway_3d's full settings UI
+
+Phase 1 shipped a placeholder `settings.html` (plugin name + version, no
+controls) to keep MVP scope small. Before release, restore the real thing —
+`highway_3d`'s settings.html is ~1800 lines covering Fretboard, Background +
+Butterchurn, Camera + Nut/Headstock, Notes, Sections, Tone Changes, and Chord
+Diagram. Since we forked `screen.js` wholesale, all the supporting JS for
+every one of these controls is already present in our copy — this phase is
+about the settings.html markup and, critically, an isolation problem the
+audit turned up before any markup was copied.
+
+**Found during audit, before writing any settings.html content: two
+architectural collision risks, both confirmed (not hypothetical) by reading
+how core actually loads plugins.**
+
+1. **Global function names collide.** `highway_3d`'s `screen.js` exposes
+   ~60 functions as bare `window.h3dSetXxx`/`window.h3dBgSetXxx` globals
+   (fret spacing, background style, camera, nut/headstock, notes, sections,
+   tone HUD, chord diagram, an internal aspect-tuning debug bridge — every
+   settings.html control other than Highway String Colors calls one of
+   these). Confirmed via `static/app.js`: **every installed plugin's
+   `screen.js` loads unconditionally on the same page**, regardless of
+   which renderer is "active" — plugin scripts aren't scoped per-selection.
+   Since our fork defines the exact same global names, whichever plugin's
+   `<script>` executes *last* silently overwrites the other's function
+   definitions — a settings control could end up driving `highway_3d`'s
+   internal state instead of ours, or vice versa, depending on load order
+   neither plugin's code controls.
+2. **Storage keys collide too, more deeply.** Nearly everything above
+   (background, camera, nut/headstock, notes, sections, tone HUD, chord
+   diagram) persists through a **hardcoded literal prefix**,
+   `'h3d_bg_' + key`, not scoped to the plugin id at all — confirmed by
+   reading `_bgReadSetting`/`_bgWriteGlobal`. Same story for the Butterchurn
+   preset browser (`'viz3d_settings'`/`'viz3d_favorites'`/`'viz3d_banned'`/
+   `'viz3d_seeded'`) and two internal debug-only keys
+   (`'h3d_full_sus'`, `'h3d_aspect_tune2'`). Both plugins installed
+   together would silently **share** this state — a background/camera/etc.
+   change made via one plugin's settings panel would also change the
+   other's, and vice versa.
+3. **A third, narrower collision: `Highway String Colors` can't be
+   duplicated at all, even with renaming.** Confirmed by reading
+   `static/app.js`'s `hwcRenderPickers`/`hwcInitSettingsUI`: this section's
+   rendering code queries **un-scoped global DOM ids** (`#hwc-pickers`,
+   `#hwc-color-<slot>`, ...), and — confirmed by reading how plugin
+   settings snippets are actually injected — every installed plugin's
+   settings.html is fetched and its `<script>` tags individually
+   re-executed into **one shared Settings-page DOM**, all simultaneously
+   present (a `<details>` accordion per plugin, not lazy-loaded). If both
+   plugins' settings.html contained this section, only whichever loads last
+   would have working color pickers — `getElementById` finds the first
+   match in document order, unconditionally.
+
+**Decisions, confirmed with the user:**
+- Fully isolate our copy's settings state: rename every `window.h3dXxx` /
+  `window.h3dBgXxx` global to `window.fse3dXxx` / `window.fse3dBgXxx`
+  throughout `screen.js` (defines **and** call sites — including a few
+  internal calls that used the bare, non-`window.`-prefixed name, which a
+  naive `window.h3d` → `window.fse3d` text replace would silently miss and
+  leave pointing at whichever plugin's script defines the old name).
+  Rename the storage prefix `h3d_bg_` → `fse_bg_`, and the Butterchurn/
+  debug keys → `fse_viz3d_settings`/`fse_viz3d_favorites`/
+  `fse_viz3d_banned`/`fse_viz3d_seeded`/`fse3d_full_sus`/
+  `fse3d_aspect_tune2`. The internal aspect-tuning debug bridge
+  (`window.__h3dAspectTune`/`__h3dAspectPanes`/`__h3dAspectReadout`/
+  `__h3dAspectPanelOpen` — a double-underscore-prefixed global, a *different*
+  naming pattern the first rename pass missed) gets the same treatment.
+- **One deliberate exception: `window.__h3dCamCtl`/`__h3dCamCtlPanels` stay
+  unrenamed.** These aren't internal settings state at all — they're a
+  documented public integration point for a real third-party tool, "Camera
+  Director" (`github.com/nimuart/cameradirector_feedback`), confirmed via
+  `highway_3d`'s own `FREECAM_BRIDGE.md` (copied into this repo for the same
+  reason). That tool *writes* `window.__h3dCamCtl`; any compatible 3D
+  highway renderer *reads* it once per frame to let the tool drive the
+  camera. Renaming this one would silently break Camera Director
+  compatibility for our renderer specifically — the opposite of what
+  isolation is for. If both plugins are ever simultaneously active
+  (splitscreen) with Camera Director installed, both renderers correctly
+  respond to it — that's the intended behavior for a camera-control tool
+  that doesn't know or care which specific renderer is active.
+- Don't duplicate the `Highway String Colors` section in our settings.html
+  at all. It's genuinely global, shared, core-owned data
+  (`window.feedBack.highwayColors`) — our plugin's whole premise already
+  depends on `highway_3d` staying installed alongside it, both renderers
+  already correctly read from that one shared source (`_fseLowBColor()`,
+  Phase 4 patch point 4), and `highway_3d`'s own settings panel remains the
+  one place to edit it.
+
+**Construction, once the isolation rename above was done:** copy
+`highway_3d/settings.html` verbatim minus its `Highway String Colors`
+section (its first ~78 lines), then apply the same renames throughout the
+copied markup — `window.h3dXxx` → `window.fse3dXxx`, every `id="h3d-...")`/
+`for="h3d-..."`/`aria-labelledby="h3d-..."`/`getElementById('h3d-...')` →
+the `fse3d-` prefix (DOM ids need this too, for the identical "both
+settings.html snippets share one page" reason as the String Colors
+finding — a control with a colliding id would end up wired to whichever
+plugin's element happens to be first in the DOM), `h3d_bg_` → `fse_bg_`,
+`viz3d_settings` → `fse_viz3d_settings`, `highway_3d.fretSpacing` →
+`five_string_everything.fretSpacing` (already the key our fork uses, per
+Phase 1), and the hardcoded video-upload URL `/api/plugins/highway_3d/
+files` → `/api/plugins/five_string_everything/files` (matching the routes
+Phase 1 already renamed on the backend). Prepended our existing plugin
+name/version header from the Phase 1 placeholder.
+
+**Reviewed every remaining section against our tuning-remap patches
+specifically** (not just the mechanical rename) for anything that reads
+chart tuning/string/fret data directly rather than through a setting we
+already know is compatible: found one — the Nut & Headstock section's
+description text said tuning labels are shown "from the chart tuning",
+which is stale for us now (Phase 4 patch point 3 hardcodes them to the
+fixed BEADG target, `B/E/A/D/G`, always — never the original chart's) —
+corrected the copy. No other section reads tuning/string/fret data directly
+(confirmed by grepping the copied settings.html for `stringCount`/`tuning`/
+`capo`/`arrangement` — the only hit was the tuning-label *visibility toggle*
+itself, a boolean flag, not a data dependency). Everything else (fret
+spacing, background/Butterchurn, camera, note display toggles including the
+slide-direction arrows — which correctly read our already-remapped `sl`/
+`slu` values, Phase 2 — section/tone HUDs, chord diagram sizing/position,
+and the fret-column marker cadence which reads our already-remapped
+`bundle.anchors`, Phase 4 patch point 5) is either purely cosmetic or
+already covered by an existing, verified patch point.
+
+**Verify:** `diff` against `highway_3d/screen.js` and confirm every hunk
+traces to a rename covered above (61 hunks, up from 23 before this phase —
+expected, given ~60 scattered function renames plus ~20 storage-key sites
+across a 15,000-line file). Load the Settings page with both `highway_3d`
+and this plugin installed; confirm each section's controls affect only the
+renderer whose settings panel they're in (change a value in one plugin's
+panel, confirm the other plugin's copy of the same control is unaffected).
+Confirm Highway String Colors still works normally from `highway_3d`'s own
+panel and visibly affects both renderers (shared by design). If Camera
+Director is available to test with, confirm it can still drive this
+renderer's camera.
+
+---
+
+## Phase 8 — Sync with upstream highway_3d
+
+Since our own tuning-remap logic lives entirely in the small set of
+documented patch points, and everything else in `screen.js` is
+`highway_3d`'s own code, this fork needs to periodically re-pull upstream
+fixes/features rather than silently drifting from a snapshot taken at fork
+time (feedback: explicitly requested a sync against
+`github.com/got-feedBack/feedBack/tree/main/plugins/highway_3d`, the
+canonical upstream, not the `jphinspace/feedBack` fork this plugin was
+originally forked from — that fork was a commit behind canonical).
+
+**Process** (repeatable for future syncs):
+1. Shallow-clone the canonical upstream (`got-feedBack/feedBack`) into a
+   scratch directory — never add a remote to or otherwise modify the
+   existing local `feedBack` checkout this plugin was forked from.
+2. Diff upstream's `plugins/highway_3d/` against whatever this plugin was
+   last synced to (see the version note below) file-by-file. If only
+   `screen.js`/`plugin.json` differ (as they did this time — every other
+   file, including `settings.html`, was byte-identical), the sync is
+   just a `screen.js` merge; a `settings.html` divergence would additionally
+   need Phase 7's rename treatment re-applied to whatever's new.
+3. For each upstream `screen.js` hunk, locate the equivalent, unrenamed
+   surrounding text in our copy (search on a unique line from the hunk,
+   not line numbers — our copy has diverged in line count from every prior
+   phase's patches) and apply the same change. Confirm the hunk doesn't
+   touch anything on our patch-point list (FSE block, `resolveStringCount`,
+   tuning labels, the note/chord/anchor/template substitution shim, the
+   color palette, note-state provider calls, or any renamed
+   `window.h3d*`/`h3d_bg_*` identifier) before applying — if it does, that
+   specific hunk needs manual reconciliation rather than a direct copy, and
+   should be flagged to the user rather than silently merged.
+4. Verify: `node --check screen.js`, `node test/retune-engine.test.js`,
+   and confirm the newly-applied section is byte-identical to upstream's
+   (extract the equivalent region from both files and `diff` them directly)
+   as a sanity check that the manual reapplication was exact, not just
+   "close enough."
+
+**This sync (2026-07-10):** local reference `feedBack` checkout
+(`jphinspace/feedBack`) was one commit behind canonical
+(`highway_3d/plugin.json` `3.31.4` vs. `3.31.5`; last commit touching
+`plugins/highway_3d/` was `14d116d8` locally vs. `b3215694` on canonical
+upstream at sync time). Diffing canonical upstream against the local
+reference showed exactly one substantive change, confined to the
+Butterchurn background visualizer's canvas-sizing code (`ctrl.viz =
+bc.createVisualizer(...)`'s initial sizing, and a new shared
+`_bcApplySize(cssW, cssH)` helper replacing duplicated sizing logic in
+`render()`/`resize()`) — a fix for the visualizer's drawing buffer staying
+at Butterchurn's 300×150 default and only being stretched via CSS, which
+showed as a stretched lower-left corner instead of a full-panel fill. Zero
+overlap with any of our patch points (a wholly separate subsystem), so this
+was a direct, unmodified merge — verified byte-identical to upstream's
+version of that code region after applying. **Bumped this plugin's own
+`version` to `0.1.1`** to reflect the change (independent of
+`highway_3d`'s own version numbering — the two plugins version separately).
+
+**Verify:** same as every other phase — `node --check screen.js`, the test
+suite, and the diff-audit against `highway_3d/screen.js` (now diffing
+against the canonical upstream copy, not the possibly-stale local
+reference) confirming every hunk still traces to a documented patch point.

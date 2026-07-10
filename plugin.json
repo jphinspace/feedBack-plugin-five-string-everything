@@ -1,7 +1,7 @@
 {
     "id": "five_string_everything",
     "name": "Five-String Everything",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "type": "visualization",
     "script": "screen.js",
     "styles": "assets/plugin.css",

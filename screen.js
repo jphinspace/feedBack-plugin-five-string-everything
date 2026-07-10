@@ -490,7 +490,7 @@
     // possibly-suspended context and mute playback, and it would miss the stems
     // side-chain that sloppaks expose at window.feedBack.stems.getAnalyser().
     /* ── Controls + readability (localStorage-backed, global config) ───── */
-    const BC_LS = 'viz3d_settings';
+    const BC_LS = 'fse_viz3d_settings';
     const BC_DEFAULTS = { enabled: true, opacity: 1.0, laneDim: true, laneDimStrength: 0.45, chartAccents: true, colorTint: true, chartStrength: 1.0, tintStrength: 0.65, guitarGain: 6, songGain: 1.8, cyclePool: 'all', hold: false };
     let _bcSettings = null;
     function _bcLoadSettings() {
@@ -509,7 +509,7 @@
     // highway re-reads and applies them immediately. Defined on window at module
     // scope so it's available regardless of whether a highway is mounted yet;
     // settings.html guards the call with `?.` for the not-yet-loaded case.
-    window.h3dBcApplySettings = function () {
+    window.fse3dBcApplySettings = function () {
         _bcSettings = null;        // drop the cache so the next read reloads from localStorage
         _bcLoadSettings();
         _bcApplyAll();
@@ -548,26 +548,26 @@
     let _bcListsLoaded = false;
     function _bcLoadLists() {
         if (_bcListsLoaded) return; _bcListsLoaded = true;
-        try { (JSON.parse(localStorage.getItem('viz3d_favorites') || '[]') || []).forEach((n) => _bcFavorites.add(n)); } catch (e) {}
-        try { (JSON.parse(localStorage.getItem('viz3d_banned') || '[]') || []).forEach((n) => _bcBanned.add(n)); } catch (e) {}
+        try { (JSON.parse(localStorage.getItem('fse_viz3d_favorites') || '[]') || []).forEach((n) => _bcFavorites.add(n)); } catch (e) {}
+        try { (JSON.parse(localStorage.getItem('fse_viz3d_banned') || '[]') || []).forEach((n) => _bcBanned.add(n)); } catch (e) {}
         let seeded = false;
-        try { seeded = !!localStorage.getItem('viz3d_seeded'); } catch (e) {}
+        try { seeded = !!localStorage.getItem('fse_viz3d_seeded'); } catch (e) {}
         if (!seeded) {
             BC_DEFAULT_FAVORITES.forEach((n) => _bcFavorites.add(n));
             BC_DEFAULT_BANS.forEach((n) => _bcBanned.add(n));
-            try { localStorage.setItem('viz3d_seeded', '1'); } catch (e) {}
+            try { localStorage.setItem('fse_viz3d_seeded', '1'); } catch (e) {}
             _bcSaveLists();
         }
     }
     function _bcSaveLists() {
-        try { localStorage.setItem('viz3d_favorites', JSON.stringify([..._bcFavorites])); } catch (e) {}
-        try { localStorage.setItem('viz3d_banned', JSON.stringify([..._bcBanned])); } catch (e) {}
+        try { localStorage.setItem('fse_viz3d_favorites', JSON.stringify([..._bcFavorites])); } catch (e) {}
+        try { localStorage.setItem('fse_viz3d_banned', JSON.stringify([..._bcBanned])); } catch (e) {}
     }
     // Re-add the bundled defaults anytime (merges; a default-fav un-bans, a default-ban un-favs).
     function _bcRestoreDefaults() {
         BC_DEFAULT_FAVORITES.forEach((n) => { _bcBanned.delete(n); _bcFavorites.add(n); });
         BC_DEFAULT_BANS.forEach((n) => { _bcFavorites.delete(n); _bcBanned.add(n); });
-        try { localStorage.setItem('viz3d_seeded', '1'); } catch (e) {}
+        try { localStorage.setItem('fse_viz3d_seeded', '1'); } catch (e) {}
         _bcSaveLists(); _bcUpdatePanelPreset(); _bcRenderList();
     }
     let _bcPrimary = null;
@@ -864,9 +864,20 @@
             ctrl.ownsActx = !(fogAudio && fogAudio.ctx);
             ctrl.actx = (fogAudio && fogAudio.ctx) || new Ctx();
             if (ctrl.actx.state === 'suspended' && ctrl.actx.resume) ctrl.actx.resume().catch(() => {});
+            // Seed the DRAWING BUFFER (canvas.width/height) to the device-pixel
+            // render size and report that SAME size to Butterchurn. Its on-screen
+            // pass viewports to the reported size but never sizes the output canvas
+            // itself — leaving the buffer at the 300x150 default blits the whole
+            // visualizer into a corner that CSS then stretches across the highway.
+            // pixelRatio:1 because DPR is now folded into the reported size, so
+            // buffer == viewport == internal texsize (no double-counting).
+            const _bcRatio0 = Math.min(window.devicePixelRatio || 1, 1.5);
+            const _bcW0 = Math.max(1, Math.round((sz.w || 1280) * _bcRatio0));
+            const _bcH0 = Math.max(1, Math.round((sz.h || 720) * _bcRatio0));
+            canvas.width = _bcW0; canvas.height = _bcH0;
             ctrl.viz = bc.createVisualizer(ctrl.actx, canvas, {
-                width: sz.w || 1280, height: sz.h || 720,
-                pixelRatio: Math.min(window.devicePixelRatio || 1, 1.5), textureRatio: 1,
+                width: _bcW0, height: _bcH0,
+                pixelRatio: 1, textureRatio: 1,
             });
             if (_bcIsDesktop()) {
                 try {
@@ -900,6 +911,27 @@
             ctrl.actx = null; ctrl.viz = null; ctrl.dead = true;
             _bcControllers.delete(ctrl);
         });
+        // Size the Butterchurn output: set the canvas DRAWING BUFFER to the
+        // device-pixel render size AND report that same size, so buffer ==
+        // on-screen viewport == full fill. Butterchurn never sizes the output
+        // canvas itself; the previous code set only CSS size, leaving the buffer
+        // at the 300x150 default -> the viz showed a stretched lower-left corner
+        // (worse the larger the panel). Ratio reuses the highway's DPR budget.
+        function _bcApplySize(cssW, cssH) {
+            if (!(cssW > 0 && cssH > 0)) return;
+            ctrl.lastW = cssW; ctrl.lastH = cssH;
+            const ratio = Math.min(window.devicePixelRatio || 1, 1.5);
+            const bw = Math.max(1, Math.round(cssW * ratio)), bh = Math.max(1, Math.round(cssH * ratio));
+            if (canvas.width !== bw) canvas.width = bw;
+            if (canvas.height !== bh) canvas.height = bh;
+            const wpx = cssW + 'px', hpx = cssH + 'px';
+            // Confine ALL layers to exactly the highway-canvas rect so the opaque
+            // backdrop can't bleed over the transport bar above the highway.
+            [ctrl.canvas, ctrl.backdrop, ctrl.scrim, ctrl.tint].forEach((el) => {
+                if (el) { el.style.width = wpx; el.style.height = hpx; el.style.right = 'auto'; el.style.bottom = 'auto'; }
+            });
+            if (ctrl.viz && ctrl.viz.setRendererSize) { try { ctrl.viz.setRendererSize(bw, bh); } catch (e) {} }
+        }
         return {
             applySettings() { ctrl.applySettings(); },
             dead() { return ctrl.dead; },
@@ -928,18 +960,11 @@
                 if (!ctrl.viz || !s.enabled) return; // skip GPU work when the bg is off
                 const sz = sizeProvider && sizeProvider();
                 if (sz && sz.w > 0 && sz.h > 0 && (sz.w !== ctrl.lastW || sz.h !== ctrl.lastH)) {
-                    ctrl.lastW = sz.w; ctrl.lastH = sz.h;
-                    const wpx = sz.w + 'px', hpx = sz.h + 'px';
-                    // Confine ALL layers to exactly the highway-canvas rect so the opaque
-                    // backdrop can't bleed over the transport bar above the highway.
-                    [ctrl.canvas, ctrl.backdrop, ctrl.scrim, ctrl.tint].forEach((el) => {
-                        if (el) { el.style.width = wpx; el.style.height = hpx; el.style.right = 'auto'; el.style.bottom = 'auto'; }
-                    });
-                    try { ctrl.viz.setRendererSize(sz.w, sz.h); } catch (e) {}
+                    _bcApplySize(sz.w, sz.h);
                 }
                 try { ctrl.viz.render(); } catch (e) {}
             },
-            resize(w, h) { if (ctrl.viz && ctrl.viz.setRendererSize) { try { ctrl.viz.setRendererSize(w, h); } catch (e) {} ctrl.lastW = w; ctrl.lastH = h; } },
+            resize(w, h) { _bcApplySize(w, h); },
             destroy() {
                 ctrl.dead = true;
                 _bcControllers.delete(ctrl);
@@ -1433,7 +1458,7 @@
     // effective vertical fov equals BASE_VFOV (exact no-op); past it the
     // vertical fov drops to keep the horizontal cone ~constant so the neck
     // fills a wide pane. HORPLUS_MIN_VFOV floors the result on pathological
-    // aspects. Engaged only via the window.__h3dAspectTune bridge (default off).
+    // aspects. Engaged only via the window.__fse3dAspectTune bridge (default off).
     const HORPLUS_START_ASPECT = 16 / 9;
     const HORPLUS_MIN_VFOV = 28;
 
@@ -1758,10 +1783,10 @@
     try { _h3dFretUniform = localStorage.getItem('five_string_everything.fretSpacing') !== 'logarithmic'; } catch (_) {}
     const fretX = f => _h3dFretUniform ? _fretXUni(f) : _fretXLog(f);
 
-    window.h3dSetFretSpacing = mode => {
+    window.fse3dSetFretSpacing = mode => {
         // Validate against the two supported modes before persisting so an
         // unexpected input can't leave an invalid value in localStorage
-        // (mirrors h3dBgSetFretNumberGhostScope's allowlist guard). No-op
+        // (mirrors fse3dBgSetFretNumberGhostScope's allowlist guard). No-op
         // when the stored mode is already what was requested.
         const m = mode === 'logarithmic' ? 'logarithmic' : 'uniform';
         try {
@@ -1854,7 +1879,7 @@
     let FRET_WIDTH_MID = fretX(7) - fretX(6);
 
     // Recompute the fretX-derived scalars baked at module init. Called from
-    // h3dSetFretSpacing after _h3dFretUniform flips so label scaling and the
+    // fse3dSetFretSpacing after _h3dFretUniform flips so label scaling and the
     // camera hysteresis threshold track the newly chosen spacing — the live
     // alternative to the old location.reload(), which ejected the user from
     // Settings back to the home screen.
@@ -1980,7 +2005,7 @@
     }
 
     // ── Wide-pane framing: live tuner bridge + panel ──────────────────────────
-    // window.__h3dAspectTune is the single source of truth the renderer reads
+    // window.__fse3dAspectTune is the single source of truth the renderer reads
     // each frame (see effectiveVfov + camUpdate). The defaults reproduce the
     // current framing exactly (enabled:false). Values persist to localStorage so
     // a tuning session survives reloads; the floating panel (Shift+A) writes the
@@ -1989,7 +2014,7 @@
     // Versioned key: the first iteration shipped a broken default (enabled:true,
     // baseVfov:30) and may have persisted it. Bumping the key ignores that stale
     // state so the corrected default-off config actually takes effect.
-    const _ASPECT_LS = 'h3d_aspect_tune2';
+    const _ASPECT_LS = 'fse3d_aspect_tune2';
     // Working defaults. Default OFF, so out of the box this is an exact no-op —
     // every pane renders byte-for-byte as before (effectiveVfov returns
     // BASE_VFOV and the pose nudges gate off). The config is also coherent when
@@ -2060,14 +2085,14 @@
     // Get-or-create the shared bridge object, seeded from defaults + localStorage.
     // May carry a sparse `__panels` map of per-pane overrides.
     function _aspectTune() {
-        let t = window.__h3dAspectTune;
+        let t = window.__fse3dAspectTune;
         if (!t || typeof t !== 'object') {
             t = Object.assign({}, _ASPECT_DEFAULTS);
             try {
                 const raw = localStorage.getItem(_ASPECT_LS);
                 if (raw) Object.assign(t, JSON.parse(raw));
             } catch (e) {}
-            window.__h3dAspectTune = t;
+            window.__fse3dAspectTune = t;
         }
         return t;
     }
@@ -2116,7 +2141,7 @@
     // pruning; the dropdown is only marked dirty when a pane is newly added — not
     // on every re-report, which would flicker the <select>.
     function _aspectRegisterPane(paneKey) {
-        const reg = window.__h3dAspectPanes || (window.__h3dAspectPanes = {});
+        const reg = window.__fse3dAspectPanes || (window.__fse3dAspectPanes = {});
         const label = _aspectPaneLabel(paneKey);
         let e = reg[paneKey];
         if (!e) { e = reg[paneKey] = { label, seen: 0 }; _aspectPanesDirty = true; }
@@ -2125,10 +2150,10 @@
     }
     // Drop panes not reported recently (song change, split teardown, pane close).
     function _aspectPrunePanes() {
-        const reg = window.__h3dAspectPanes;
+        const reg = window.__fse3dAspectPanes;
         if (!reg) return;
         const now = _aspectNowMs();
-        const ro = window.__h3dAspectReadout;
+        const ro = window.__fse3dAspectReadout;
         Object.keys(reg).forEach((k) => {
             if (now - (reg[k].seen || 0) > 1500) {
                 delete reg[k];
@@ -2181,7 +2206,7 @@
         // Don't yank a dropdown the user is actively interacting with — leave it
         // dirty and rebuild on a later tick once it's no longer focused.
         if (document.activeElement === _aspectTargetSel) return;
-        const reg = window.__h3dAspectPanes || {};
+        const reg = window.__fse3dAspectPanes || {};
         const keys = Object.keys(reg).sort();
         _aspectTargetSel.innerHTML = '';
         const all = document.createElement('option');
@@ -2391,16 +2416,16 @@
         _ensureAspectPanel();
         if (!_aspectPanelEl) return;
         _aspectPanelEl.style.display = on ? 'block' : 'none';
-        window.__h3dAspectPanelOpen = !!on;        // gates the per-frame readout publish
+        window.__fse3dAspectPanelOpen = !!on;        // gates the per-frame readout publish
         // Prune before the first build so panes from a prior song/split don't
         // flash in the dropdown until the first RAF tick.
         if (on) { _aspectPrunePanes(); _aspectBuildTargets(); }
         if (on && !_aspectPanelRAF) {
             const tick = () => {
-                if (!window.__h3dAspectPanelOpen) { _aspectPanelRAF = 0; return; }
+                if (!window.__fse3dAspectPanelOpen) { _aspectPanelRAF = 0; return; }
                 _aspectPrunePanes();
                 if (_aspectPanesDirty) _aspectBuildTargets();
-                const ro = window.__h3dAspectReadout;
+                const ro = window.__fse3dAspectReadout;
                 if (_aspectPanelRO && ro) {
                     const key = _aspectEditTarget || ro.__last;
                     const e = key && ro[key];
@@ -2430,7 +2455,7 @@
      *  the feedBack core <audio id="audio"> element across all panel
      *  instances; per-panel settings live in localStorage with a global
      *  fallback so settings.html drives a single default while per-panel
-     *  overrides (h3d_bg_panel<idx>_*) can be set for splitscreen layouts.
+     *  overrides (fse_bg_panel<idx>_*) can be set for splitscreen layouts.
      *
      *  Caveat: createMediaElementSource() can only be called once per
      *  element. 3dhighway owns that source for now; future plugins
@@ -2632,7 +2657,7 @@
     // User-selectable, persistable bg styles — must mirror settings.html's
     // VALID_STYLES. 'venue' is deliberately NOT here: it is an internal effective
     // style reached only via _venueSceneOverride (the viz-picker Venue flow), so
-    // _bgCoerce must reject a stored h3d_bg_style='venue' — otherwise venue could
+    // _bgCoerce must reject a stored fse_bg_style='venue' — otherwise venue could
     // mount outside that flow and settings.html (which can't represent 'venue')
     // would be unable to switch back. BG_STYLES still has a 'venue' renderer entry.
     const BG_STYLE_IDS = ['off', 'particles', 'silhouettes', 'lights', 'geometric', 'butterchurn', 'image', 'video'];
@@ -2995,12 +3020,12 @@
             // 'palette' + 'customColors' are GLOBAL-only: the per-panel palette
             // control was removed in favour of the global "Highway String Colors"
             // UI, so a panel must never be shadowed by a stale per-panel override
-            // (h3d_bg_panel<idx>_palette / _customColors). Neither is a
+            // (fse_bg_panel<idx>_palette / _customColors). Neither is a
             // BG_DEFAULTS key, so per-panel scoping never applied to them.
             if (key !== 'palette' && key !== 'customColors') {
-                panelVal = localStorage.getItem('h3d_bg_' + panelKey + '_' + key);
+                panelVal = localStorage.getItem('fse_bg_' + panelKey + '_' + key);
             }
-            globalVal = localStorage.getItem('h3d_bg_' + key);
+            globalVal = localStorage.getItem('fse_bg_' + key);
         } catch (_) { /* storage blocked — both stay null */ }
         if (panelVal !== null && panelVal !== undefined) return _bgCoerce(key, panelVal);
         // Prefer the in-memory staged value over the persisted global slot.
@@ -3072,11 +3097,11 @@
     // the camera don't lose calmness on the new axes by default.
     function _bgHasStored(panelKey, key) {
         try {
-            if (localStorage.getItem('h3d_bg_' + panelKey + '_' + key) != null) return true;
+            if (localStorage.getItem('fse_bg_' + panelKey + '_' + key) != null) return true;
         } catch (_) {}
         if (key in _bgMemFallback) return true;
         try {
-            if (localStorage.getItem('h3d_bg_' + key) != null) return true;
+            if (localStorage.getItem('fse_bg_' + key) != null) return true;
         } catch (_) {}
         return false;
     }
@@ -3089,7 +3114,7 @@
         // was already mutated would leave a stale value in localStorage
         // that's newer than _bgMemFallback.
         _bgMemFallback[key] = s;
-        try { localStorage.setItem('h3d_bg_' + key, s); } catch (_) { /* storage blocked */ }
+        try { localStorage.setItem('fse_bg_' + key, s); } catch (_) { /* storage blocked */ }
         _bgEmitChange(key);
     }
 
@@ -3105,21 +3130,21 @@
 
     // Settings.html setters — global keys; per-panel overrides via direct
     // localStorage edits today, runtime UI in a follow-up.
-    window.h3dBgSetStyle = (v) => _bgWriteGlobal('style', v);
-    window.h3dBgSetIntensity = (v) => _bgWriteGlobal('intensity', v);
-    window.h3dBgSetReactive = (v) => _bgWriteGlobal('reactive', !!v);
-    window.h3dBgSetPalette = (v) => _bgWriteGlobal('palette', v);
+    window.fse3dBgSetStyle = (v) => _bgWriteGlobal('style', v);
+    window.fse3dBgSetIntensity = (v) => _bgWriteGlobal('intensity', v);
+    window.fse3dBgSetReactive = (v) => _bgWriteGlobal('reactive', !!v);
+    window.fse3dBgSetPalette = (v) => _bgWriteGlobal('palette', v);
     // BACKGROUND scene-color axis (clear + fog only). Validated against
     // BG_THEME_IDS in _bgCoerce; the listener re-applies clear/fog live and
     // independently of the highway axis.
-    window.h3dBgSetBgTheme = (v) => {
+    window.fse3dBgSetBgTheme = (v) => {
         const s = String(v);
         _bgWriteGlobal('bgTheme', BG_THEME_IDS.includes(s) ? s : BG_DEFAULTS.bgTheme);
     };
     // HIGHWAY scene-color axis (board + lane + laneDim). Same id-set as the
     // background axis, so any highway can mix with any background. The listener
     // re-applies the board plane + lane live and independently.
-    window.h3dBgSetHwTheme = (v) => {
+    window.fse3dBgSetHwTheme = (v) => {
         const s = String(v);
         _bgWriteGlobal('hwTheme', BG_THEME_IDS.includes(s) ? s : BG_DEFAULTS.hwTheme);
     };
@@ -3127,8 +3152,8 @@
     // is up to 8 hex strings; invalid/missing entries fall back to the default
     // palette per index. Writes the colors, then flips the palette to 'custom'
     // — the palette listener retints all materials + rebuilds the board live.
-    // Pass null/[] then h3dBgSetPalette('default') to revert.
-    window.h3dBgSetStringColors = (hexArray) => {
+    // Pass null/[] then fse3dBgSetPalette('default') to revert.
+    window.fse3dBgSetStringColors = (hexArray) => {
         const arr = Array.isArray(hexArray) ? hexArray : [];
         const norm = [];
         for (let i = 0; i < MAX_RENDER_STRINGS; i++) {
@@ -3138,64 +3163,64 @@
         _bgWriteGlobal('customColors', JSON.stringify(norm));
         _bgWriteGlobal('palette', 'custom');
     };
-    window.h3dBgSetShowFretOnNote = (v) => _bgWriteGlobal('showFretOnNote', !!v);
-    window.h3dBgSetFretNumberGhostScope = (v) => {
+    window.fse3dBgSetShowFretOnNote = (v) => _bgWriteGlobal('showFretOnNote', !!v);
+    window.fse3dBgSetFretNumberGhostScope = (v) => {
         const s = String(v);
         _bgWriteGlobal('fretNumberGhostScope', FRET_NUMBER_GHOST_SCOPE_IDS.includes(s) ? s : BG_DEFAULTS.fretNumberGhostScope);
     };
-    window.h3dBgSetCameraSmoothing = (v) => _bgWriteGlobal('cameraSmoothing', v);
-    window.h3dBgSetZoomSmoothing = (v) => _bgWriteGlobal('zoomSmoothing', v);
-    window.h3dBgSetTiltSmoothing = (v) => _bgWriteGlobal('tiltSmoothing', v);
-    window.h3dBgSetCameraLockLow = (v) => _bgWriteGlobal('cameraLockLow', !!v);
-    window.h3dBgSetCameraLockZoom = (v) => _bgWriteGlobal('cameraLockZoom', v);
-    window.h3dBgSetCameraMode = (v) => {
+    window.fse3dBgSetCameraSmoothing = (v) => _bgWriteGlobal('cameraSmoothing', v);
+    window.fse3dBgSetZoomSmoothing = (v) => _bgWriteGlobal('zoomSmoothing', v);
+    window.fse3dBgSetTiltSmoothing = (v) => _bgWriteGlobal('tiltSmoothing', v);
+    window.fse3dBgSetCameraLockLow = (v) => _bgWriteGlobal('cameraLockLow', !!v);
+    window.fse3dBgSetCameraLockZoom = (v) => _bgWriteGlobal('cameraLockZoom', v);
+    window.fse3dBgSetCameraMode = (v) => {
         let s = String(v);
         if (s === 'classic') s = 'steady';
         _bgWriteGlobal('cameraMode', s);
     };
-    window.h3dBgSetNutHeadstockVisible = (v) => _bgWriteGlobal('nutHeadstockVisible', !!v);
-    window.h3dBgSetTuningLabelsVisible = (v) => _bgWriteGlobal('tuningLabelsVisible', !!v);
-    window.h3dBgSetNutColor = (v) => _bgWriteGlobal('nutColor', v);
-    window.h3dBgSetHeadstockColor = (v) => _bgWriteGlobal('headstockColor', v);
-    window.h3dBgSetTextSize = (v) => _bgWriteGlobal('textSize', v);
-    window.h3dBgSetVibrancy = (v) => _bgWriteGlobal('vibrancy', v);
-    window.h3dBgSetGlow     = (v) => _bgWriteGlobal('glow', v);
-    window.h3dBgSetHitFx        = (v) => _bgWriteGlobal('hitFx', v);
-    window.h3dBgSetSparks       = (v) => _bgWriteGlobal('sparks', !!v);
-    window.h3dBgSetCinematic    = (v) => _bgWriteGlobal('cinematic', !!v);
-    window.h3dBgSetVerdictMarks = (v) => _bgWriteGlobal('verdictMarks', !!v);
-    window.h3dBgSetTimingFx     = (v) => _bgWriteGlobal('timingFx', !!v);
-    window.h3dBgSetStreakFx     = (v) => _bgWriteGlobal('streakFx', !!v);
-    window.h3dBgSetBloom        = (v) => _bgWriteGlobal('bloom', !!v);
-    window.h3dBgSetToneHudVisible   = (v) => _bgWriteGlobal('toneHudVisible', !!v);
-    window.h3dBgSetToneHudPosition  = (v) => _bgWriteGlobal('toneHudPosition', v);
-    window.h3dBgSetToneHudSize      = (v) => _bgWriteGlobal('toneHudSize', v);
-    window.h3dBgSetFpsVisible           = (v) => _bgWriteGlobal('fpsVisible', !!v);
-    window.h3dBgSetFretDividersVisible  = (v) => _bgWriteGlobal('fretDividersVisible', !!v);
-    window.h3dBgSetChordDiagramVisible  = (v) => _bgWriteGlobal('chordDiagramVisible', !!v);
-    window.h3dBgSetChordDiagramSize     = (v) => _bgWriteGlobal('chordDiagramSize', v);
-    window.h3dBgSetChordDiagramPosition = (v) => _bgWriteGlobal('chordDiagramPosition', v);
-    window.h3dBgSetFretColumnMarkerCadence = (v) => _bgWriteGlobal('fretColumnMarkerCadence', v);
-    window.h3dBgSetInlayLabelsVisible = (v) => _bgWriteGlobal('inlayLabelsVisible', !!v);
-    window.h3dBgSetSectionLabelsOnHighway = (v) => _bgWriteGlobal('sectionLabelsOnHighway', !!v);
-    window.h3dBgSetSectionHudVisible      = (v) => _bgWriteGlobal('sectionHudVisible', !!v);
-    window.h3dBgSetSectionHudPosition     = (v) => _bgWriteGlobal('sectionHudPosition', v);
-    window.h3dBgSetSectionHudSize         = (v) => _bgWriteGlobal('sectionHudSize', v);
-    window.h3dBgSetProjectionVisible      = (v) => _bgWriteGlobal('projectionVisible', !!v);
-    window.h3dBgSetSlideArrowApproachVisible = (v) => _bgWriteGlobal('slideArrowApproachVisible', !!v);
-    window.h3dBgSetSlideArrowNeckVisible     = (v) => _bgWriteGlobal('slideArrowNeckVisible', !!v);
-    window.h3dBgSetSlideArrowChainPreviewVisible = (v) => _bgWriteGlobal('slideArrowChainPreviewVisible', !!v);
+    window.fse3dBgSetNutHeadstockVisible = (v) => _bgWriteGlobal('nutHeadstockVisible', !!v);
+    window.fse3dBgSetTuningLabelsVisible = (v) => _bgWriteGlobal('tuningLabelsVisible', !!v);
+    window.fse3dBgSetNutColor = (v) => _bgWriteGlobal('nutColor', v);
+    window.fse3dBgSetHeadstockColor = (v) => _bgWriteGlobal('headstockColor', v);
+    window.fse3dBgSetTextSize = (v) => _bgWriteGlobal('textSize', v);
+    window.fse3dBgSetVibrancy = (v) => _bgWriteGlobal('vibrancy', v);
+    window.fse3dBgSetGlow     = (v) => _bgWriteGlobal('glow', v);
+    window.fse3dBgSetHitFx        = (v) => _bgWriteGlobal('hitFx', v);
+    window.fse3dBgSetSparks       = (v) => _bgWriteGlobal('sparks', !!v);
+    window.fse3dBgSetCinematic    = (v) => _bgWriteGlobal('cinematic', !!v);
+    window.fse3dBgSetVerdictMarks = (v) => _bgWriteGlobal('verdictMarks', !!v);
+    window.fse3dBgSetTimingFx     = (v) => _bgWriteGlobal('timingFx', !!v);
+    window.fse3dBgSetStreakFx     = (v) => _bgWriteGlobal('streakFx', !!v);
+    window.fse3dBgSetBloom        = (v) => _bgWriteGlobal('bloom', !!v);
+    window.fse3dBgSetToneHudVisible   = (v) => _bgWriteGlobal('toneHudVisible', !!v);
+    window.fse3dBgSetToneHudPosition  = (v) => _bgWriteGlobal('toneHudPosition', v);
+    window.fse3dBgSetToneHudSize      = (v) => _bgWriteGlobal('toneHudSize', v);
+    window.fse3dBgSetFpsVisible           = (v) => _bgWriteGlobal('fpsVisible', !!v);
+    window.fse3dBgSetFretDividersVisible  = (v) => _bgWriteGlobal('fretDividersVisible', !!v);
+    window.fse3dBgSetChordDiagramVisible  = (v) => _bgWriteGlobal('chordDiagramVisible', !!v);
+    window.fse3dBgSetChordDiagramSize     = (v) => _bgWriteGlobal('chordDiagramSize', v);
+    window.fse3dBgSetChordDiagramPosition = (v) => _bgWriteGlobal('chordDiagramPosition', v);
+    window.fse3dBgSetFretColumnMarkerCadence = (v) => _bgWriteGlobal('fretColumnMarkerCadence', v);
+    window.fse3dBgSetInlayLabelsVisible = (v) => _bgWriteGlobal('inlayLabelsVisible', !!v);
+    window.fse3dBgSetSectionLabelsOnHighway = (v) => _bgWriteGlobal('sectionLabelsOnHighway', !!v);
+    window.fse3dBgSetSectionHudVisible      = (v) => _bgWriteGlobal('sectionHudVisible', !!v);
+    window.fse3dBgSetSectionHudPosition     = (v) => _bgWriteGlobal('sectionHudPosition', v);
+    window.fse3dBgSetSectionHudSize         = (v) => _bgWriteGlobal('sectionHudSize', v);
+    window.fse3dBgSetProjectionVisible      = (v) => _bgWriteGlobal('projectionVisible', !!v);
+    window.fse3dBgSetSlideArrowApproachVisible = (v) => _bgWriteGlobal('slideArrowApproachVisible', !!v);
+    window.fse3dBgSetSlideArrowNeckVisible     = (v) => _bgWriteGlobal('slideArrowNeckVisible', !!v);
+    window.fse3dBgSetSlideArrowChainPreviewVisible = (v) => _bgWriteGlobal('slideArrowChainPreviewVisible', !!v);
     // Custom image asset for the 'image' bg style (#19). Composite setter:
     // writes both the data URL (the bytes that drive the texture) and the
     // display filename, each emitting a change event. The listener
     // rebuilds on customImageDataUrl change when the image style is
     // active; customImageName is display-only and skips rebuild.
-    window.h3dBgSetCustomImage = (asset) => {
+    window.fse3dBgSetCustomImage = (asset) => {
         const a = asset || {};
         _bgWriteGlobal('customImageDataUrl', a.dataUrl || '');
         _bgWriteGlobal('customImageName', a.name || '');
     };
-    window.h3dBgClearCustomImage = () => {
+    window.fse3dBgClearCustomImage = () => {
         _bgWriteGlobal('customImageDataUrl', '');
         _bgWriteGlobal('customImageName', '');
     };
@@ -3205,11 +3230,11 @@
     // filename, which the renderer maps to the served URL. Single
     // global slot; the file picker in settings.html POSTs to the
     // upload route and then calls this setter with the response name.
-    window.h3dBgSetCustomVideo = (asset) => {
+    window.fse3dBgSetCustomVideo = (asset) => {
         _bgWriteGlobal('customVideoName', (asset && asset.name) || '');
     };
-    window.h3dBgClearCustomVideo = () => _bgWriteGlobal('customVideoName', '');
-    window.h3dVenueSceneSetActive = (on) => {
+    window.fse3dBgClearCustomVideo = () => _bgWriteGlobal('customVideoName', '');
+    window.fse3dVenueSceneSetActive = (on) => {
         const next = !!on;
         if (_venueSceneOverride === next) return;
         _venueSceneOverride = next;
@@ -3219,21 +3244,21 @@
         }
         _bgEmitChange('venueScene');
     };
-    window.h3dVenueSceneSetMood = (state) => {
+    window.fse3dVenueSceneSetMood = (state) => {
         _venueMoodState = String(state || 'idle').toLowerCase();
     };
-    window.h3dVenueSceneSetInstrumentPov = (input) => {
+    window.fse3dVenueSceneSetInstrumentPov = (input) => {
         const next = _venueResolvePovFromInput(input);
         if (_venueInstrumentPov === next) return;
         _venueInstrumentPov = next;
         _bgEmitChange('venueInstrumentPov');
     };
-    window.h3dVenueSceneSetMotionMode = (mode) => {
+    window.fse3dVenueSceneSetMotionMode = (mode) => {
         const next = String(mode || 'subtle').toLowerCase();
         const allowed = { off: 1, subtle: 1, full: 1 };
         _venueMotionMode = allowed[next] ? next : 'subtle';
     };
-    window.h3dVenueSceneGetState = () => {
+    window.fse3dVenueSceneGetState = () => {
         const motionMode = _venueEffectiveMotionMode();
         const motionProfile = _venueMotionProfile(motionMode);
         return {
@@ -3252,7 +3277,7 @@
     };
     // Back-compat alias for any caller that picked up the original
     // (inconsistent) name during this PR's review window.
-    window.h3dSetPalette = window.h3dBgSetPalette;
+    window.fse3dSetPalette = window.fse3dBgSetPalette;
 
     // Procedural silhouette bitmap, drawn once and shared across panels.
     // The Canvas2D bitmap is module-level (cheap, CPU-only); each layer
@@ -3606,7 +3631,7 @@
             },
         },
         // Venue visualization — generated small-club raster bg plate
-        // behind the highway. Activated via h3dVenueSceneSetActive(true)
+        // behind the highway. Activated via fse3dVenueSceneSetActive(true)
         // when Visualization = Venue; does not persist as a user bg style.
         venue: {
             build(scene, settings) {
@@ -3740,7 +3765,7 @@
         },
         // Custom image backdrop (#19). User uploads a JPG/PNG/WebP
         // through settings.html; the bytes are persisted as a base64
-        // data URL in localStorage under h3d_bg_customImageDataUrl and
+        // data URL in localStorage under fse_bg_customImageDataUrl and
         // passed in via settings.customImageDataUrl. Renders as a
         // PlaneGeometry in the silhouette parallax band, "cover" cropped
         // (via texture.repeat / offset) so non-matching aspects fill
@@ -4229,7 +4254,7 @@
         let lyricsCanvas = null, lyricsCtx = null;
         // FPS counter overlay. EMA-smoothed over ~30 frames so the readout doesn't
         // jitter every rAF tick. Controlled by the 'fpsVisible' setting (BG_DEFAULTS).
-        // Legacy 'h3d_showFps' localStorage key and window.h3dShowFps are no longer
+        // Legacy 'h3d_showFps' localStorage key and window.fse3dShowFps are no longer
         // consulted — use the Settings → 3D Highway — Camera → Show FPS counter checkbox.
         let _fpsLastT = 0;
         let _fpsEma = 0;
@@ -4404,7 +4429,7 @@
         let _appliedW = 0, _appliedH = 0;
         // Last pane aspect (w/h) handed to the camera, cached so camUpdate can
         // recompute the horizontal-FOV-hold each frame (and react to live
-        // __h3dAspectTune edits) without waiting for a resize. 0 until first
+        // __fse3dAspectTune edits) without waiting for a resize. 0 until first
         // applySize().
         let _paneAspect = 0;
         // Per-instance fallback id for the wide-pane tuner's pane key, used only
@@ -4456,7 +4481,7 @@
         let _boardPlaneMat = null;
         // Per-render opt-out for plugins borrowing the highway as a viz: when the
         // mount bundle sets bgReactive === false, suppress the audio-reactive
-        // background for THIS instance only (no shared h3d_bg_* write). Captured
+        // background for THIS instance only (no shared fse_bg_* write). Captured
         // from the bundle in init(); applied in _bgLoadSettings() so it survives
         // later setting reloads. See init() for the rationale.
         let _bgReactiveOptOut = false;
@@ -5107,8 +5132,8 @@
         // with hit/miss colour) is kept — it's a thin, cheap layer and gives
         // tails their border, so it's worth the small fill cost. Opt back into
         // the full look (re-enable the rail bloom) per browser, no rebuild:
-        //   localStorage.h3d_full_sus = '1'   // re-enable rail bloom halo
-        //   delete localStorage.h3d_full_sus  // back to lean default
+        //   localStorage.fse3d_full_sus = '1'   // re-enable rail bloom halo
+        //   delete localStorage.fse3d_full_sus  // back to lean default
         // Polled at ~1 Hz at the top of update() (perf: localStorage reads
         // are synchronous) so the console flag still takes effect live.
         // The bloom pool/material/gaussian texture are kept intact
@@ -8050,7 +8075,7 @@
 
             // Background animations (#13). Read settings keyed by this
             // panel and mount the active style's meshes. Subscribe to
-            // in-app settings changes (settings.html via window.h3dBgSet*)
+            // in-app settings changes (settings.html via window.fse3dBgSet*)
             // so they propagate without a reload. Manual localStorage
             // edits don't fire the pub-sub and require a reload.
             // Push the freshly-loaded vibrancy/glow values into the
@@ -8075,7 +8100,7 @@
             _bgListener = (changedKey) => {
                 if (changedKey === 'fretSpacing') {
                     // _h3dFretUniform + the fretX-derived scalars were already
-                    // updated globally in h3dSetFretSpacing. Rebuild this
+                    // updated globally in fse3dSetFretSpacing. Rebuild this
                     // panel's static board geometry (fret wires, lanes, inlays)
                     // so it re-lays-out for the new spacing; per-frame note
                     // geometry reads fretX live and needs no rebuild.
@@ -8414,7 +8439,7 @@
             } else {
                 hwThemeId = bgThemeId;
                 _bgMemFallback.hwTheme = String(bgThemeId);
-                try { localStorage.setItem('h3d_bg_hwTheme', String(bgThemeId)); } catch (_) { /* storage blocked — mem fallback still seeds the read */ }
+                try { localStorage.setItem('fse_bg_hwTheme', String(bgThemeId)); } catch (_) { /* storage blocked — mem fallback still seeds the read */ }
             }
             showFretOnNote = _bgReadSetting(panelKey, 'showFretOnNote');
             fretNumberGhostScope = _bgReadSetting(panelKey, 'fretNumberGhostScope');
@@ -8470,10 +8495,10 @@
             // Custom image asset is a single GLOBAL slot — bytes are
             // shared across panels (per-panel choice is which style
             // each panel renders, not which asset). Reading via
-            // _bgReadSetting would let a stray h3d_bg_panel<idx>_*
+            // _bgReadSetting would let a stray fse_bg_panel<idx>_*
             // override silently re-introduce the per-panel asset
             // duplication this design deliberately avoids (and
-            // h3dBgClearCustomImage wouldn't reach those overrides).
+            // fse3dBgClearCustomImage wouldn't reach those overrides).
             // Read globals directly instead.
             //
             // Precedence: in-memory fallback BEFORE localStorage. The
@@ -8487,8 +8512,8 @@
             const memDataUrl = _bgMemFallback.customImageDataUrl;
             const memName    = _bgMemFallback.customImageName;
             try {
-                const gDataUrl = (memDataUrl !== undefined) ? memDataUrl : localStorage.getItem('h3d_bg_customImageDataUrl');
-                const gName    = (memName    !== undefined) ? memName    : localStorage.getItem('h3d_bg_customImageName');
+                const gDataUrl = (memDataUrl !== undefined) ? memDataUrl : localStorage.getItem('fse_bg_customImageDataUrl');
+                const gName    = (memName    !== undefined) ? memName    : localStorage.getItem('fse_bg_customImageName');
                 bgCustomImageDataUrl = (gDataUrl != null) ? gDataUrl : BG_DEFAULTS.customImageDataUrl;
                 bgCustomImageName    = (gName    != null) ? gName    : BG_DEFAULTS.customImageName;
             } catch (_) {
@@ -8500,7 +8525,7 @@
             // setItem leaves _bgMemFallback ahead of localStorage).
             const memVideoName = _bgMemFallback.customVideoName;
             try {
-                const gVideoName = (memVideoName !== undefined) ? memVideoName : localStorage.getItem('h3d_bg_customVideoName');
+                const gVideoName = (memVideoName !== undefined) ? memVideoName : localStorage.getItem('fse_bg_customVideoName');
                 bgCustomVideoName = (gVideoName != null) ? gVideoName : BG_DEFAULTS.customVideoName;
             } catch (_) {
                 bgCustomVideoName = (memVideoName !== undefined) ? memVideoName : BG_DEFAULTS.customVideoName;
@@ -10523,7 +10548,7 @@
             // effect live (within a second).
             if ((_leanSusPollCounter++ % 60) === 0) {
                 try {
-                    _leanSus = localStorage.getItem('h3d_full_sus') !== '1';
+                    _leanSus = localStorage.getItem('fse3d_full_sus') !== '1';
                 } catch (_) { _leanSus = true; }
             }
             // Materialize the text-size multiplier from the user's slider.
@@ -15053,7 +15078,7 @@
             const lerp = CAM_LERP_BASE * Math.max(bpm, 60) / 120;
 
             // ── Horizontal-FOV-hold + optional wide-pane pose nudges ──
-            // Driven by window.__h3dAspectTune (default off → exact no-op).
+            // Driven by window.__fse3dAspectTune (default off → exact no-op).
             // _resolveTuneFor(paneKey) returns the shared base with THIS pane's
             // overrides (if any) laid on top, so a single split pane can be framed
             // independently. The base is seeded from defaults + localStorage on
@@ -15069,7 +15094,7 @@
             // gate as the readout). Closed → nothing is registered, so the registry
             // can't grow for users who never open the panel; the key is still
             // resolved below so any saved overrides keep applying.
-            if (window.__h3dAspectPanelOpen) _aspectRegisterPane(_paneKey);
+            if (window.__fse3dAspectPanelOpen) _aspectRegisterPane(_paneKey);
             const _aspTune = _resolveTuneFor(_paneKey);
             const _aspActive = !!(_aspTune && _aspTune.enabled
                 && !(_aspTune.splitOnly && !_ssActive()));
@@ -15082,8 +15107,8 @@
             // Publish a per-pane live readout for the tuner panel (only while it's
             // open, so the steady path stays allocation-free). Keyed by pane so
             // the panel can show the reading for whichever target is selected.
-            if (window.__h3dAspectPanelOpen) {
-                const _ro = window.__h3dAspectReadout || (window.__h3dAspectReadout = {});
+            if (window.__fse3dAspectPanelOpen) {
+                const _ro = window.__fse3dAspectReadout || (window.__fse3dAspectReadout = {});
                 const _slot = _ro[_paneKey] || (_ro[_paneKey] = {});
                 _slot.aspect = _paneAspect; _slot.vfov = _vfov;
                 _ro.__last = _paneKey;
@@ -15282,7 +15307,7 @@
             aspectScale = Math.max(1, REF_ASPECT / Math.max(cam.aspect, 0.5));
             // Cache the pane aspect for the horizontal-FOV-hold in camUpdate.
             // cam.fov itself is owned by camUpdate (not set here) so live
-            // __h3dAspectTune edits apply every frame without a resize.
+            // __fse3dAspectTune edits apply every frame without a resize.
             _paneAspect = cam.aspect;
             _appliedW = w; _appliedH = h;
         }
@@ -15677,7 +15702,7 @@
                 // Per-render background opt-out. A plugin borrowing the highway as
                 // a visualization can set bundle.bgReactive === false to suppress
                 // the audio-reactive background for THIS instance only — without
-                // writing the shared h3d_bg_* settings (which would also change the
+                // writing the shared fse_bg_* settings (which would also change the
                 // host's own highway). Motivation: the reactive bg taps the core
                 // <audio> element, and when another consumer already holds it the
                 // setup throws + the cleanup AudioContext.close() is an audible
