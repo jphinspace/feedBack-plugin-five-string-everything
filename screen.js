@@ -38,6 +38,7 @@
         // Fixed target: 5-string bass, standard BEADG, no capo, no
         // per-string offset. Index 0 = lowest (B), index 4 = highest (G).
         const TARGET_OPEN_STRING_HALFSTEPS = [23, 28, 33, 38, 43]; // B0 E1 A1 D2 G2
+        const TARGET_STRING_COUNT = TARGET_OPEN_STRING_HALFSTEPS.length;
         const TARGET_MAX_FRET = 20;
 
         function standardOpenStringHalfsteps(stringCount) {
@@ -55,34 +56,78 @@
             return root + (tuningOffsets[s] | 0) + (capo | 0);
         }
 
-        // Search every target string for the given source-string open
-        // offset + fret, returning the candidate requiring the SMALLEST
-        // fret adjustment from the original fret — NOT the smallest
-        // resulting fret number. That distinction is what makes
-        // already-standard tunings (EADG, BEAD, already-BEADG) come out
-        // unchanged: picking the globally smallest fret would happily hop
-        // to a different string even when the original string+fret was
-        // already exactly correct (see PLANNING.md Phase 2 for the worked
-        // proof). Returns { s, f, adjustment } or null if unplayable on
-        // every target string.
-        function bestTargetCandidate(sourceOpenOffset, fret) {
-            if (sourceOpenOffset === null || sourceOpenOffset === undefined) return null;
-            let best = null;
-            for (let ts = 0; ts < TARGET_OPEN_STRING_HALFSTEPS.length; ts++) {
-                const adjustment = sourceOpenOffset - TARGET_OPEN_STRING_HALFSTEPS[ts];
-                const targetFret = fret + adjustment;
-                if (targetFret < 0 || targetFret > TARGET_MAX_FRET) continue;
-                if (best === null || Math.abs(adjustment) < Math.abs(best.adjustment)) {
-                    best = { s: ts, f: targetFret, adjustment };
+        // Per-arrangement "natural" string shift: the single k (target
+        // string = source string + k) that best aligns the WHOLE source
+        // string family with the target, preferring the k with the most
+        // exact (zero-adjustment) string matches, tie-broken by smallest
+        // total |adjustment|, tie-broken by smallest |k|. This is what
+        // makes EADG (k=+1, sits on target's top 4 strings) and BEAD (k=0,
+        // sits on target's bottom 4 strings) resolve differently even
+        // though both are "all-zero-offset" 4-string tunings — the
+        // difference is which absolute pitches they actually sit at, not a
+        // per-tuning special case. Compute once per song, not per note.
+        function computeArrangementShift(sourceStringCount, tuningOffsets, capo) {
+            let bestK = 0, bestExact = -1, bestTotalAbs = Infinity;
+            for (let k = 1 - sourceStringCount; k <= TARGET_STRING_COUNT - 1; k++) {
+                let exact = 0, totalAbs = 0, counted = 0;
+                for (let s = 0; s < sourceStringCount; s++) {
+                    const j = s + k;
+                    if (j < 0 || j >= TARGET_STRING_COUNT) continue;
+                    const off = sourceOpenStringOffset(sourceStringCount, tuningOffsets, capo, s);
+                    if (off === null) continue;
+                    const adjustment = off - TARGET_OPEN_STRING_HALFSTEPS[j];
+                    counted++;
+                    totalAbs += Math.abs(adjustment);
+                    if (adjustment === 0) exact++;
+                }
+                if (counted === 0) continue;
+                if (exact > bestExact
+                    || (exact === bestExact && totalAbs < bestTotalAbs)
+                    || (exact === bestExact && totalAbs === bestTotalAbs && Math.abs(k) < Math.abs(bestK))) {
+                    bestExact = exact;
+                    bestTotalAbs = totalAbs;
+                    bestK = k;
                 }
             }
-            return best;
+            return bestK;
+        }
+
+        // Resolves one (sourceOpenOffset, fret) pair against the target,
+        // starting from the arrangement's natural target string for this
+        // source string and stepping in whichever direction the
+        // out-of-range fret demands (fret < 0 -> lower string, since a
+        // lower target base needs a larger fret for the same pitch; fret >
+        // 20 -> higher string). Fret strictly moves away from the violated
+        // bound as the string index steps in that direction (target
+        // open-string half-steps are strictly increasing), so this always
+        // converges or exhausts the target's string range. Returns
+        // { s, f, adjustment } or null if unplayable on every reachable
+        // string. This — NOT a global "smallest adjustment across all 5
+        // strings" search — is what keeps a big single-string drop (e.g.
+        // Drop C#, -3 half-steps) on its natural string for every fret that
+        // string can actually reach, only falling back to the extra B
+        // string for the frets that genuinely go below it. A global search
+        // by adjustment magnitude flips to preferring B as soon as the drop
+        // exceeds half the 5-half-step string spacing, which is exactly the
+        // bug this replaced (Drop D's -2 half-step drop happened to stay
+        // under that threshold; Drop C#'s -3 did not).
+        function resolveTargetForFret(sourceOpenOffset, naturalTargetString, fret) {
+            if (sourceOpenOffset === null || sourceOpenOffset === undefined) return null;
+            let j = Math.max(0, Math.min(TARGET_STRING_COUNT - 1, naturalTargetString));
+            while (j >= 0 && j < TARGET_STRING_COUNT) {
+                const adjustment = sourceOpenOffset - TARGET_OPEN_STRING_HALFSTEPS[j];
+                const targetFret = fret + adjustment;
+                if (targetFret < 0) { j -= 1; continue; }
+                if (targetFret > TARGET_MAX_FRET) { j += 1; continue; }
+                return { s: j, f: targetFret, adjustment };
+            }
+            return null;
         }
 
         // Ordinary (non-sliding) note: { s, f } on the target, or null if
-        // unplayable on every target string (dropped).
-        function remapNote(sourceOpenOffset, fret) {
-            const best = bestTargetCandidate(sourceOpenOffset, fret);
+        // unplayable on every reachable target string (dropped).
+        function remapNote(sourceOpenOffset, naturalTargetString, fret) {
+            const best = resolveTargetForFret(sourceOpenOffset, naturalTargetString, fret);
             return best ? { s: best.s, f: best.f } : null;
         }
 
@@ -96,12 +141,12 @@
         // Unlike an ordinary out-of-range note, an overflowing slide is
         // clamped to fret 20 rather than dropped (PLANNING.md Phase 2,
         // "Slide notes").
-        function remapSlide(sourceOpenOffset, fret, slideToFret) {
+        function remapSlide(sourceOpenOffset, naturalTargetString, fret, slideToFret) {
             if (sourceOpenOffset === null || sourceOpenOffset === undefined) return null;
             const lowFret = Math.min(fret, slideToFret);
             const highFret = Math.max(fret, slideToFret);
-            let anchor = bestTargetCandidate(sourceOpenOffset, lowFret);
-            if (!anchor) anchor = bestTargetCandidate(sourceOpenOffset, highFret);
+            let anchor = resolveTargetForFret(sourceOpenOffset, naturalTargetString, lowFret);
+            if (!anchor) anchor = resolveTargetForFret(sourceOpenOffset, naturalTargetString, highFret);
             if (!anchor) return null;
             const clamp = v => Math.max(0, Math.min(TARGET_MAX_FRET, v));
             return {
@@ -126,18 +171,18 @@
         // when present on the input, a remapped `sl` or `slu` — never both
         // set to -1 placeholders, so a caller spreading this over the
         // original note's fields only overwrites what actually changed.
-        function remapNoteEntry(sourceOpenOffset, note) {
+        function remapNoteEntry(sourceOpenOffset, naturalTargetString, note) {
             const hasSl = Number.isInteger(note.sl) && note.sl >= 0;
             const hasSlu = !hasSl && Number.isInteger(note.slu) && note.slu >= 0;
             if (hasSl || hasSlu) {
                 const dest = hasSl ? note.sl : note.slu;
-                const r = remapSlide(sourceOpenOffset, note.f, dest);
+                const r = remapSlide(sourceOpenOffset, naturalTargetString, note.f, dest);
                 if (!r) return null;
                 const out = { s: r.s, f: r.f };
                 if (hasSl) out.sl = r.slideTo; else out.slu = r.slideTo;
                 return out;
             }
-            return remapNote(sourceOpenOffset, note.f);
+            return remapNote(sourceOpenOffset, naturalTargetString, note.f);
         }
 
         // Resolves chord note collisions (PLANNING.md Phase 3): remaps every
@@ -146,18 +191,17 @@
         // only the lower-pitched original (smallest noteHalfstepRank) —
         // per colliding string, not the whole chord. `notes` is an array of
         // note-shaped objects (must have `s`/`f`, may have `sl`/`slu`).
-        // `offsetsByString` is a precomputed array/map of this song's
-        // sourceOpenStringOffset per source string index (build once per
-        // song, not per chord). Returns an array of { entry, note } for
-        // every surviving note, where `entry` is remapNoteEntry's result and
-        // `note` is the original input object (for field passthrough and
-        // for keying bundle.getNoteState).
-        function resolveChordCollisions(offsetsByString, notes) {
+        // `offsetsByString`/`naturalTargetByString` are precomputed once per
+        // song (index = source string), not per chord. Returns an array of
+        // { entry, note } for every surviving note, where `entry` is
+        // remapNoteEntry's result and `note` is the original input object
+        // (for field passthrough and for keying bundle.getNoteState).
+        function resolveChordCollisions(offsetsByString, naturalTargetByString, notes) {
             const candidates = [];
             for (const note of notes) {
                 const off = offsetsByString[note.s];
                 if (off === null || off === undefined) continue;
-                const entry = remapNoteEntry(off, note);
+                const entry = remapNoteEntry(off, naturalTargetByString[note.s], note);
                 if (!entry) continue;
                 candidates.push({ entry, note, rank: noteHalfstepRank(off, note.f) });
             }
@@ -171,10 +215,11 @@
 
         return {
             TARGET_MAX_FRET,
-            TARGET_STRING_COUNT: TARGET_OPEN_STRING_HALFSTEPS.length,
+            TARGET_STRING_COUNT,
             standardOpenStringHalfsteps,
             sourceOpenStringOffset,
-            bestTargetCandidate,
+            computeArrangementShift,
+            resolveTargetForFret,
             remapNote,
             remapSlide,
             noteHalfstepRank,
@@ -890,6 +935,32 @@
         const full = t.length === 3 ? t[0] + t[0] + t[1] + t[1] + t[2] + t[2] : t;
         if (!/^[0-9a-fA-F]{6}$/.test(full)) return null;
         return parseInt(full, 16);
+    }
+    // PATCH POINT (feedback: our added B string was using the guitar's own
+    // "B" slot color, green — wrong slot). Core's named-string-color system
+    // (static/app.js HWC_SLOTS/HWC_DEFAULT_FALLBACK, "window.feedBack.
+    // highwayColors") already has the semantically correct slot for an
+    // ADDED low extension string: "low7" ("Low B", used by 7-string
+    // guitars going below standard low E), default #cc00aa. That system's
+    // own chart-shape detection (_hwcChartShape/_hwcSlotKeysForChart in
+    // app.js) keys off `highway.getStringCount()` — the chart's TRUE
+    // string count — so it never assigns our *synthesized* 5th string a
+    // color (it doesn't know our renderer adds one). Read the user's own
+    // "Low B" customization directly from the same storage core's Highway
+    // String Colors settings panel uses, so a real per-name override still
+    // applies to our added string; fall back to HWC_DEFAULT_FALLBACK's own
+    // low7 default (#cc00aa) otherwise. Settings-load-time only, not a
+    // per-frame cost.
+    function _fseLowBColor() {
+        try {
+            const raw = localStorage.getItem('highwayStringColors');
+            if (raw) {
+                const parsed = JSON.parse(raw);
+                const n = _h3dHexToInt(parsed && parsed.low7);
+                if (n != null) return n;
+            }
+        } catch (_) { /* corrupt / blocked storage — fall through to default */ }
+        return 0xcc00aa; // HWC_DEFAULT_FALLBACK.low7 ("Low B", 7-string default)
     }
     // Numeric (0xRRGGBB) darken/lighten — used to derive the gem-gradient
     // top-highlight / bottom-shade stops from a custom per-string base color
@@ -4296,7 +4367,23 @@
         // frame color reads inside createFactory all consult this rather
         // than the module-level S_COL, so a palette swap re-tints the
         // panel live without touching module-level state.
-        let activePalette = PALETTES.default;
+        // PATCH POINT: index 0 (our added B string) is NOT part of
+        // highway_3d's raw per-index palette at all — it gets the
+        // dedicated "Low B" color (_fseLowBColor(), see above) instead of
+        // whatever coincidentally sits at some reused palette slot.
+        // Indices 1-4 (E/A/D/G) pass through PALETTES.default[0..3]
+        // directly/unchanged — that's already the correct lowE/A/D/G
+        // order (matches core's own 4-string-bass HWC slot order), so no
+        // reordering is needed for them, only B is special-cased. Set
+        // before any settings load so the very first frame is already
+        // correct.
+        let activePalette = [_fseLowBColor(), PALETTES.default[0], PALETTES.default[1], PALETTES.default[2], PALETTES.default[3]];
+        // Source palette (pre-remap, E/A/D/G only) activePalette was last
+        // derived from — lets _bgLoadSettings skip re-deriving/re-tinting
+        // when the user's palette selection hasn't actually changed
+        // (activePalette itself is always a fresh derived array, never
+        // === the source palette).
+        let _fsePaletteSrcRef = PALETTES.default;
         // Content signature of the colors last applied to materials; lets
         // _bgLoadSettings force a retint when the in-place custom palette
         // changes values without changing array identity.
@@ -8193,8 +8280,23 @@
             // color the reference stays === activePalette, so compare contents
             // too to force a retint. _bgPaletteSig caches the applied colors.
             const newSig = newPalette.join(',');
-            if (newPalette !== activePalette || newSig !== _bgPaletteSig) {
-                activePalette = newPalette;
+            // PATCH POINT: B (index 0) is looked up independently of
+            // newPalette/newSig (see _fseLowBColor) — core's own palette
+            // change-detection here only tracks E/A/D/G's source, so check
+            // B separately or a same-frame "Low B" edit would go stale
+            // until something else also changed.
+            const newLowB = _fseLowBColor();
+            if (newPalette !== _fsePaletteSrcRef || newSig !== _bgPaletteSig || newLowB !== activePalette[0]) {
+                // PATCH POINT (feedback: colors looked shifted up a string —
+                // "adding a fifth high string on top rather than low
+                // string" — and B was using the guitar's own "B" slot color
+                // instead of the dedicated "Low B" one). Indices 1-4
+                // (E/A/D/G) pass through whichever palette the user picked
+                // (named or custom) unchanged/unreordered; index 0 (B) uses
+                // the dedicated Low B lookup instead of any slot of
+                // newPalette.
+                activePalette = [newLowB, newPalette[0], newPalette[1], newPalette[2], newPalette[3]];
+                _fsePaletteSrcRef = newPalette;
                 _bgPaletteSig = newSig;
                 _applyPaletteToMaterials();
             }
@@ -8376,7 +8478,10 @@
         // churn, pooled note meshes pick it up next frame).
         function _recolorGemGradients() {
             if (!T || !gNoteGrad || !gNoteGrad.length) return;
-            const isCustom = (activePalette === _customPalette);
+            // PATCH POINT: activePalette is always a freshly-derived (remapped)
+            // array now, never === _customPalette even when the user picked
+            // "custom" — check the pre-remap source ref instead.
+            const isCustom = (_fsePaletteSrcRef === _customPalette);
             const topCol = new T.Color(), botCol = new T.Color(), tmp = new T.Color();
             const halfH = NH / 2;
             for (let s = 0; s < gNoteGrad.length; s++) {
@@ -8384,14 +8489,22 @@
                 if (!g || !g.attributes || !g.attributes.color) continue;
                 const base = activePalette[s];
                 let topHex, botHex;
-                if (isCustom && base !== PALETTES.default[s]) {
+                // PATCH POINT: index 0 (B) never has a "stock" gradient —
+                // there's no dedicated Low B entry in DEFAULT_GEM_GRADIENTS
+                // (that array only covers the original 6-string palette) —
+                // so it always derives its gradient from _fseLowBColor()'s
+                // base, same as a genuinely custom color would. Indices 1-4
+                // (E/A/D/G) read PALETTES.default[s-1]/DEFAULT_GEM_GRADIENTS[s-1]
+                // directly (activePalette's own index 0 is B-only, so E/A/D/G
+                // sit one slot up from the raw palette's own lowE/A/D/G order).
+                if (s === 0 || (isCustom && base !== PALETTES.default[s - 1])) {
                     // Match the SUBTLE stock gem shading (bottom ≈ 0.78 of a
                     // near-base top), so a custom gem reads as a flat-ish gem
                     // in the chosen color rather than a strong gradient.
                     topHex = _lightenInt(base, 0.05);
                     botHex = _darkenInt(base, 0.78);
                 } else {
-                    const stops = DEFAULT_GEM_GRADIENTS[s];
+                    const stops = DEFAULT_GEM_GRADIENTS[s - 1];
                     if (!stops) continue; // strings 6/7 have no gradient geometry
                     topHex = stops[0];
                     botHex = stops[1];
@@ -15350,16 +15463,21 @@
                 bundle.chords = _fseRemappedChords;
                 return;
             }
-            const offsetsByString = [];
+            // Arrangement-wide natural string shift (PLANNING.md Phase 2):
+            // computed once per song, not per note — see FSE.computeArrangementShift
+            // for why a per-note global search was wrong (Drop C# regression).
+            const shiftK = FSE.computeArrangementShift(sc, tuning, capo);
+            const offsetsByString = [], naturalTargetByString = [];
             for (let s = 0; s < sc; s++) {
                 offsetsByString.push(FSE.sourceOpenStringOffset(sc, tuning, capo, s));
+                naturalTargetByString.push(s + shiftK);
             }
             const remappedNotes = [];
             if (Array.isArray(rawNotes)) {
                 for (const n of rawNotes) {
                     const off = offsetsByString[n.s];
                     if (off === null || off === undefined) continue; // string not in tuning range, drop
-                    const entry = FSE.remapNoteEntry(off, n);
+                    const entry = FSE.remapNoteEntry(off, naturalTargetByString[n.s], n);
                     if (!entry) continue; // unplayable on the target, drop
                     const copy = Object.assign({}, n, entry);
                     copy._origNote = n; // PLANNING.md Phase 5: keyed against by the note-state provider
@@ -15369,7 +15487,7 @@
             const remappedChords = [];
             if (Array.isArray(rawChords)) {
                 for (const ch of rawChords) {
-                    const survivors = FSE.resolveChordCollisions(offsetsByString, ch.notes || []);
+                    const survivors = FSE.resolveChordCollisions(offsetsByString, naturalTargetByString, ch.notes || []);
                     if (survivors.length === 0) continue; // every note collided/unplayable, drop the chord
                     const notesCopy = survivors.map(({ entry, note }) => {
                         const c = Object.assign({}, note, entry);
