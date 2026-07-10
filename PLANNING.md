@@ -181,32 +181,80 @@ function sourceOpenStringOffset(sourceBase, tuningOffsets, capo, s) {
     return root + (tuningOffsets[s] | 0) + (capo | 0);
 }
 
-// For one note (source string `s`, source fret `f`), returns the best
-// { s: targetString, f: targetFret } on the fixed BEADG target, or null if
-// unplayable on every target string. "Best" = the valid target string
-// requiring the SMALLEST fret adjustment from the note's original fret —
-// NOT the smallest resulting fret number. This distinction is what makes
-// already-standard tunings (EADG, BEAD, already-BEADG) come out unchanged:
-// picking the globally smallest fret would happily hop to a different
-// string even when the original string+fret was already exactly correct.
-function remapStringFret(sourceOpenOffset, s, f) {
-    let best = null;
-    for (let ts = 0; ts < TARGET_OPEN_STRING_HALFSTEPS.length; ts++) {
-        const adjustment = sourceOpenOffset - TARGET_OPEN_STRING_HALFSTEPS[ts];
-        const targetFret = f + adjustment;
-        if (targetFret < 0 || targetFret > TARGET_MAX_FRET) continue;
-        if (best === null || Math.abs(adjustment) < Math.abs(best.adjustment)) {
-            best = { s: ts, f: targetFret, adjustment };
+// Per-arrangement "natural" string shift: the single k (target string =
+// source string + k) that best aligns the WHOLE source string family with
+// the target — most exact (zero-adjustment) string matches wins; ties
+// broken by smallest total |adjustment|, then smallest |k|. Compute once
+// per song, not per note.
+function computeArrangementShift(sourceStringCount, sourceBase, tuningOffsets, capo) {
+    let bestK = 0, bestExact = -1, bestTotalAbs = Infinity;
+    for (let k = 1 - sourceStringCount; k <= TARGET_OPEN_STRING_HALFSTEPS.length - 1; k++) {
+        let exact = 0, totalAbs = 0, counted = 0;
+        for (let s = 0; s < sourceStringCount; s++) {
+            const j = s + k;
+            if (j < 0 || j >= TARGET_OPEN_STRING_HALFSTEPS.length) continue;
+            const off = sourceOpenStringOffset(sourceBase, tuningOffsets, capo, s);
+            if (off === null) continue;
+            const adjustment = off - TARGET_OPEN_STRING_HALFSTEPS[j];
+            counted++;
+            totalAbs += Math.abs(adjustment);
+            if (adjustment === 0) exact++;
+        }
+        if (counted === 0) continue;
+        if (exact > bestExact
+            || (exact === bestExact && totalAbs < bestTotalAbs)
+            || (exact === bestExact && totalAbs === bestTotalAbs && Math.abs(k) < Math.abs(bestK))) {
+            bestExact = exact; bestTotalAbs = totalAbs; bestK = k;
         }
     }
-    return best ? { s: best.s, f: best.f } : null;
+    return bestK;
+}
+
+// For one note (source string's open offset + source fret `f`), returns
+// { s: targetString, f: targetFret } on the fixed BEADG target, or null if
+// unplayable on every reachable target string. Starts from the
+// arrangement's NATURAL target string for this source string
+// (naturalTargetString = s + shiftK) and steps in whichever direction the
+// out-of-range fret demands: fret < 0 -> lower string (a lower target open
+// note needs a larger fret for the same pitch), fret > 20 -> higher string.
+// Fret moves monotonically away from the violated bound as the string steps
+// in that direction (target open-string half-steps are strictly
+// increasing), so this always converges or exhausts the target's strings.
+//
+// This — NOT a global "smallest |adjustment| across all 5 strings" search —
+// is the correct algorithm. An earlier version of this engine used the
+// global-search form and it shipped a real bug: it happened to reproduce
+// the Drop D example correctly (a 2-half-step drop) but broke on Drop C#
+// (a 3-half-step drop), where it started preferring the extra B string as
+// the DEFAULT for nearly the whole dropped string, rather than only for the
+// frets that actually fall below what the string's natural (undropped)
+// target could reach. The failure mode: comparing |adjustment| to ALL 5
+// target strings flips its preference as soon as a single string's drop
+// exceeds half the 5-half-step spacing between adjacent target strings —
+// an artifact of the global comparison, unrelated to whether the note is
+// actually reachable on its natural string. Anchoring on the natural
+// (majority-fit) string first and only stepping away when the fret is
+// truly out of range on it avoids that failure mode entirely, and still
+// reproduces every identity case below (the natural string for EADG/BEAD/
+// already-BEADG never needs to step away, by construction).
+function remapStringFret(sourceOpenOffset, naturalTargetString, f) {
+    let j = Math.max(0, Math.min(TARGET_OPEN_STRING_HALFSTEPS.length - 1, naturalTargetString));
+    while (j >= 0 && j < TARGET_OPEN_STRING_HALFSTEPS.length) {
+        const adjustment = sourceOpenOffset - TARGET_OPEN_STRING_HALFSTEPS[j];
+        const targetFret = f + adjustment;
+        if (targetFret < 0) { j -= 1; continue; }
+        if (targetFret > TARGET_MAX_FRET) { j += 1; continue; }
+        return { s: j, f: targetFret };
+    }
+    return null;
 }
 ```
 
-Per song load, precompute `sourceOpenStringOffset` once per distinct source
-string index (not per note — it only depends on `tuningOffsets[s]`/`capo`,
-both constant for the whole song), then call `remapStringFret` per note using
-that cached value and the note's own `f`.
+Per song load, precompute `sourceOpenStringOffset` and the natural target
+string (`s + shiftK`, using one arrangement-wide `computeArrangementShift`
+call) once per distinct source string index — not per note, both are
+constant for the whole song — then call `remapStringFret` per note using
+those cached values and the note's own `f`.
 
 **Fret-numbering convention — confirmed against `highway_3d`, load-bearing for
 every calculation above.** Fret `0` means the open string; fret `1` is one
@@ -256,20 +304,52 @@ wiring into rendering — no test framework needed for MVP):
      target strings depending on fret) while notes on untouched strings don't
      move at all — and none of this required detecting "this is Drop D" as a
      special case; it's the general algorithm's natural output.
-2. **EADG identity**: 4-string bass, `tuning = [0, 0, 0, 0]`, `capo = 0`. For
+2. **Real Drop C#** (feedback found and then precisely confirmed against an
+   actual chart in manual testing): open strings low-to-high are C#, G#, C#,
+   F# — `tuning = [-3, -1, -1, -1]`, `capo = 0`. Unlike Drop D, this is
+   **not** "only the lowest string modified" — the whole tuning sits a
+   half-step below standard, plus the lowest string drops an *additional*
+   whole step. `computeArrangementShift` still picks `k = +1` (same shift
+   as EADG — 4 of 4 strings are closer to that alignment than to `k = 0`),
+   but now *every* string's own natural target carries a nonzero adjustment
+   (+2 for string 0, +4 for strings 1–3), so every string needs its own
+   one-fret cascade at the very bottom of its range before settling onto its
+   natural target for everything else:
+   - String 0 (C#, natural target E, adjustment +2): frets 0,1,2 (C#,D,Eb)
+     cascade down to B (frets 2,3,4); fret 3 upward (E and above) stays on
+     the natural E target (`{s: 1, f: f - 3}`).
+   - String 1 (G#, natural target A, adjustment +4): fret 0 (G#) cascades
+     down to E (fret 4); fret 1 upward (A and above) stays on the natural A
+     target (`{s: 2, f: f - 1}`).
+   - String 2 (C#, natural target D, adjustment +4): fret 0 (C#) cascades
+     down to A (fret 4); fret 1 upward (D and above) stays on the natural D
+     target (`{s: 3, f: f - 1}`).
+   - String 3 (F#, natural target G, adjustment +4): fret 0 (F#) cascades
+     down to D (fret 4); fret 1 upward (G and above) stays on the natural G
+     target (`{s: 4, f: f - 1}`).
+   This is the same general algorithm as Drop D — nothing here is a special
+   case for this tuning — it's just that a uniform whole-tuning offset makes
+   every string (not only the lowest) need its own cascade, whereas Drop D's
+   uniform-zero offset on strings 1–3 meant only the lowest string needed
+   one. An earlier draft of this test used an unrealistic `tuning = [-3, 0,
+   0, 0]` (only the lowest string modified) and, separately, an earlier
+   *algorithm* draft briefly (never shipped) mis-selected `k = 0` for this
+   case by over-weighting "how many strings need zero cascade" — both were
+   wrong turns corrected once the actual chart's tuning was pinned down.
+3. **EADG identity**: 4-string bass, `tuning = [0, 0, 0, 0]`, `capo = 0`. For
    every fret 0–20 on every source string 0–3, the remapped result must be
    `{s: sourceString + 1, f: sourceFret}` — i.e. every note lands on the
    *same fret*, just shifted up one string index (since EADG's string family
    sits exactly on BEADG's top 4 strings). This must fall out of the general
    algorithm, not a special case for this tuning.
-3. **BEAD identity**: 4-string bass, `tuning = [-5, -5, -5, -5]`, `capo = 0`
+4. **BEAD identity**: 4-string bass, `tuning = [-5, -5, -5, -5]`, `capo = 0`
    (BEAD is EADG shifted down a full fourth). For every fret 0–20 on every
    source string 0–3, the remapped result must be `{s: sourceString, f:
    sourceFret}` — completely unchanged, same string, same fret. Also derived
    from the general algorithm, not detected/special-cased.
-4. **Already-BEADG identity**: 5-string bass, `tuning = [0,0,0,0,0]`, `capo =
+5. **Already-BEADG identity**: 5-string bass, `tuning = [0,0,0,0,0]`, `capo =
    0` → every note unchanged.
-5. **Out-of-range drop**: a pitch one half-step below open B on every target
+6. **Out-of-range drop**: a pitch one half-step below open B on every target
    string, and a pitch one half-step above fret 20 on the G string, both
    return `null`.
 
@@ -285,17 +365,18 @@ being a discrete second note. Naively remapping `s`/`f` per Phase 2's function
 and leaving `sl`/`slu` untouched would desync the slide's destination fret
 from whatever string the start note actually landed on. Both endpoints must
 resolve to the **same** target string, which isn't guaranteed if each fret is
-remapped independently (the minimize-adjustment rule can pick a different
-target string for two different frets on the same source string).
+resolved independently starting from the natural target string (a fret near
+the natural string's own range boundary can step away while the other
+endpoint doesn't).
 
 Algorithm, applied per sliding note in addition to Phase 2's base function:
 1. Take `lowFret = min(f, slideToFret)`, `highFret = max(f, slideToFret)`.
-2. Find the best target string using **`lowFret`** only (reuse Phase 2's
-   per-string candidate search, restricted to validity at `lowFret`) — the
-   lower fret is the one most likely to land in-range, so anchoring on it is
-   the stable choice. If no target string is valid for `lowFret`, retry the
-   search anchored on `highFret` instead; if neither fret has any valid
-   target string, drop the note (same as an ordinary unplayable note).
+2. Resolve the target string using **`lowFret`** only (Phase 2's
+   `remapStringFret`, starting from this source string's natural target) —
+   the lower fret is the one most likely to land in-range, so anchoring on
+   it is the stable choice. If `lowFret` is unplayable on every reachable
+   string, retry anchored on `highFret` instead; if neither fret resolves,
+   drop the note (same as an ordinary unplayable note).
 3. Apply that one target string's adjustment to **both** `f` and
    `slideToFret` (or `slideUnpitchToFret`).
 4. Per the user's explicit direction — unlike an ordinary out-of-range note,
@@ -376,7 +457,64 @@ patch points (identified from the earlier research pass over
    `['B', 'E', 'A', 'D', 'G']` rather than deriving it from the chart's
    (original, not our target) tuning, since the fretboard now always
    represents the fixed BEADG target.
-4. Everything else in the copied file — themes, video backgrounds, camera,
+4. **Per-string color palette** (feedback found this in manual testing, in
+   two rounds — see both corrections below): `highway_3d` colors gems by raw
+   string index (`activePalette[s]`, `S_COL`/`PALETTES.default` — index 0 =
+   red, 1 = yellow, 2 = blue, 3 = orange, 4 = green, ...), with no
+   instrument-aware adjustment. Under our target's B/E/A/D/G indexing
+   (0..4), that reuses red — the color players associate with E on any
+   4-string chart — for B instead, and shifts every other string's color up
+   a slot. The result reads as "a new high string added on top" rather than
+   "a new low string added below," exactly backwards from the intent.
+   **First correction, superseded by the second:** an initial fix reused
+   slot 4 (green) for B, reasoning that it's "the color a 6-string guitar's
+   own B string gets." That's the wrong "B" — a guitar's 2nd string (between
+   G and high E) is an unrelated string sharing the name by coincidence.
+   **Second, correct fix:** core already has a dedicated, name-based color
+   system for exactly this situation — an *added low extension string*, the
+   same role a 7-string guitar's lowest string plays below standard low E.
+   `static/app.js`'s `HWC_SLOTS`/`HWC_DEFAULT_FALLBACK` names that slot
+   `low7` ("Low B, 7-string"), default `#cc00aa` — that's B's correct color,
+   not the guitar-B-string green. Two parts:
+   - E/A/D/G (target indices 1-4) need no reorder table at all: they pass
+     through `newPalette[0..3]` **unchanged** — core's own 4-string-bass
+     slot order (`lowE, A, D, G`) already lines up 1:1 with those indices.
+   - B (target index 0) is looked up independently via a small helper
+     (`_fseLowBColor()`) that reads the user's own "Low B" customization
+     directly from the same storage core's Highway String Colors settings
+     panel writes (`localStorage['highwayStringColors'].low7`), falling back
+     to `0xcc00aa` (`HWC_DEFAULT_FALLBACK.low7`) otherwise. This has to be a
+     direct, independent lookup rather than routed through core's normal
+     per-chart translation (`_hwcSlotKeysForChart` in `app.js`) because that
+     translation keys off `highway.getStringCount()` — the chart's *true*
+     string count — so it never assigns a color to a string our renderer
+     synthesizes that core doesn't know exists. Known limitation: a user's
+     "Low B" customization intended for real 7-string guitar charts will
+     also apply to our synthesized B string, and there's no way to give
+     them independent values without deeper core plumbing than an MVP
+     patch — acceptable since both represent the same "extra added low
+     string" role.
+   Apply both at the three points where a palette array is actually
+   consumed by string index, not by chasing the ~20 individual
+   `activePalette[s]` reads scattered through the file:
+   - Where `activePalette` is assigned from the user's palette selection
+     (named or custom) — build it as `[_fseLowBColor(), newPalette[0],
+     newPalette[1], newPalette[2], newPalette[3]]` instead of assigning
+     `newPalette` directly.
+   - `activePalette`'s initial value (before any settings load) — same
+     construction applied to `PALETTES.default`, so the very first frame
+     isn't briefly wrong.
+   - `_recolorGemGradients()`'s stock-vs-custom gradient lookup: index 0 (B)
+     always takes the derived-from-base lighten/darken path (there's no
+     stock "Low B" entry in `DEFAULT_GEM_GRADIENTS` — that array only
+     covers the original 6-string palette), while indices 1-4 read
+     `DEFAULT_GEM_GRADIENTS[s - 1]`/`PALETTES.default[s - 1]` directly (one
+     slot down, since index 0 is B-only now). The "is this actually a
+     custom palette" check (previously `activePalette === _customPalette`)
+     must compare against the *pre-remap* source palette reference instead,
+     since `activePalette` is now always a freshly-derived array that's
+     never `===` anything it was built from.
+5. Everything else in the copied file — themes, video backgrounds, camera,
    lighting, particle effects, splitscreen support, hand-shape ghosting,
    lyrics, minimap, event listeners (`highway:visibility`,
    `highway:canvas-replaced`, `notedetect:hit`/`notedetect:skin`) — stays
@@ -417,11 +555,37 @@ gem.
 
 - Confirm `matchesArrangement` (Phase 1, narrowed to `/bass/i`) correctly wins
   the Auto-mode "first match wins" tiebreak against the installed
-  `highway_3d`'s broader bass-matching regex — Auto-mode's evaluation order
-  follows plugin registration order (alphabetical by id), and
-  `"five_string_everything"` sorts before `"highway_3d"`. Confirm this
-  empirically (load a bass song with Auto selected, both plugins installed)
-  rather than relying on the alphabetical argument alone.
+  `highway_3d`'s broader bass-matching regex. **Correction from manual
+  testing:** this plan originally (and incorrectly) assumed the tiebreak
+  follows the `id` field declared in `plugin.json`. The actual mechanism
+  (`static/app.js` `_autoMatchViz`, confirmed by reading the source directly)
+  evaluates candidates in viz-picker DOM order, which mirrors `/api/plugins`'
+  order, which is `sorted(plugins_base_dir.iterdir())` in
+  `plugins/__init__.py` — i.e. **sorted by the on-disk plugin *directory*
+  name**, not by `plugin.json`'s `id`. `highway_3d` is bundled with core at
+  `plugins/highway_3d/`, so whether we win the tiebreak depends entirely on
+  what directory name this plugin gets installed under locally — it must
+  sort alphabetically before `"highway_3d"` (e.g. `five_string_everything`
+  or `feedBack-plugin-five-string-everything`, both of which start with a
+  character before `h` — but a differently-named install directory could
+  easily lose the tiebreak). This is a deployment-time consideration, not
+  something the plugin's own code can guarantee — confirm the actual
+  installed directory name sorts correctly, and document that requirement
+  wherever install instructions live. **Follow-up:** the user installs via
+  feedback-desktop's plugin manager
+  (`feedBack-desktop/src/main/plugin-manager.ts`), which — confirmed by
+  reading that source — installs under the git URL's last path segment
+  verbatim (`feedBack-plugin-five-string-everything` for this repo), with
+  no sanitization/reordering and no explicit override given. That name
+  already sorts before `highway_3d` (`f` < `h`), so directory naming likely
+  *isn't* the actual cause of the reported "Auto mode didn't take over"
+  behavior. The much more likely explanation: `_autoMatchViz` only runs when
+  the viz picker is on `'auto'` — a *manual* pick from an earlier session
+  persists to `localStorage.vizSelection` and is restored on load,
+  permanently bypassing Auto-mode evaluation regardless of directory naming
+  or `matchesArrangement` correctness until the picker is explicitly set
+  back to "Auto (match arrangement)". Check the picker's actual value
+  before assuming a tiebreak problem.
 - Confirm manual picker selection still works, and that switching away from
   our renderer via the picker is the "disable" mechanism, per the locked-in
   decision (no settings toggle).

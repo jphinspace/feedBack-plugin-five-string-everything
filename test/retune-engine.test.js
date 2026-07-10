@@ -14,6 +14,7 @@ const STANDARD_OPEN_STRING_HALFSTEPS = {
     8: [30, 35, 40, 45, 50, 55, 59, 64],
 };
 const TARGET_OPEN_STRING_HALFSTEPS = [23, 28, 33, 38, 43]; // B0 E1 A1 D2 G2
+const TARGET_STRING_COUNT = TARGET_OPEN_STRING_HALFSTEPS.length;
 const TARGET_MAX_FRET = 20;
 
 function standardOpenStringHalfsteps(stringCount) {
@@ -25,29 +26,79 @@ function sourceOpenStringOffset(sourceStringCount, tuningOffsets, capo, s) {
     const root = s < base.length ? base[s] : base[base.length - 1];
     return root + (tuningOffsets[s] | 0) + (capo | 0);
 }
-function bestTargetCandidate(sourceOpenOffset, fret) {
-    if (sourceOpenOffset === null || sourceOpenOffset === undefined) return null;
-    let best = null;
-    for (let ts = 0; ts < TARGET_OPEN_STRING_HALFSTEPS.length; ts++) {
-        const adjustment = sourceOpenOffset - TARGET_OPEN_STRING_HALFSTEPS[ts];
-        const targetFret = fret + adjustment;
-        if (targetFret < 0 || targetFret > TARGET_MAX_FRET) continue;
-        if (best === null || Math.abs(adjustment) < Math.abs(best.adjustment)) {
-            best = { s: ts, f: targetFret, adjustment };
+
+// Per-arrangement "natural" string shift: the single k (target string =
+// source string + k) that best aligns the WHOLE source string family with
+// the target, preferring the k with the most exact (zero-adjustment)
+// string matches, tie-broken by smallest total |adjustment|, tie-broken by
+// smallest |k|. This is what makes EADG (k=+1, sits on target's top 4
+// strings) and BEAD (k=0, sits on target's bottom 4 strings) resolve
+// differently even though both are "all-zero-offset" 4-string tunings —
+// the difference is which absolute pitches they actually sit at, not a
+// per-tuning special case.
+function computeArrangementShift(sourceStringCount, tuningOffsets, capo) {
+    let bestK = 0, bestExact = -1, bestTotalAbs = Infinity;
+    for (let k = 1 - sourceStringCount; k <= TARGET_STRING_COUNT - 1; k++) {
+        let exact = 0, totalAbs = 0, counted = 0;
+        for (let s = 0; s < sourceStringCount; s++) {
+            const j = s + k;
+            if (j < 0 || j >= TARGET_STRING_COUNT) continue;
+            const off = sourceOpenStringOffset(sourceStringCount, tuningOffsets, capo, s);
+            if (off === null) continue;
+            const adjustment = off - TARGET_OPEN_STRING_HALFSTEPS[j];
+            counted++;
+            totalAbs += Math.abs(adjustment);
+            if (adjustment === 0) exact++;
+        }
+        if (counted === 0) continue;
+        if (exact > bestExact
+            || (exact === bestExact && totalAbs < bestTotalAbs)
+            || (exact === bestExact && totalAbs === bestTotalAbs && Math.abs(k) < Math.abs(bestK))) {
+            bestExact = exact;
+            bestTotalAbs = totalAbs;
+            bestK = k;
         }
     }
-    return best;
+    return bestK;
 }
-function remapNote(sourceOpenOffset, fret) {
-    const best = bestTargetCandidate(sourceOpenOffset, fret);
+
+// Resolves one (sourceOpenOffset, fret) pair against the target, starting
+// from the arrangement's natural target string for this source string and
+// stepping in whichever direction the out-of-range fret demands (fret < 0
+// -> lower string, since a lower target base needs a larger fret for the
+// same pitch; fret > 20 -> higher string). Fret strictly moves away from
+// the violated bound as the string index steps in that direction (target
+// open-string half-steps are strictly increasing), so this always
+// converges or exhausts the target's string range. Returns
+// { s, f, adjustment } or null if unplayable on every reachable string.
+function resolveTargetForFret(sourceOpenOffset, naturalTargetString, fret) {
+    if (sourceOpenOffset === null || sourceOpenOffset === undefined) return null;
+    let j = Math.max(0, Math.min(TARGET_STRING_COUNT - 1, naturalTargetString));
+    while (j >= 0 && j < TARGET_STRING_COUNT) {
+        const adjustment = sourceOpenOffset - TARGET_OPEN_STRING_HALFSTEPS[j];
+        const targetFret = fret + adjustment;
+        if (targetFret < 0) { j -= 1; continue; }
+        if (targetFret > TARGET_MAX_FRET) { j += 1; continue; }
+        return { s: j, f: targetFret, adjustment };
+    }
+    return null;
+}
+
+function remapNote(sourceOpenOffset, naturalTargetString, fret) {
+    const best = resolveTargetForFret(sourceOpenOffset, naturalTargetString, fret);
     return best ? { s: best.s, f: best.f } : null;
 }
-function remapSlide(sourceOpenOffset, fret, slideToFret) {
+
+// Sliding note: both endpoints must land on the SAME target string. Anchor
+// on whichever endpoint is lower (most likely to resolve cleanly); if that
+// endpoint is entirely unplayable, retry anchored on the higher endpoint.
+// An overflowing endpoint clamps to fret 20 rather than dropping the slide.
+function remapSlide(sourceOpenOffset, naturalTargetString, fret, slideToFret) {
     if (sourceOpenOffset === null || sourceOpenOffset === undefined) return null;
     const lowFret = Math.min(fret, slideToFret);
     const highFret = Math.max(fret, slideToFret);
-    let anchor = bestTargetCandidate(sourceOpenOffset, lowFret);
-    if (!anchor) anchor = bestTargetCandidate(sourceOpenOffset, highFret);
+    let anchor = resolveTargetForFret(sourceOpenOffset, naturalTargetString, lowFret);
+    if (!anchor) anchor = resolveTargetForFret(sourceOpenOffset, naturalTargetString, highFret);
     if (!anchor) return null;
     const clamp = v => Math.max(0, Math.min(TARGET_MAX_FRET, v));
     return { s: anchor.s, f: clamp(fret + anchor.adjustment), slideTo: clamp(slideToFret + anchor.adjustment) };
@@ -55,25 +106,25 @@ function remapSlide(sourceOpenOffset, fret, slideToFret) {
 function noteHalfstepRank(sourceOpenOffset, fret) {
     return sourceOpenOffset + fret;
 }
-function remapNoteEntry(sourceOpenOffset, note) {
+function remapNoteEntry(sourceOpenOffset, naturalTargetString, note) {
     const hasSl = Number.isInteger(note.sl) && note.sl >= 0;
     const hasSlu = !hasSl && Number.isInteger(note.slu) && note.slu >= 0;
     if (hasSl || hasSlu) {
         const dest = hasSl ? note.sl : note.slu;
-        const r = remapSlide(sourceOpenOffset, note.f, dest);
+        const r = remapSlide(sourceOpenOffset, naturalTargetString, note.f, dest);
         if (!r) return null;
         const out = { s: r.s, f: r.f };
         if (hasSl) out.sl = r.slideTo; else out.slu = r.slideTo;
         return out;
     }
-    return remapNote(sourceOpenOffset, note.f);
+    return remapNote(sourceOpenOffset, naturalTargetString, note.f);
 }
-function resolveChordCollisions(offsetsByString, notes) {
+function resolveChordCollisions(offsetsByString, naturalTargetByString, notes) {
     const candidates = [];
     for (const note of notes) {
         const off = offsetsByString[note.s];
         if (off === null || off === undefined) continue;
-        const entry = remapNoteEntry(off, note);
+        const entry = remapNoteEntry(off, naturalTargetByString[note.s], note);
         if (!entry) continue;
         candidates.push({ entry, note, rank: noteHalfstepRank(off, note.f) });
     }
@@ -91,106 +142,157 @@ function check(label, actual, expected) {
     passed++;
 }
 
+// Helper mirroring what _fseApplyRetune does once per song: compute k, then
+// per-string offsets and natural targets.
+function songContext(sourceStringCount, tuning, capo) {
+    const k = computeArrangementShift(sourceStringCount, tuning, capo);
+    const offsetsByString = [], naturalTargetByString = [];
+    for (let s = 0; s < sourceStringCount; s++) {
+        offsetsByString.push(sourceOpenStringOffset(sourceStringCount, tuning, capo, s));
+        naturalTargetByString.push(s + k);
+    }
+    return { k, offsetsByString, naturalTargetByString };
+}
+
 // 1. Drop-D worked example, full chart. tuning = [-2,0,0,0], capo = 0.
 {
-    const tuning = [-2, 0, 0, 0], capo = 0, sc = 4;
-    // Untouched strings (A, D, G) shift string index +1, fret unchanged.
+    const ctx = songContext(4, [-2, 0, 0, 0], 0);
+    assert.strictEqual(ctx.k, 1, `Drop-D arrangement shift: expected k=1, got ${ctx.k}`); passed++;
     for (let f = 0; f <= 20; f++) {
-        const offA = sourceOpenStringOffset(sc, tuning, capo, 1);
-        check(`Drop-D A string f=${f}`, remapNote(offA, f), { s: 2, f });
-        const offD = sourceOpenStringOffset(sc, tuning, capo, 2);
-        check(`Drop-D D string f=${f}`, remapNote(offD, f), { s: 3, f });
-        const offG = sourceOpenStringOffset(sc, tuning, capo, 3);
-        check(`Drop-D G string f=${f}`, remapNote(offG, f), { s: 4, f });
+        check(`Drop-D A string f=${f}`, remapNote(ctx.offsetsByString[1], ctx.naturalTargetByString[1], f), { s: 2, f });
+        check(`Drop-D D string f=${f}`, remapNote(ctx.offsetsByString[2], ctx.naturalTargetByString[2], f), { s: 3, f });
+        check(`Drop-D G string f=${f}`, remapNote(ctx.offsetsByString[3], ctx.naturalTargetByString[3], f), { s: 4, f });
     }
-    // Dropped string: crossover at fret 2.
-    const off0 = sourceOpenStringOffset(sc, tuning, capo, 0);
-    check('Drop-D dropped string f=0 (D open)', remapNote(off0, 0), { s: 0, f: 3 });
-    check('Drop-D dropped string f=1 (Eb, original example)', remapNote(off0, 1), { s: 0, f: 4 });
-    check('Drop-D dropped string f=2 (E, crossover)', remapNote(off0, 2), { s: 1, f: 0 });
+    const off0 = ctx.offsetsByString[0], nat0 = ctx.naturalTargetByString[0];
+    check('Drop-D dropped string f=0 (D open)', remapNote(off0, nat0, 0), { s: 0, f: 3 });
+    check('Drop-D dropped string f=1 (Eb, original example)', remapNote(off0, nat0, 1), { s: 0, f: 4 });
+    check('Drop-D dropped string f=2 (E, crossover)', remapNote(off0, nat0, 2), { s: 1, f: 0 });
     for (let f = 2; f <= 20; f++) {
-        check(`Drop-D dropped string f=${f}`, remapNote(off0, f), { s: 1, f: f - 2 });
+        check(`Drop-D dropped string f=${f}`, remapNote(off0, nat0, f), { s: 1, f: f - 2 });
+    }
+}
+
+// 1b. Real Drop C# (feedback, verified against the user's actual chart —
+// open strings low-to-high are C#, G#, C#, F#, i.e. tuning = [-3,-1,-1,-1]:
+// the WHOLE tuning is a half-step down from standard, PLUS the lowest
+// string dropped an EXTRA whole step — not just the lowest string modified
+// in isolation, unlike Drop D. Every string's own natural target (k=+1,
+// same shift as EADG, since 3 of 4 strings differ from standard by a
+// uniform amount) is off by a nonzero adjustment (+4 for strings 1-3, +2
+// for string 0), so EVERY string ends up "borrowing" fret space from the
+// next-higher target for its very lowest note(s), then landing on its own
+// natural target for the rest of its range:
+//   string 0 (C#) -> natural E: frets 0,1,2 (C#,D,Eb) can't reach E's
+//     non-negative range, cascade down to B (frets 2,3,4); fret 3+ (E and
+//     up) stays on the natural E target.
+//   string 1 (G#) -> natural A: fret 0 (G#) cascades down to E (fret 4);
+//     fret 1+ (A and up) stays on the natural A target.
+//   string 2 (C#) -> natural D: fret 0 (C#) cascades down to A (fret 4);
+//     fret 1+ (D and up) stays on the natural D target.
+//   string 3 (F#) -> natural G: fret 0 (F#) cascades down to D (fret 4);
+//     fret 1+ (G and up) stays on the natural G target.
+// This is the SAME general algorithm as Drop D, just with every string
+// (not only the lowest) needing its own one-fret cascade at the bottom of
+// its range — nothing here is a special case for this specific tuning.
+{
+    const ctx = songContext(4, [-3, -1, -1, -1], 0);
+    assert.strictEqual(ctx.k, 1, `Drop-C# arrangement shift: expected k=1, got ${ctx.k}`); passed++;
+
+    const [off0, off1, off2, off3] = ctx.offsetsByString;
+    const [nat0, nat1, nat2, nat3] = ctx.naturalTargetByString;
+
+    check('Drop-C# string0 f=0 (C#) cascades to B', remapNote(off0, nat0, 0), { s: 0, f: 2 });
+    check('Drop-C# string0 f=1 (D) cascades to B', remapNote(off0, nat0, 1), { s: 0, f: 3 });
+    check('Drop-C# string0 f=2 (Eb) cascades to B', remapNote(off0, nat0, 2), { s: 0, f: 4 });
+    check('Drop-C# string0 f=3 (E, crossover onto natural E target)', remapNote(off0, nat0, 3), { s: 1, f: 0 });
+    for (let f = 3; f <= 20; f++) {
+        check(`Drop-C# string0 f=${f} stays on its natural (E) target`, remapNote(off0, nat0, f), { s: 1, f: f - 3 });
+    }
+
+    check('Drop-C# string1 f=0 (G#) cascades to E', remapNote(off1, nat1, 0), { s: 1, f: 4 });
+    check('Drop-C# string1 f=1 (A, crossover onto natural A target)', remapNote(off1, nat1, 1), { s: 2, f: 0 });
+    for (let f = 1; f <= 20; f++) {
+        check(`Drop-C# string1 f=${f} stays on its natural (A) target`, remapNote(off1, nat1, f), { s: 2, f: f - 1 });
+    }
+
+    check('Drop-C# string2 f=0 (C#) cascades to A', remapNote(off2, nat2, 0), { s: 2, f: 4 });
+    check('Drop-C# string2 f=1 (D, crossover onto natural D target)', remapNote(off2, nat2, 1), { s: 3, f: 0 });
+    for (let f = 1; f <= 20; f++) {
+        check(`Drop-C# string2 f=${f} stays on its natural (D) target`, remapNote(off2, nat2, f), { s: 3, f: f - 1 });
+    }
+
+    check('Drop-C# string3 f=0 (F#) cascades to D', remapNote(off3, nat3, 0), { s: 3, f: 4 });
+    check('Drop-C# string3 f=1 (G, crossover onto natural G target)', remapNote(off3, nat3, 1), { s: 4, f: 0 });
+    for (let f = 1; f <= 20; f++) {
+        check(`Drop-C# string3 f=${f} stays on its natural (G) target`, remapNote(off3, nat3, f), { s: 4, f: f - 1 });
     }
 }
 
 // 2. EADG identity: every note shifts string index +1, fret unchanged.
 {
-    const tuning = [0, 0, 0, 0], capo = 0, sc = 4;
+    const ctx = songContext(4, [0, 0, 0, 0], 0);
+    assert.strictEqual(ctx.k, 1, `EADG arrangement shift: expected k=1, got ${ctx.k}`); passed++;
     for (let s = 0; s < 4; s++) {
-        const off = sourceOpenStringOffset(sc, tuning, capo, s);
         for (let f = 0; f <= 20; f++) {
-            check(`EADG identity s=${s} f=${f}`, remapNote(off, f), { s: s + 1, f });
+            check(`EADG identity s=${s} f=${f}`, remapNote(ctx.offsetsByString[s], ctx.naturalTargetByString[s], f), { s: s + 1, f });
         }
     }
 }
 
 // 3. BEAD identity: completely unchanged (BEAD = EADG shifted down a fourth).
 {
-    const tuning = [-5, -5, -5, -5], capo = 0, sc = 4;
+    const ctx = songContext(4, [-5, -5, -5, -5], 0);
+    assert.strictEqual(ctx.k, 0, `BEAD arrangement shift: expected k=0, got ${ctx.k}`); passed++;
     for (let s = 0; s < 4; s++) {
-        const off = sourceOpenStringOffset(sc, tuning, capo, s);
         for (let f = 0; f <= 20; f++) {
-            check(`BEAD identity s=${s} f=${f}`, remapNote(off, f), { s, f });
+            check(`BEAD identity s=${s} f=${f}`, remapNote(ctx.offsetsByString[s], ctx.naturalTargetByString[s], f), { s, f });
         }
     }
 }
 
 // 4. Already-BEADG identity.
 {
-    const tuning = [0, 0, 0, 0, 0], capo = 0, sc = 5;
+    const ctx = songContext(5, [0, 0, 0, 0, 0], 0);
+    assert.strictEqual(ctx.k, 0, `Already-BEADG arrangement shift: expected k=0, got ${ctx.k}`); passed++;
     for (let s = 0; s < 5; s++) {
-        const off = sourceOpenStringOffset(sc, tuning, capo, s);
         for (let f = 0; f <= 20; f++) {
-            check(`Already-BEADG identity s=${s} f=${f}`, remapNote(off, f), { s, f });
+            check(`Already-BEADG identity s=${s} f=${f}`, remapNote(ctx.offsetsByString[s], ctx.naturalTargetByString[s], f), { s, f });
         }
     }
 }
 
 // 5. Out-of-range drop.
 {
-    // One half-step below open B (offset 22) on a hypothetical single-string
-    // source: no target string can produce a fret >= 0.
-    check('below open B drops', remapNote(22, 0), null);
-    // One half-step above fret 20 on the G string (offset 43): fret 21 on
-    // string 4 is the only "candidate" and it's out of range.
-    check('above fret 20 on G drops', remapNote(43, 21), null);
+    check('below open B drops', remapNote(22, 0, 0), null);
+    check('above fret 20 on G drops', remapNote(43, 4, 21), null);
 }
 
 // Slide notes.
 {
     // sourceOpenOffset = 28 exactly matches the target E string (adjustment
-    // 0 when anchored there) — chosen so the anchor fret passes through
-    // unchanged and only the overflowing endpoint needs clamping.
-    // bestTargetCandidate(28, 18): adjustments 28-[23,28,33,38,43] =
-    // [5,0,-5,-10,-15]; targetFret = 18+adj = [23,18,13,8,3]; j0(23) is
-    // invalid (>20), so among valid candidates the smallest |adjustment| is
-    // j1 (E string, adjustment 0) -> anchor = { s: 1, adjustment: 0 }.
-    const off = 28;
-
-    // Low-to-high: starts at (low) fret 18, slides up to fret 25 — past the
-    // neck. Anchor is chosen from the low end (18, unaffected by clamping);
-    // the far end (25) must clamp down to 20 rather than being dropped.
-    const lowToHigh = remapSlide(off, 18, 25);
+    // 0 when anchored there) on a source string whose natural target is
+    // already E (naturalTargetString = 1).
+    const off = 28, natural = 1;
+    const lowToHigh = remapSlide(off, natural, 18, 25);
     check('low-to-high slide anchors on lower fret, clamps far end', lowToHigh, { s: 1, f: 18, slideTo: 20 });
-
-    // High-to-low: starts at (high) fret 25, slides down to fret 18 — the
-    // destination. Anchoring on the lower (destination) fret picks the same
-    // target string as above; the (higher) start fret clamps to 20.
-    const highToLow = remapSlide(off, 25, 18);
+    const highToLow = remapSlide(off, natural, 25, 18);
     check('high-to-low slide anchors on the (lower) destination fret', highToLow, { s: 1, f: 20, slideTo: 18 });
 }
 
-// Chord collision resolution (Phase 3). Two source strings sharing the same
-// open-string offset (33) both independently prefer target string 2:
+// Chord collision resolution (Phase 3), redone against the new API. Two
+// source strings sharing the same open-string offset (33) and the same
+// natural target (2) both resolve to target string 2:
 //   noteA {s:0,f:5} -> target {s:2,f:5}, rank 33+5=38
 //   noteB {s:1,f:2} -> target {s:2,f:2}, rank 33+2=35 (lower, survives)
-// A third, non-colliding note on a different source string is untouched.
+// A third, non-colliding note on a different source string/natural target
+// is untouched.
 {
     const offsetsByString = [33, 33, 38];
+    const naturalTargetByString = [2, 2, 3];
     const noteA = { s: 0, f: 5 };
     const noteB = { s: 1, f: 2 };
     const noteC = { s: 2, f: 0 };
-    const survivors = resolveChordCollisions(offsetsByString, [noteA, noteB, noteC]);
+    const survivors = resolveChordCollisions(offsetsByString, naturalTargetByString, [noteA, noteB, noteC]);
     const bySourceString = new Map(survivors.map(x => [x.note.s, x]));
 
     assert.strictEqual(survivors.length, 2, `expected 2 survivors, got ${survivors.length}`);
