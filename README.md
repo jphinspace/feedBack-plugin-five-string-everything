@@ -21,7 +21,7 @@ every patch point against `highway_3d`, and why each one exists.
 ## Install
 
 **Option A — feedback-desktop plugin manager:** add this repo's URL
-(`https://github.com/<you>/feedBack-plugin-five-string-everything`) in the
+(`https://github.com/<you>/feedBack-plugin-five-string-everything.git`) in the
 plugin manager. It installs under the repo name verbatim.
 
 **Option B — manual copy:** clone or copy this repo's contents into your
