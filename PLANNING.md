@@ -514,7 +514,41 @@ patch points (identified from the earlier research pass over
      must compare against the *pre-remap* source palette reference instead,
      since `activePalette` is now always a freshly-derived array that's
      never `===` anything it was built from.
-5. Everything else in the copied file — themes, video backgrounds, camera,
+5. **Anchors** (feedback found this in manual testing — "highlighted lanes,
+   usually 4 frets... indicate hand position... inaccurate now with this
+   plugin enabled"): RS2014 `<anchor>` markers (`lib/song.py`'s `Anchor`
+   dataclass — `{time, fret, width}`, no string field) drive the fretboard's
+   hand-position highlight band, consumed in exactly one place
+   (`const anchors = bundle.anchors;`) and fanned out from there into
+   `getChartAnchorAt`/`laneBoundsFromAnchor`/`anchorPlayedFretInclusiveSpan`/
+   `fretColumnMarkersForAnchor`/etc. — the same "one substitution point"
+   shape as the note/chord shim, so reassigning `bundle.anchors` once fixes
+   every downstream reader without touching ~20 call sites individually. The
+   only real design question is *which* adjustment to apply to a bare fret
+   number that has no string of its own — different strings can carry
+   different adjustments (Drop C# gives all four a different one), so
+   there's no single "the" shift for the arrangement. Resolved by
+   `FSE.remapAnchors`: `getChartAnchorAt` treats an anchor's fret/width as
+   governing the passage of notes *from its own time onward until the next
+   anchor* (i.e. it's authored to describe hand position for whatever notes
+   come next), so each anchor borrows the adjustment of the first
+   already-remapped note at or after its own time (falling back to the
+   nearest note before it, or passing the anchor through unchanged if the
+   chart has no surviving notes at all). One shared forward-scanning pointer
+   over both time-sorted arrays, computed once per song alongside notes/
+   chords, not per frame.
+   - Checked whether anything else in the file reads fret data independent
+     of `bundle.notes`/`.chords`/`.anchors` and needs the same treatment:
+     `n.sd` (the scale-degree teaching-mark label, `screen.js` around
+     `_drawTeachMark`) is pitch-based, not tuning-position-based — it's
+     computed server-side from the note's actual sounding pitch
+     (`lib/song.py`'s `note_pitch_midi`), which our remap always preserves
+     exactly, so it stays correct unmodified. `chordTemplates[chord.id]`
+     (finger-diagram fret arrays, used for chord-ghost/hand-shape rendering)
+     remains the one known, already-documented exception (Phase 3) — fixing
+     it would mean synthesizing new templates matching the remapped chord
+     notes, out of scope for MVP given bass charts are mostly monophonic.
+6. Everything else in the copied file — themes, video backgrounds, camera,
    lighting, particle effects, splitscreen support, hand-shape ghosting,
    lyrics, minimap, event listeners (`highway:visibility`,
    `highway:canvas-replaced`, `notedetect:hit`/`notedetect:skin`) — stays
@@ -522,7 +556,7 @@ patch points (identified from the earlier research pass over
 
 **Verify:** `diff` our patched `screen.js` against the untouched
 `highway_3d/screen.js` copy from Phase 1 and confirm every hunk maps to one
-of the four patch points above (plus the Phase 1 identity/route renames) —
+of the five patch points above (plus the Phase 1 identity/route renames) —
 nothing else should differ.
 
 ---
