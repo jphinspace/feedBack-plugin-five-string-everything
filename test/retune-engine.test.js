@@ -316,14 +316,19 @@ function songContext(sourceStringCount, tuning, capo) {
 // Anchor remapping (feedback: the "hand position" highlight band tracked
 // the chart's original fret numbers, not the remapped ones). Mirrors the
 // FSE.remapAnchors added to screen.js.
+// Open-string notes are excluded from the donor pool since their adjustment
+// comes from a different fallback target string than surrounding fretted
+// notes on the same source string.
 function remapAnchors(anchors, remappedNotes) {
     if (!Array.isArray(anchors) || anchors.length === 0) return anchors || [];
     if (!Array.isArray(remappedNotes) || remappedNotes.length === 0) return anchors.slice();
+    const fretted = remappedNotes.filter(n => n._origNote.f > 0);
+    const donors = fretted.length ? fretted : remappedNotes;
     const out = [];
     let ptr = 0;
     for (const a of anchors) {
-        while (ptr < remappedNotes.length - 1 && remappedNotes[ptr].t < a.time) ptr++;
-        const note = remappedNotes[ptr];
+        while (ptr < donors.length - 1 && donors[ptr].t < a.time) ptr++;
+        const note = donors[ptr];
         const adjustment = note.f - note._origNote.f;
         const fret = Math.max(0, Math.min(TARGET_MAX_FRET, a.fret + adjustment));
         out.push({ time: a.time, fret, width: a.width });
@@ -360,6 +365,20 @@ function remapAnchors(anchors, remappedNotes) {
     // No notes survived at all — pass through unchanged rather than throw.
     const passthrough = remapAnchors([{ time: 0, fret: 5, width: 4 }], []);
     check('anchor passes through unchanged with no surviving notes', passthrough[0], { time: 0, fret: 5, width: 4 });
+
+    // Open-string donor is skipped in favor of the next fretted note.
+    const openDonorNotes = [
+        { t: 0, f: 3, _origNote: { t: 0, f: 4 } },   // fretted, adjustment -1
+        { t: 1, f: 4, _origNote: { t: 1, f: 0 } },   // open string, adjustment +4 (fallback string)
+        { t: 2, f: 6, _origNote: { t: 2, f: 7 } },   // fretted, adjustment -1
+    ];
+    const openDonorAnchors = [
+        { time: 0, fret: 3, width: 4 },   // before the open note — should use the -1 fretted donor
+        { time: 1, fret: 8, width: 4 },   // aligned with the open note — should skip it for the next fretted donor
+    ];
+    const remappedOpenDonor = remapAnchors(openDonorAnchors, openDonorNotes);
+    check('anchor before open-string note uses fretted-note adjustment', remappedOpenDonor[0], { time: 0, fret: 2, width: 4 });
+    check('anchor aligned with open-string note skips it for the next fretted donor', remappedOpenDonor[1], { time: 1, fret: 7, width: 4 });
 }
 
 // Collision resolution for simultaneous notes that AREN'T wrapped in a
