@@ -5,355 +5,17 @@
 // feedBackViz setRenderer contract (feedBack#36) so it works in the
 // main player and per-panel in splitscreen without any architectural
 // changes.
+//
+// Five-String Everything: this file is a fork of highway_3d/screen.js,
+// patched at a small set of PATCH POINTs to draw every note remapped onto a
+// fixed 5-string BEADG target instead of the chart's own tuning. All of that
+// new logic lives in ./src/fse-retune.js (imported as the `FSE` namespace
+// below) rather than inline here, so this file stays as close as possible
+// to upstream highway_3d/screen.js and periodic syncs stay a mechanical diff.
+import { FSE } from './src/fse-retune.js';
 
 (function () {
     'use strict';
-
-    /* ======================================================================
-     *  Five-String Everything — string/fret offset transformation engine
-     *  (PLANNING.md Phase 2/3). Pure functions, no dependency on the rest of
-     *  this file. This is the ONLY new logic in this fork beyond the three
-     *  patch points documented in PLANNING.md Phase 4 — everything else
-     *  below this block is highway_3d's rendering code, unmodified.
-     *
-     *  This is string/fret offset arithmetic, not a pitch/frequency
-     *  calculation: one fret = one half-step, and adjacent BEADG target
-     *  strings are a perfect fourth apart = 5 half-steps. The tables below
-     *  are fixed reference points for that arithmetic (same numbers as
-     *  lib/song.py's _TUNING_BASE_MIDI), not an acoustic/Hz computation.
-     * ====================================================================== */
-    const FSE = (function () {
-        // Reference half-step position of each standard string's open note,
-        // index 0 = lowest string, per source string count. MVP treats every
-        // source as bass, so the guitar-borrows-6-string-base branch in
-        // lib/song.py's base_open_string_midis is not needed here.
-        const STANDARD_OPEN_STRING_HALFSTEPS = {
-            4: [28, 33, 38, 43],
-            5: [23, 28, 33, 38, 43],
-            6: [40, 45, 50, 55, 59, 64],
-            7: [35, 40, 45, 50, 55, 59, 64],
-            8: [30, 35, 40, 45, 50, 55, 59, 64],
-        };
-
-        // Fixed target: 5-string bass, standard BEADG, no capo, no
-        // per-string offset. Index 0 = lowest (B), index 4 = highest (G).
-        const TARGET_OPEN_STRING_HALFSTEPS = [23, 28, 33, 38, 43]; // B0 E1 A1 D2 G2
-        const TARGET_STRING_COUNT = TARGET_OPEN_STRING_HALFSTEPS.length;
-        const TARGET_MAX_FRET = 20;
-
-        function standardOpenStringHalfsteps(stringCount) {
-            return STANDARD_OPEN_STRING_HALFSTEPS[stringCount] || STANDARD_OPEN_STRING_HALFSTEPS[6];
-        }
-
-        // Half-step offset of source string `s`'s open note, given the
-        // chart's own tuning/capo. Constant for the whole song per string —
-        // callers should compute this once per distinct source string index,
-        // not per note.
-        function sourceOpenStringOffset(sourceStringCount, tuningOffsets, capo, s) {
-            if (!tuningOffsets || !(s >= 0 && s < tuningOffsets.length)) return null;
-            const base = standardOpenStringHalfsteps(sourceStringCount);
-            const root = s < base.length ? base[s] : base[base.length - 1];
-            return root + (tuningOffsets[s] | 0) + (capo | 0);
-        }
-
-        // Every source string's open-note offset, indexed by string — the
-        // "compute once per distinct source string index" of
-        // sourceOpenStringOffset applied to the whole string family in one
-        // pass. Compute once per song; both computeArrangementShift (which
-        // otherwise re-derives every string's offset once per candidate k,
-        // ~10x redundant) and the per-string natural-target table in
-        // _fseApplyRetune read from this same array instead of each calling
-        // sourceOpenStringOffset independently.
-        function computeOffsetsByString(sourceStringCount, tuningOffsets, capo) {
-            const offsets = [];
-            for (let s = 0; s < sourceStringCount; s++) {
-                offsets.push(sourceOpenStringOffset(sourceStringCount, tuningOffsets, capo, s));
-            }
-            return offsets;
-        }
-
-        // Per-arrangement "natural" string shift: the single k (target
-        // string = source string + k) that best aligns the WHOLE source
-        // string family with the target, preferring the k with the most
-        // exact (zero-adjustment) string matches, tie-broken by smallest
-        // total |adjustment|, tie-broken by smallest |k|. This is what
-        // makes EADG (k=+1, sits on target's top 4 strings) and BEAD (k=0,
-        // sits on target's bottom 4 strings) resolve differently even
-        // though both are "all-zero-offset" 4-string tunings — the
-        // difference is which absolute pitches they actually sit at, not a
-        // per-tuning special case. Compute once per song, not per note.
-        // `offsetsByString` is optional (computed on demand if omitted) —
-        // pass computeOffsetsByString's result when the caller already has
-        // it, to avoid deriving every string's offset twice.
-        function computeArrangementShift(sourceStringCount, tuningOffsets, capo, offsetsByString) {
-            const offsets = offsetsByString || computeOffsetsByString(sourceStringCount, tuningOffsets, capo);
-            let bestK = 0, bestExact = -1, bestTotalAbs = Infinity;
-            for (let k = 1 - sourceStringCount; k <= TARGET_STRING_COUNT - 1; k++) {
-                let exact = 0, totalAbs = 0, counted = 0;
-                for (let s = 0; s < sourceStringCount; s++) {
-                    const j = s + k;
-                    if (j < 0 || j >= TARGET_STRING_COUNT) continue;
-                    const off = offsets[s];
-                    if (off === null) continue;
-                    const adjustment = off - TARGET_OPEN_STRING_HALFSTEPS[j];
-                    counted++;
-                    totalAbs += Math.abs(adjustment);
-                    if (adjustment === 0) exact++;
-                }
-                if (counted === 0) continue;
-                if (exact > bestExact
-                    || (exact === bestExact && totalAbs < bestTotalAbs)
-                    || (exact === bestExact && totalAbs === bestTotalAbs && Math.abs(k) < Math.abs(bestK))) {
-                    bestExact = exact;
-                    bestTotalAbs = totalAbs;
-                    bestK = k;
-                }
-            }
-            return bestK;
-        }
-
-        // Resolves one (sourceOpenOffset, fret) pair against the target,
-        // starting from the arrangement's natural target string for this
-        // source string and stepping in whichever direction the
-        // out-of-range fret demands (fret < 0 -> lower string, since a
-        // lower target base needs a larger fret for the same pitch; fret >
-        // 20 -> higher string). Fret strictly moves away from the violated
-        // bound as the string index steps in that direction (target
-        // open-string half-steps are strictly increasing), so this always
-        // converges or exhausts the target's string range. Returns
-        // { s, f, adjustment } or null if unplayable on every reachable
-        // string. This — NOT a global "smallest adjustment across all 5
-        // strings" search — is what keeps a big single-string drop (e.g.
-        // Drop C#, -3 half-steps) on its natural string for every fret that
-        // string can actually reach, only falling back to the extra B
-        // string for the frets that genuinely go below it. A global search
-        // by adjustment magnitude flips to preferring B as soon as the drop
-        // exceeds half the 5-half-step string spacing, which is exactly the
-        // bug this replaced (Drop D's -2 half-step drop happened to stay
-        // under that threshold; Drop C#'s -3 did not).
-        function resolveTargetForFret(sourceOpenOffset, naturalTargetString, fret) {
-            if (sourceOpenOffset === null || sourceOpenOffset === undefined) return null;
-            let j = Math.max(0, Math.min(TARGET_STRING_COUNT - 1, naturalTargetString));
-            while (j >= 0 && j < TARGET_STRING_COUNT) {
-                const adjustment = sourceOpenOffset - TARGET_OPEN_STRING_HALFSTEPS[j];
-                const targetFret = fret + adjustment;
-                if (targetFret < 0) { j -= 1; continue; }
-                if (targetFret > TARGET_MAX_FRET) { j += 1; continue; }
-                return { s: j, f: targetFret, adjustment };
-            }
-            return null;
-        }
-
-        // Ordinary (non-sliding) note: { s, f } on the target, or null if
-        // unplayable on every reachable target string (dropped).
-        function remapNote(sourceOpenOffset, naturalTargetString, fret) {
-            const best = resolveTargetForFret(sourceOpenOffset, naturalTargetString, fret);
-            return best ? { s: best.s, f: best.f } : null;
-        }
-
-        // Sliding note (has slide_to/slide_unpitch_to — same string as the
-        // note itself). Both endpoints must land on the SAME target string,
-        // which independent per-fret remapping doesn't guarantee. Anchor the
-        // target-string choice on whichever endpoint is lower (most likely
-        // to land in range); if that endpoint has no valid target string at
-        // all, retry anchored on the higher endpoint; if neither does,
-        // there's truly no playable position and the slide is dropped.
-        // Unlike an ordinary out-of-range note, an overflowing slide is
-        // clamped to fret 20 rather than dropped (PLANNING.md Phase 2,
-        // "Slide notes").
-        function remapSlide(sourceOpenOffset, naturalTargetString, fret, slideToFret) {
-            if (sourceOpenOffset === null || sourceOpenOffset === undefined) return null;
-            const lowFret = Math.min(fret, slideToFret);
-            const highFret = Math.max(fret, slideToFret);
-            let anchor = resolveTargetForFret(sourceOpenOffset, naturalTargetString, lowFret);
-            if (!anchor) anchor = resolveTargetForFret(sourceOpenOffset, naturalTargetString, highFret);
-            if (!anchor) return null;
-            const clamp = v => Math.max(0, Math.min(TARGET_MAX_FRET, v));
-            return {
-                s: anchor.s,
-                f: clamp(fret + anchor.adjustment),
-                slideTo: clamp(slideToFret + anchor.adjustment),
-            };
-        }
-
-        // Half-step rank for comparing two notes' pitch order (chord
-        // collision resolution, PLANNING.md Phase 3) — not a pitch/frequency
-        // value, just the same offset arithmetic used above, summed once so
-        // "lower" and "higher" note comparisons are a plain integer compare.
-        function noteHalfstepRank(sourceOpenOffset, fret) {
-            return sourceOpenOffset + fret;
-        }
-
-        // Single entry point used by both a standalone note and each note of
-        // a chord (PLANNING.md Phase 3/4): dispatches to remapSlide when the
-        // note carries a slide (sl/slu default to -1 = "no slide" per
-        // lib/song.py), otherwise remapNote. Returns { s, f } plus, only
-        // when present on the input, a remapped `sl` or `slu` — never both
-        // set to -1 placeholders, so a caller spreading this over the
-        // original note's fields only overwrites what actually changed.
-        function remapNoteEntry(sourceOpenOffset, naturalTargetString, note) {
-            const hasSl = Number.isInteger(note.sl) && note.sl >= 0;
-            const hasSlu = !hasSl && Number.isInteger(note.slu) && note.slu >= 0;
-            if (hasSl || hasSlu) {
-                const dest = hasSl ? note.sl : note.slu;
-                const r = remapSlide(sourceOpenOffset, naturalTargetString, note.f, dest);
-                if (!r) return null;
-                const out = { s: r.s, f: r.f };
-                if (hasSl) out.sl = r.slideTo; else out.slu = r.slideTo;
-                return out;
-            }
-            return remapNote(sourceOpenOffset, naturalTargetString, note.f);
-        }
-
-        // Resolves chord note collisions (PLANNING.md Phase 3): remaps every
-        // note independently via remapNoteEntry, groups survivors by target
-        // string, and for any target string with more than one note keeps
-        // only the lower-pitched original (smallest noteHalfstepRank) —
-        // per colliding string, not the whole chord. `notes` is an array of
-        // note-shaped objects (must have `s`/`f`, may have `sl`/`slu`).
-        // `offsetsByString`/`naturalTargetByString` are precomputed once per
-        // song (index = source string), not per chord. Returns an array of
-        // { entry, note } for every surviving note, where `entry` is
-        // remapNoteEntry's result and `note` is the original input object
-        // (for field passthrough and for keying bundle.getNoteState).
-        function resolveChordCollisions(offsetsByString, naturalTargetByString, notes) {
-            const candidates = [];
-            for (const note of notes) {
-                const off = offsetsByString[note.s];
-                if (off === null || off === undefined) continue;
-                const entry = remapNoteEntry(off, naturalTargetByString[note.s], note);
-                if (!entry) continue;
-                candidates.push({ entry, note, rank: noteHalfstepRank(off, note.f) });
-            }
-            const bySlot = new Map();
-            for (const c of candidates) {
-                const prev = bySlot.get(c.entry.s);
-                if (!prev || c.rank < prev.rank) bySlot.set(c.entry.s, c);
-            }
-            return Array.from(bySlot.values()).map(c => ({ entry: c.entry, note: c.note }));
-        }
-
-        // Remaps the chart's `anchors` array (RS2014 "fret hand position"
-        // markers — { time, fret, width }, no string field, per
-        // lib/song.py's Anchor dataclass) so the highway's hand-position
-        // highlight band tracks the remapped fretboard instead of the
-        // chart's original (now-inaccurate) fret numbers.
-        //
-        // An anchor has no string of its own, so there's no way to remap
-        // one independently the way a note is remapped — different
-        // strings can carry different adjustments (Drop C# gives every
-        // string a different one), so there's no single "the" adjustment
-        // for a bare fret number. The well-defined choice: `getChartAnchorAt`
-        // (screen.js) treats an anchor's fret/width as governing the
-        // passage of notes from its own time onward until the next anchor
-        // — i.e. it's authored to describe the hand position for whatever
-        // notes come next — so borrow the adjustment of the first
-        // ALREADY-REMAPPED note at or after the anchor's time (falling back
-        // to the nearest note before it if the anchor is after the last
-        // note, or leaving the anchor unchanged if the chart has no
-        // surviving notes at all).
-        //
-        // Open-string (fret 0) notes are excluded from the donor pool:
-        // resolveTargetForFret falls back to a different target string with
-        // an unrelated adjustment when the natural one would go negative,
-        // so an open string's adjustment doesn't represent nearby fretted
-        // notes' hand position. Falls back to the full note list if the
-        // chart has no fretted notes at all.
-        //
-        // `remappedNotes` must be time-sorted with each entry carrying `t`
-        // (unchanged from the original), `f` (remapped), and `_origNote.f`
-        // (original fret) to diff against — exactly the shape the note
-        // substitution shim already builds. `anchors` must be time-sorted
-        // (chart invariant). Single shared forward-scanning pointer over
-        // both time-sorted arrays — O(anchors + notes), not O(anchors *
-        // notes) — compute once per song, not per frame.
-        function remapAnchors(anchors, remappedNotes) {
-            if (!Array.isArray(anchors) || anchors.length === 0) return anchors || [];
-            if (!Array.isArray(remappedNotes) || remappedNotes.length === 0) return anchors.slice();
-            const fretted = remappedNotes.filter(n => n._origNote.f > 0);
-            const donors = fretted.length ? fretted : remappedNotes;
-            const out = [];
-            let ptr = 0;
-            for (const a of anchors) {
-                while (ptr < donors.length - 1 && donors[ptr].t < a.time) ptr++;
-                const note = donors[ptr];
-                const adjustment = note.f - note._origNote.f;
-                const fret = Math.max(0, Math.min(TARGET_MAX_FRET, a.fret + adjustment));
-                out.push({ time: a.time, fret, width: a.width });
-            }
-            return out;
-        }
-
-        // Remaps one chord template's `frets`/`fingers` (both indexed by
-        // ORIGINAL string) into arrays indexed by TARGET string, so anything
-        // that reads `chordTemplates[id]` directly — chord-ghost/finger-
-        // diagram rendering, and critically `chordNotesFromTemplate` (which
-        // synthesizes actual chord-frame note gems from hand-shape spans,
-        // screen.js) — sees the same remapped positions as the real note
-        // gems, instead of raw original-tuning fret numbers misread as
-        // target-string indices (feedback: this is what produced two note
-        // gems on the same target string at different frets even though the
-        // chart has zero real Chord objects — the "chord" was entirely
-        // synthesized from a hand-shape + this template).
-        //
-        // A template's per-string entries are exactly a chord's notes in
-        // shape (one fret per string, `-1` = unused), so this reuses
-        // resolveChordCollisions verbatim: build a { s, f } list from the
-        // non–`-1` frets, resolve collisions, and scatter survivors into
-        // fresh TARGET_STRING_COUNT-length frets/fingers arrays (still `-1`
-        // for every string the template doesn't use, or that collided and
-        // lost). Fingers relocate to their note's new index unchanged in
-        // value — finger *assignment* is a display-only best-effort; our
-        // remap can change the physical hand shape entirely (e.g. two
-        // adjacent frets on adjacent strings becoming a wide stretch across
-        // different strings), so there's no principled way to recompute
-        // "correct" fingering, only to keep the original hint from going
-        // stale-indexed.
-        function remapChordTemplate(offsetsByString, naturalTargetByString, template) {
-            if (!template || !Array.isArray(template.frets)) return template;
-            const notes = [];
-            for (let si = 0; si < template.frets.length; si++) {
-                const f = template.frets[si];
-                if (f >= 0) notes.push({ s: si, f });
-            }
-            const survivors = resolveChordCollisions(offsetsByString, naturalTargetByString, notes);
-            const frets = new Array(TARGET_STRING_COUNT).fill(-1);
-            const hasFingers = Array.isArray(template.fingers);
-            const fingers = hasFingers ? new Array(TARGET_STRING_COUNT).fill(-1) : template.fingers;
-            for (const { entry, note } of survivors) {
-                frets[entry.s] = entry.f;
-                if (hasFingers) fingers[entry.s] = template.fingers[note.s] ?? -1;
-            }
-            return Object.assign({}, template, { frets, fingers });
-        }
-
-        // Remaps every template in `chordTemplates` (array indexed by
-        // chord_id — that indexing is untouched, only each entry's own
-        // frets/fingers change). Compute once per song alongside notes/
-        // chords/anchors, not per frame.
-        function remapChordTemplates(offsetsByString, naturalTargetByString, templates) {
-            if (!Array.isArray(templates)) return templates || [];
-            return templates.map(t => remapChordTemplate(offsetsByString, naturalTargetByString, t));
-        }
-
-        return {
-            TARGET_MAX_FRET,
-            TARGET_STRING_COUNT,
-            standardOpenStringHalfsteps,
-            sourceOpenStringOffset,
-            computeOffsetsByString,
-            computeArrangementShift,
-            resolveTargetForFret,
-            remapNote,
-            remapSlide,
-            noteHalfstepRank,
-            remapNoteEntry,
-            resolveChordCollisions,
-            remapAnchors,
-            remapChordTemplate,
-            remapChordTemplates,
-        };
-    })();
 
     /* ======================================================================
      *  Constants
@@ -1088,32 +750,9 @@
         if (!/^[0-9a-fA-F]{6}$/.test(full)) return null;
         return parseInt(full, 16);
     }
-    // PATCH POINT (feedback: our added B string was using the guitar's own
-    // "B" slot color, green — wrong slot). Core's named-string-color system
-    // (static/app.js HWC_SLOTS/HWC_DEFAULT_FALLBACK, "window.feedBack.
-    // highwayColors") already has the semantically correct slot for an
-    // ADDED low extension string: "low7" ("Low B", used by 7-string
-    // guitars going below standard low E), default #cc00aa. That system's
-    // own chart-shape detection (_hwcChartShape/_hwcSlotKeysForChart in
-    // app.js) keys off `highway.getStringCount()` — the chart's TRUE
-    // string count — so it never assigns our *synthesized* 5th string a
-    // color (it doesn't know our renderer adds one). Read the user's own
-    // "Low B" customization directly from the same storage core's Highway
-    // String Colors settings panel uses, so a real per-name override still
-    // applies to our added string; fall back to HWC_DEFAULT_FALLBACK's own
-    // low7 default (#cc00aa) otherwise. Settings-load-time only, not a
-    // per-frame cost.
-    function _fseLowBColor() {
-        try {
-            const raw = localStorage.getItem('highwayStringColors');
-            if (raw) {
-                const parsed = JSON.parse(raw);
-                const n = _h3dHexToInt(parsed && parsed.low7);
-                if (n != null) return n;
-            }
-        } catch (_) { /* corrupt / blocked storage — fall through to default */ }
-        return 0xcc00aa; // HWC_DEFAULT_FALLBACK.low7 ("Low B", 7-string default)
-    }
+    // PATCH POINT (five-string retune): the added B string's color comes
+    // from FSE.lowBColor() (src/fse-retune.js), not the raw string-index
+    // palette — see that module for the rationale.
     // Numeric (0xRRGGBB) darken/lighten — used to derive the gem-gradient
     // top-highlight / bottom-shade stops from a custom per-string base color
     // so the note bodies follow the custom palette (mirrors the 2D highway's
@@ -1176,70 +815,22 @@
     // for older feedBack cores that don't emit the field. Clamp to the
     // palette size so a malformed bundle or a 12-string chart doesn't
     // index past the per-string material arrays.
-    // PATCH POINT (PLANNING.md Phase 4, #2): this renderer always draws the
-    // fixed 5-string BEADG target — never the chart's own (possibly
-    // different) string count. Unlike highway_3d's original, which reads
-    // bundle.stringCount, we own this fork outright so there's no
-    // closure-variable obstacle to hardcoding it (see PLANNING.md Context
-    // for why the shared, installed highway_3d plugin can't do this).
+    // PATCH POINT (five-string retune): always the fixed 5-string BEADG
+    // target, never the chart's own string count.
     function resolveStringCount(bundle) {
         return FSE.TARGET_STRING_COUNT;
-    }
-
-    /** Chart-format tuning entries are semitone offsets from instrument standard. */
-    const _NOTE_NAMES_SHARP = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
-
-    // Open-string MIDI (thick → thin), matched to RS string index 0 low.
-    const _BASE_OPEN_MIDI_BASS4 = Object.freeze([28, 33, 38, 43]);
-    const _BASE_OPEN_MIDI_BASS5 = Object.freeze([23, 28, 33, 38, 43]);
-    const _BASE_OPEN_MIDI_GUITAR6 = Object.freeze([40, 45, 50, 55, 59, 64]);
-    const _BASE_OPEN_MIDI_GUITAR7 = Object.freeze([35, 40, 45, 50, 55, 59, 64]);
-    // F#/B/E standard extension — low string is a fifth below RS 7‑string low B.
-    const _BASE_OPEN_MIDI_GUITAR8 = Object.freeze([28, 35, 40, 45, 50, 55, 59, 64]);
-
-    function _baseOpenStringMidis(sc, arrangement) {
-        const isBass = /bass/i.test(arrangement || '');
-        if (sc === 4 && isBass) return _BASE_OPEN_MIDI_BASS4.slice();
-        if (sc === 4) return _BASE_OPEN_MIDI_GUITAR6.slice(0, 4);
-        if (sc === 5 && isBass) return _BASE_OPEN_MIDI_BASS5.slice();
-        if (sc === 5) return _BASE_OPEN_MIDI_GUITAR6.slice(0, 5);
-        if (sc === 7) return _BASE_OPEN_MIDI_GUITAR7.slice();
-        if (sc === 8) return _BASE_OPEN_MIDI_GUITAR8.slice();
-        if (Number.isFinite(sc) && sc > 8) {
-            const out = Array.from(_BASE_OPEN_MIDI_GUITAR8);
-            let last = out[out.length - 1];
-            while (out.length < sc) {
-                last += 5;
-                out.push(last);
-            }
-            return out.slice(0, sc);
-        }
-        const g6 = _BASE_OPEN_MIDI_GUITAR6.slice();
-        if (Number.isFinite(sc) && sc < 6 && sc >= 1) return g6.slice(0, sc);
-        return g6;
-    }
-
-    function _midiToPitchLabel(midi) {
-        const m = Math.round(midi);
-        const octave = Math.floor(m / 12) - 1;
-        const n = _NOTE_NAMES_SHARP[(m % 12 + 12) % 12];
-        return n + octave;
     }
 
     /**
      * @param {number} nEffective string count clamped like nStr / resolveStringCount
      * @param {Record<string, unknown>} songInfo WS song_info blob (subset)
      */
-    // PATCH POINT (PLANNING.md Phase 4, #3): the fretboard always represents
-    // the fixed BEADG target now, not the chart's own (original) tuning —
-    // so these labels are hardcoded rather than derived from
-    // songInfo/bundle.tuning. `_baseOpenStringMidis`/`_midiToPitchLabel`
-    // above are kept (unused by this function now) only because other
-    // callers in the untouched, forked code may still reference them.
-    const _TARGET_OPEN_STRING_LABELS = ['B', 'E', 'A', 'D', 'G'];
+    // PATCH POINT (five-string retune): fixed BEADG labels
+    // (FSE.TARGET_OPEN_STRING_LABELS) instead of labels derived from the
+    // chart's own tuning.
     function _openStringPitchLabelsForTuning(bundle, songInfo, nEffective) {
         const n = Number.isFinite(nEffective) ? Math.min(Math.max(1, Math.trunc(nEffective)), MAX_RENDER_STRINGS) : resolveStringCount(bundle);
-        return _TARGET_OPEN_STRING_LABELS.slice(0, n);
+        return FSE.TARGET_OPEN_STRING_LABELS.slice(0, n);
     }
 
     const STR_THICK = 0.25 * K;
@@ -4521,15 +4112,15 @@
         // panel live without touching module-level state.
         // PATCH POINT: index 0 (our added B string) is NOT part of
         // highway_3d's raw per-index palette at all — it gets the
-        // dedicated "Low B" color (_fseLowBColor(), see above) instead of
-        // whatever coincidentally sits at some reused palette slot.
-        // Indices 1-4 (E/A/D/G) pass through PALETTES.default[0..3]
+        // dedicated "Low B" color (FSE.lowBColor(), src/fse-retune.js)
+        // instead of whatever coincidentally sits at some reused palette
+        // slot. Indices 1-4 (E/A/D/G) pass through PALETTES.default[0..3]
         // directly/unchanged — that's already the correct lowE/A/D/G
         // order (matches core's own 4-string-bass HWC slot order), so no
         // reordering is needed for them, only B is special-cased. Set
         // before any settings load so the very first frame is already
         // correct.
-        let activePalette = [_fseLowBColor(), PALETTES.default[0], PALETTES.default[1], PALETTES.default[2], PALETTES.default[3]];
+        let activePalette = [FSE.lowBColor(), PALETTES.default[0], PALETTES.default[1], PALETTES.default[2], PALETTES.default[3]];
         // Source palette (pre-remap, E/A/D/G only) activePalette was last
         // derived from — lets _bgLoadSettings skip re-deriving/re-tinting
         // when the user's palette selection hasn't actually changed
@@ -8433,11 +8024,11 @@
             // too to force a retint. _bgPaletteSig caches the applied colors.
             const newSig = newPalette.join(',');
             // PATCH POINT: B (index 0) is looked up independently of
-            // newPalette/newSig (see _fseLowBColor) — core's own palette
-            // change-detection here only tracks E/A/D/G's source, so check
-            // B separately or a same-frame "Low B" edit would go stale
-            // until something else also changed.
-            const newLowB = _fseLowBColor();
+            // newPalette/newSig (see FSE.lowBColor(), src/fse-retune.js) —
+            // core's own palette change-detection here only tracks
+            // E/A/D/G's source, so check B separately or a same-frame
+            // "Low B" edit would go stale until something else also changed.
+            const newLowB = FSE.lowBColor();
             if (newPalette !== _fsePaletteSrcRef || newSig !== _bgPaletteSig || newLowB !== activePalette[0]) {
                 // PATCH POINT (feedback: colors looked shifted up a string —
                 // "adding a fifth high string on top rather than low
@@ -8644,7 +8235,7 @@
                 // PATCH POINT: index 0 (B) never has a "stock" gradient —
                 // there's no dedicated Low B entry in DEFAULT_GEM_GRADIENTS
                 // (that array only covers the original 6-string palette) —
-                // so it always derives its gradient from _fseLowBColor()'s
+                // so it always derives its gradient from FSE.lowBColor()'s
                 // base, same as a genuinely custom color would. Indices 1-4
                 // (E/A/D/G) read PALETTES.default[s-1]/DEFAULT_GEM_GRADIENTS[s-1]
                 // directly (activePalette's own index 0 is B-only, so E/A/D/G
@@ -12312,11 +11903,10 @@
                                 let anyState = false;  // true if any constituent had a non-null state this scan
                                 for (const cn of chordNotes) {
                                     let cs = null;
-                                    // PATCH POINT (PLANNING.md Phase 5): pass the ORIGINAL,
-                                    // un-remapped chord note to the note-state provider —
-                                    // that's the identity the external scorer's judgments are
-                                    // keyed against, even though `cn` itself is drawn at the
-                                    // remapped position.
+                                    // PATCH POINT (five-string retune): pass the ORIGINAL,
+                                    // un-remapped chord note to the note-state provider — the
+                                    // scorer keys judgments on it, even though `cn` is drawn
+                                    // at the remapped position.
                                     try { cs = _ndGetNoteState(cn._origNote || cn, ch.t); } catch (e) { cs = null; }
                                     const st = (cs && typeof cs === 'object') ? cs.state : cs;
                                     if (st === 'hit' || st === 'active') {
@@ -13859,8 +13449,8 @@
                 if (hasSus) _susVerdictLatch.delete(Math.round(n.t * 1e4) * 10 + n.s);
                 if (!_ndHasProvider || dt < -NOTEDETECT_GEM_VERDICT_WINDOW) return;
                 let _ndProbe = null;
-                // PATCH POINT (PLANNING.md Phase 5): original note, see the
-                // identical note above _ndGetNoteState(cn._origNote...).
+                // PATCH POINT (five-string retune): pass the original,
+                // un-remapped note — the scorer keys judgments on it.
                 try { _ndProbe = _ndGetNoteState(n._origNote || n, n.t); } catch (e) { _ndProbe = null; }
                 _ndProbed = true;
                 _ndProbedState = _ndProbe;
@@ -13942,7 +13532,7 @@
                 if (_ndProbed) {
                     _raw = _ndProbedState;
                 } else {
-                    // PATCH POINT (PLANNING.md Phase 5): original note, same reason.
+                    // PATCH POINT (five-string retune): original note, same reason.
                     try { _raw = _ndGetNoteState(n._origNote || n, n.t); } catch (e) { _raw = null; }
                 }
                 if (_raw) {
@@ -15576,138 +15166,15 @@
             return { w: innerWidth, h: innerHeight - ch };
         }
 
-        // PATCH POINT (PLANNING.md Phase 4 #1 / Phase 5): remap bundle.notes
-        // /bundle.chords to the fixed BEADG target IN PLACE on the bundle
-        // object, once per song (cached — see below), so every downstream
-        // reader in this file — a local `const notes = bundle.notes` alias
-        // or a direct `bundle.notes` read — sees the remapped chart with no
-        // need to hunt down individual usage sites. Safe to mutate: `bundle`
-        // is this createHighway() instance's own per-frame object (never
-        // shared with note_detect, which reads the core closure directly via
-        // highway.getNotes(), or with other splitscreen panels' instances).
-        // Per-instance cache (declared inside createFactory(), not at module
-        // scope) so splitscreen panels showing different songs don't thrash
-        // or cross-contaminate each other's cached remap.
-        let _fseCacheNotesRef = null, _fseCacheChordsRef = null, _fseCacheAnchorsRef = null, _fseCacheTemplatesRef = null;
-        let _fseCacheTuningRef = null, _fseCacheCapo = null, _fseCacheStringCount = null;
-        let _fseRemappedNotes = [], _fseRemappedChords = [], _fseRemappedAnchors = [], _fseRemappedTemplates = [];
-        function _fseApplyRetune(bundle) {
-            const rawNotes = bundle.notes, rawChords = bundle.chords, rawAnchors = bundle.anchors;
-            const rawTemplates = bundle.chordTemplates;
-            const tuning = bundle.tuning, capo = bundle.capo | 0, sc = bundle.stringCount;
-            if (rawNotes === _fseCacheNotesRef && rawChords === _fseCacheChordsRef
-                && rawAnchors === _fseCacheAnchorsRef && rawTemplates === _fseCacheTemplatesRef
-                && tuning === _fseCacheTuningRef && capo === _fseCacheCapo && sc === _fseCacheStringCount) {
-                bundle.notes = _fseRemappedNotes;
-                bundle.chords = _fseRemappedChords;
-                bundle.anchors = _fseRemappedAnchors;
-                bundle.chordTemplates = _fseRemappedTemplates;
-                return;
-            }
-            _fseCacheNotesRef = rawNotes;
-            _fseCacheChordsRef = rawChords;
-            _fseCacheAnchorsRef = rawAnchors;
-            _fseCacheTemplatesRef = rawTemplates;
-            _fseCacheTuningRef = tuning;
-            _fseCacheCapo = capo;
-            _fseCacheStringCount = sc;
-            if (!Number.isFinite(sc) || sc < 1 || !Array.isArray(tuning)) {
-                // No usable source tuning yet (shouldn't happen once
-                // isReady/draw() is gated by core, but fail safe rather than
-                // throw) — pass the untouched chart through unremapped.
-                _fseRemappedNotes = Array.isArray(rawNotes) ? rawNotes : [];
-                _fseRemappedChords = Array.isArray(rawChords) ? rawChords : [];
-                _fseRemappedAnchors = Array.isArray(rawAnchors) ? rawAnchors : [];
-                _fseRemappedTemplates = Array.isArray(rawTemplates) ? rawTemplates : [];
-                bundle.notes = _fseRemappedNotes;
-                bundle.chords = _fseRemappedChords;
-                bundle.anchors = _fseRemappedAnchors;
-                bundle.chordTemplates = _fseRemappedTemplates;
-                return;
-            }
-            // Arrangement-wide natural string shift (PLANNING.md Phase 2):
-            // computed once per song, not per note — see FSE.computeArrangementShift
-            // for why a per-note global search was wrong (Drop C# regression).
-            // offsetsByString is derived once here and handed to
-            // computeArrangementShift so it isn't re-derived per candidate k.
-            const offsetsByString = FSE.computeOffsetsByString(sc, tuning, capo);
-            const shiftK = FSE.computeArrangementShift(sc, tuning, capo, offsetsByString);
-            const naturalTargetByString = [];
-            for (let s = 0; s < sc; s++) {
-                naturalTargetByString.push(s + shiftK);
-            }
-            // PATCH POINT (feedback: chords could still show two notes on the
-            // same target string, different frets). Root cause: a bass
-            // "double stop" is often encoded as two independent Note
-            // entries in bundle.notes sharing the same onset time, rather
-            // than wrapped in a Chord object — arr.notes and arr.chords are
-            // separate lists in lib/song.py, nothing requires simultaneous
-            // notes to be chord-wrapped. Remapping bundle.notes one note at
-            // a time (as before) never checked a note against OTHER notes
-            // at the same instant, so two such notes could independently
-            // land on the same target string. Group by exact onset time
-            // first and run every group — including ordinary
-            // singleton-note groups, which come back unchanged — through
-            // the same FSE.resolveChordCollisions used for real Chord
-            // objects below, rather than maintaining two separate
-            // collision-handling paths.
-            const remappedNotes = [];
-            if (Array.isArray(rawNotes)) {
-                const byTime = new Map();
-                for (const n of rawNotes) {
-                    let bucket = byTime.get(n.t);
-                    if (!bucket) byTime.set(n.t, bucket = []);
-                    bucket.push(n);
-                }
-                for (const bucket of byTime.values()) {
-                    const survivors = FSE.resolveChordCollisions(offsetsByString, naturalTargetByString, bucket);
-                    for (const { entry, note } of survivors) {
-                        const copy = Object.assign({}, note, entry);
-                        copy._origNote = note; // PLANNING.md Phase 5: keyed against by the note-state provider
-                        remappedNotes.push(copy);
-                    }
-                }
-                // byTime iterates in first-insertion order, which already
-                // matches rawNotes' time order (chart invariant) — but sort
-                // explicitly rather than depending on that Map-ordering
-                // detail, since every downstream consumer assumes
-                // bundle.notes is time-sorted (binary searches, etc.).
-                remappedNotes.sort((a, b) => a.t - b.t);
-            }
-            const remappedChords = [];
-            if (Array.isArray(rawChords)) {
-                for (const ch of rawChords) {
-                    const survivors = FSE.resolveChordCollisions(offsetsByString, naturalTargetByString, ch.notes || []);
-                    if (survivors.length === 0) continue; // every note collided/unplayable, drop the chord
-                    const notesCopy = survivors.map(({ entry, note }) => {
-                        const c = Object.assign({}, note, entry);
-                        c._origNote = note;
-                        return c;
-                    });
-                    remappedChords.push(Object.assign({}, ch, { notes: notesCopy }));
-                }
-            }
-            _fseRemappedNotes = remappedNotes;
-            _fseRemappedChords = remappedChords;
-            // PATCH POINT (feedback: the hand-position highlight band tracked
-            // the chart's original, now-inaccurate fret numbers). Anchors
-            // have no string of their own, so they borrow the remap
-            // adjustment of whichever already-remapped note they're
-            // authored to align with — see FSE.remapAnchors.
-            _fseRemappedAnchors = FSE.remapAnchors(rawAnchors, remappedNotes);
-            // PATCH POINT (feedback: two note gems on the same target
-            // string, different frets, inside what looked like a normal
-            // chord indicator — root cause traced to a real chart with ZERO
-            // authored Chord objects: the "chord" was entirely synthesized
-            // from a hand-shape + this chord template's raw, un-remapped
-            // frets, misread as target-string indices — see
-            // FSE.remapChordTemplates and chordNotesFromTemplate below).
-            _fseRemappedTemplates = FSE.remapChordTemplates(offsetsByString, naturalTargetByString, rawTemplates);
-            bundle.notes = _fseRemappedNotes;
-            bundle.chords = _fseRemappedChords;
-            bundle.anchors = _fseRemappedAnchors;
-            bundle.chordTemplates = _fseRemappedTemplates;
-        }
+        // PATCH POINT (five-string retune): remaps bundle.notes/.chords/
+        // .anchors/.chordTemplates to the fixed BEADG target IN PLACE, so
+        // every downstream reader in this file sees the remapped chart with
+        // no per-usage-site changes needed. Safe to mutate: `bundle` is this
+        // createHighway() instance's own object. One retuner per
+        // createFactory() instance (not module scope) so splitscreen panels
+        // don't cross-contaminate each other's cached remap — see
+        // FSE.createRetuner() (src/fse-retune.js).
+        const _fseRetuner = FSE.createRetuner();
 
         /* ── setRenderer contract ────────────────────────────────────────── */
         return {
@@ -15816,7 +15283,7 @@
             draw(bundle) {
                 if (!_isReady) return;
                 if (_ctxLost) return;   // GPU context lost (alt-tab / reset) — skip until restored
-                _fseApplyRetune(bundle); // PATCH POINT (PLANNING.md Phase 4 #1) — before anything else reads bundle.notes/chords
+                _fseRetuner.apply(bundle); // PATCH POINT (five-string retune) — before anything else reads bundle.notes/chords
                 if (!_chartPrewarmed) {
                     _chartPrewarmed = true;
                     _prewarmChart(bundle);
@@ -16234,8 +15701,8 @@
         resetAnalyserBridgeForTest() { _bgBridgeKeys.clear(); _bgAudio = null; _bgAudioCore = null; _bgAudioFailedAt = 0; },
     };
     // MVP scope: bass arrangements only (the string/fret offset engine
-    // assumes an is-bass source tuning throughout — see PLANNING.md Phase 2).
-    // Narrower than highway_3d's own \b(?:lead|rhythm|bass|combo|guitar)\b
+    // assumes an is-bass source tuning throughout). Narrower than
+    // highway_3d's own \b(?:lead|rhythm|bass|combo|guitar)\b
     // match on purpose. Word boundary keeps us from matching arrangements
     // that merely contain "bass" as a substring (e.g. "BasslineKeys").
     window.feedBackViz_five_string_everything.matchesArrangement = function (songInfo) {

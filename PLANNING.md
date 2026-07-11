@@ -858,7 +858,7 @@ originally forked from — that fork was a commit behind canonical).
    `window.h3d*`/`h3d_bg_*` identifier) before applying — if it does, that
    specific hunk needs manual reconciliation rather than a direct copy, and
    should be flagged to the user rather than silently merged.
-4. Verify: `node --check screen.js`, `node test/retune-engine.test.js`,
+4. Verify: `node --check screen.js`, `node test/retune-engine.test.mjs`,
    and confirm the newly-applied section is byte-identical to upstream's
    (extract the equivalent region from both files and `diff` them directly)
    as a sanity check that the manual reapplication was exact, not just
@@ -886,3 +886,82 @@ version of that code region after applying. **Bumped this plugin's own
 suite, and the diff-audit against `highway_3d/screen.js` (now diffing
 against the canonical upstream copy, not the possibly-stale local
 reference) confirming every hunk still traces to a documented patch point.
+
+---
+
+## Phase 9 — Extract the retune engine into its own module (2026-07-11)
+
+Every phase above grew the FSE logic (Phase 2/3's pure engine, Phase 4's
+note/chord/anchor/template substitution shim, the Low-B color helper)
+directly inline in `screen.js`, alongside `highway_3d`'s own copied
+rendering code. That kept `_fseApplyRetune`/`_fseLowBColor`/the `FSE` IIFE
+auditable as *patch points* (Phase 4's explicit goal), but it also meant
+`test/retune-engine.test.mjs` carried a hand-maintained duplicate of the
+whole pure engine ("Keep this in sync with screen.js's FSE block if that
+logic changes" — exactly the kind of drift risk CLAUDE.md's plugin
+guidelines warn about) and the file-level diff against upstream
+`highway_3d/screen.js` mixed new logic in with the mechanical Phase 7
+renames.
+
+**Change:** moved everything that is genuinely new logic (not a rename of
+copied `highway_3d` code) into its own ES module, `src/fse-retune.js`:
+- The full Phase 2/3 pure engine (previously the inline `const FSE = (function () {...})();` IIFE at the top of the file).
+- `_fseApplyRetune` → `FSE.createRetuner()`, a factory returning `{ apply(bundle) }` that owns its own per-instance cache state internally (still called once per `createFactory()` instance, so splitscreen panels still don't cross-contaminate — same guarantee as before, just encapsulated in the module instead of loose closure vars in `screen.js`).
+- `_fseLowBColor()` → `FSE.lowBColor()` (self-contained; duplicates the ~4-line hex-parsing helper rather than importing `screen.js`'s `_h3dHexToInt`, since that helper is unrelated `highway_3d` code used elsewhere and pulling it into the module would create a dependency in the wrong direction).
+- `_TARGET_OPEN_STRING_LABELS` → `FSE.TARGET_OPEN_STRING_LABELS`.
+
+`screen.js` now imports the module (`import { FSE } from './src/fse-retune.js';`, top of file, outside the IIFE — `import` must be top-level) and every existing `FSE.xxx` call site is unchanged; only the four PATCH POINTs above shrank to a handful of lines each. `resolveStringCount()` (Phase 4 #2) and the anchors/chord-template PATCH POINTs (Phase 4 #5/#6, `FSE.remapAnchors`/`FSE.remapChordTemplates`) were already thin call-throughs into `FSE` and needed no change.
+
+**Loader mechanism:** this relies on a real host capability, not a hack —
+feedBack core's plugin loader supports `plugin.json`'s `"scriptType":
+"module"` (`static/app.js`'s loader injects `<script type="module">`
+instead of a classic script when set) plus a dedicated
+`/api/plugins/<id>/src/{path}` route that serves a plugin's `src/` subtree
+(mirrors the existing `assets/` route; confirmed by reading
+`plugins/__init__.py`'s `plugin_src` handler and `static/app.js`'s
+"Module-migration (R0)" loader comment). `plugin.json` gained
+`"scriptType": "module"`; the classic `(function () { 'use strict'; ...
+})();` IIFE body of `screen.js` is otherwise unchanged (`import` works
+identically whether the rest of the file is an IIFE or top-level code).
+
+**Node/test wiring:** `src/fse-retune.js` is real ESM (`export const FSE =
+{...}`, required for the browser's native module loader to parse it — a
+UMD/dual-format wrapper would not satisfy `<script type="module">`).
+Node's default module type is CommonJS with no root `package.json`, so
+`src/package.json` and `test/package.json` (both just `{ "type": "module"
+}`) scope only those two subtrees to ESM — the standard "nested
+package.json" pattern for mixed CJS/ESM in one repo — so the repo root
+(and critically `tailwind.config.js`, which still uses `module.exports =`
+for `build-tailwind.sh`'s `npx tailwindcss` loader) is untouched.
+`test/retune-engine.test.mjs` now does `import { FSE } from
+'../src/fse-retune.js';` and destructures what it needs — no more
+duplicated engine code, so the module and its test can never drift.
+
+**What deliberately stayed in `screen.js`:** the Phase 7 settings-isolation
+renames (`window.h3dXxx` → `window.fse3dXxx`, `window.h3dBgXxx` →
+`window.fse3dBgXxx`, the `h3d_bg_`/`viz3d_*`/`h3d_full_sus`/
+`h3d_aspect_tune2` storage-key renames, ~80 call sites across the file) are
+*not* new logic — they're mechanical renames of `highway_3d`'s own copied
+background/camera/nut-headstock/notes/sections/tone-HUD/chord-diagram code,
+required only to avoid colliding with the real, separately-installed
+`highway_3d` plugin (Phase 7's isolation problem). That code reads and
+mutates dozens of Three.js scene objects, materials, and camera state that
+live in `createFactory()`'s closure — extracting it into a module would
+mean either passing that whole closure across a module boundary (no real
+separation, just indirection) or duplicating large swaths of `highway_3d`'s
+own rendering code into a second file, which would work directly against
+Phase 8's sync goal (a smaller, more mechanical diff against upstream) by
+splitting upstream's own code across two files instead of one. Those
+renames remain the only source of "our changes" still living inline in
+`screen.js`, and they're exactly the *mechanical, auditable* kind Phase 7
+already scoped and documented — not hidden new behavior.
+
+**Verify:** `node --check screen.js`, `node --check src/fse-retune.js`,
+`node test/retune-engine.test.mjs` (482 assertions, unchanged pass/fail
+behavior — same test cases, now run against the real module instead of a
+duplicate), and the diff-audit against `highway_3d/screen.js` confirming
+hunk count is unchanged (61) and every hunk still traces to a documented
+patch point or a Phase 7 rename.
+
+**Bumped this plugin's own `version` to `0.1.2`** (`plugin.json`, which
+also gained `"scriptType": "module"`) to reflect the change.

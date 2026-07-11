@@ -49,7 +49,7 @@ bash build-tailwind.sh
 **Tests** (the string/fret remap engine only — pure functions, no browser/DOM):
 
 ```sh
-node test/retune-engine.test.js
+node test/retune-engine.test.mjs
 ```
 
 **Syncing from upstream `highway_3d`:** this fork needs to periodically pull
