@@ -253,6 +253,13 @@
         // note, or leaving the anchor unchanged if the chart has no
         // surviving notes at all).
         //
+        // Open-string (fret 0) notes are excluded from the donor pool:
+        // resolveTargetForFret falls back to a different target string with
+        // an unrelated adjustment when the natural one would go negative,
+        // so an open string's adjustment doesn't represent nearby fretted
+        // notes' hand position. Falls back to the full note list if the
+        // chart has no fretted notes at all.
+        //
         // `remappedNotes` must be time-sorted with each entry carrying `t`
         // (unchanged from the original), `f` (remapped), and `_origNote.f`
         // (original fret) to diff against — exactly the shape the note
@@ -263,11 +270,13 @@
         function remapAnchors(anchors, remappedNotes) {
             if (!Array.isArray(anchors) || anchors.length === 0) return anchors || [];
             if (!Array.isArray(remappedNotes) || remappedNotes.length === 0) return anchors.slice();
+            const fretted = remappedNotes.filter(n => n._origNote.f > 0);
+            const donors = fretted.length ? fretted : remappedNotes;
             const out = [];
             let ptr = 0;
             for (const a of anchors) {
-                while (ptr < remappedNotes.length - 1 && remappedNotes[ptr].t < a.time) ptr++;
-                const note = remappedNotes[ptr];
+                while (ptr < donors.length - 1 && donors[ptr].t < a.time) ptr++;
+                const note = donors[ptr];
                 const adjustment = note.f - note._origNote.f;
                 const fret = Math.max(0, Math.min(TARGET_MAX_FRET, a.fret + adjustment));
                 out.push({ time: a.time, fret, width: a.width });
