@@ -3,10 +3,287 @@
     <div class="fb-textDim text-sm">v0.1.0</div>
     <p class="fb-textDim text-xs mt-1">
         Controls below mirror 3D Highway's own settings — this plugin
-        renders its own independent 5-string BEADG highway, so these are
-        separate from (not synced with) 3D Highway's copies of the same
-        controls.
+        renders its own independent 5-string highway (default tuning
+        BEADG, customizable below), so these are separate from (not
+        synced with) 3D Highway's copies of the same controls.
     </p>
+</div>
+
+<div role="group" aria-labelledby="fse3d-tuning-heading" class="mt-6">
+    <h3 id="fse3d-tuning-heading" class="text-sm font-medium text-gray-400 mb-2">Bass Tuning</h3>
+    <p class="text-xs text-gray-500 mb-3">
+        Every chart, in any source tuning, is remapped onto this fixed
+        5-string target tuning (still 5 strings — just which pitches
+        they're tuned to is up to you). BEADG is the built-in default;
+        add your own for AEADG, a half-step-flat BbEbAbDbGb, or anything
+        else. Per-string colors stay pinned to string position, not note
+        name, so switching tunings never reshuffles them.
+    </p>
+
+    <div class="mt-3">
+        <label for="fse3d-tuning-active" class="text-xs font-medium text-gray-400 mb-1 block">Active tuning</label>
+        <select id="fse3d-tuning-active"
+            class="w-full bg-dark-700 border border-gray-800 rounded-lg px-3 py-2 text-xs text-gray-300 outline-none">
+        </select>
+        <p class="text-[10px] text-gray-500 mt-1">Applies to the highway immediately — no reload required.</p>
+    </div>
+
+    <div class="mt-4">
+        <p class="text-xs font-medium text-gray-400 mb-1">Saved custom tunings</p>
+        <div id="fse3d-tuning-list" class="space-y-1"></div>
+    </div>
+
+    <div class="mt-4 rounded-lg border border-gray-800 bg-dark-700/40 p-3">
+        <p class="text-xs font-medium text-gray-400 mb-2" id="fse3d-tuning-form-heading">Add a tuning</p>
+        <div class="mt-1">
+            <label for="fse3d-tuning-name" class="text-xs font-medium text-gray-400 mb-1 block">Name</label>
+            <input type="text" id="fse3d-tuning-name" placeholder="e.g. AEADG"
+                class="w-full bg-dark-700 border border-gray-800 rounded-lg px-3 py-2 text-xs text-gray-300 outline-none">
+        </div>
+        <div class="grid grid-cols-5 gap-2 mt-3">
+            <div>
+                <label class="text-[10px] text-gray-500 block mb-1">String 1 (low)</label>
+                <input type="text" data-idx="0" placeholder="B0"
+                    class="fse3d-tuning-string w-full bg-dark-700 border border-gray-800 rounded px-2 py-1 text-xs text-gray-300 outline-none">
+                <span class="text-[9px] text-gray-600 block mt-1">BEADG: <span class="text-gold font-mono">B0</span></span>
+            </div>
+            <div>
+                <label class="text-[10px] text-gray-500 block mb-1">String 2</label>
+                <input type="text" data-idx="1" placeholder="E1"
+                    class="fse3d-tuning-string w-full bg-dark-700 border border-gray-800 rounded px-2 py-1 text-xs text-gray-300 outline-none">
+                <span class="text-[9px] text-gray-600 block mt-1">BEADG: <span class="text-gold font-mono">E1</span></span>
+            </div>
+            <div>
+                <label class="text-[10px] text-gray-500 block mb-1">String 3</label>
+                <input type="text" data-idx="2" placeholder="A1"
+                    class="fse3d-tuning-string w-full bg-dark-700 border border-gray-800 rounded px-2 py-1 text-xs text-gray-300 outline-none">
+                <span class="text-[9px] text-gray-600 block mt-1">BEADG: <span class="text-gold font-mono">A1</span></span>
+            </div>
+            <div>
+                <label class="text-[10px] text-gray-500 block mb-1">String 4</label>
+                <input type="text" data-idx="3" placeholder="D2"
+                    class="fse3d-tuning-string w-full bg-dark-700 border border-gray-800 rounded px-2 py-1 text-xs text-gray-300 outline-none">
+                <span class="text-[9px] text-gray-600 block mt-1">BEADG: <span class="text-gold font-mono">D2</span></span>
+            </div>
+            <div>
+                <label class="text-[10px] text-gray-500 block mb-1">String 5 (high)</label>
+                <input type="text" data-idx="4" placeholder="G2"
+                    class="fse3d-tuning-string w-full bg-dark-700 border border-gray-800 rounded px-2 py-1 text-xs text-gray-300 outline-none">
+                <span class="text-[9px] text-gray-600 block mt-1">BEADG: <span class="text-gold font-mono">G2</span></span>
+            </div>
+        </div>
+        <p class="text-[10px] text-gray-500 mt-2">
+            Note + octave, scientific pitch notation, low string first —
+            e.g. <code>B0</code>, <code>Bb1</code>, <code>F#2</code>. The
+            <span class="text-gold">gold</span> value under each field is
+            standard BEADG for that string position, as a reference point
+            for tuning up/down from it. Strings can repeat the same note +
+            octave too (e.g. an intentional unison pair) — nothing requires
+            them to be distinct, though a BDADG tuning's two D strings
+            would typically be different octaves (<code>D2</code> and
+            <code>D3</code>).
+        </p>
+        <p id="fse3d-tuning-form-error" class="text-xs text-red-400 mt-2 hidden"></p>
+        <div class="flex gap-2 mt-3">
+            <button type="button" id="fse3d-tuning-save"
+                class="text-xs px-3 py-1.5 rounded bg-accent text-white">Save</button>
+            <button type="button" id="fse3d-tuning-cancel"
+                class="text-xs px-3 py-1.5 rounded bg-dark-700 border border-gray-800 text-gray-400 hover:text-gray-200 hidden">Cancel edit</button>
+        </div>
+    </div>
+
+    <script>
+    (function () {
+        const $ = (id) => document.getElementById(id);
+        const BUILTIN_ID = 'beadg';
+        // Note + octave, e.g. B0 / Bb1 / F#2 — mirrors FSE.parseTargetNote's
+        // regex (src/fse-retune.js) for immediate client-side field
+        // feedback. The authoritative validation still happens in
+        // window.fse3dSaveCustomTuning (calls the real parser), this is
+        // just so a bad field goes red before that round-trip.
+        const NOTE_RE = /^[A-Ga-g][#b]?-?\d+$/;
+
+        function readActiveId() {
+            try { return localStorage.getItem('fse_bg_targetTuningId') || BUILTIN_ID; } catch (_) { return BUILTIN_ID; }
+        }
+        function readCustom() {
+            let raw = null;
+            try { raw = localStorage.getItem('fse_bg_customTunings'); } catch (_) { /* storage blocked */ }
+            let list;
+            try { list = JSON.parse(raw || '[]'); } catch (_) { list = []; }
+            return Array.isArray(list)
+                ? list.filter((p) => p && typeof p.id === 'string' && typeof p.name === 'string'
+                    && Array.isArray(p.strings) && p.strings.length === 5)
+                : [];
+        }
+        // Fallback persistence for the narrow window before screen.js has
+        // registered window.fse3d* (settings.html usually renders first —
+        // see the NOTE on the custom-image style-correction path below in
+        // this same file). Live-apply won't happen until the next reload
+        // in that case, but the setting itself is never lost.
+        function writeCustomFallback(list) {
+            try { localStorage.setItem('fse_bg_customTunings', JSON.stringify(list)); } catch (_) { /* storage blocked */ }
+        }
+        function writeActiveFallback(id) {
+            try { localStorage.setItem('fse_bg_targetTuningId', id); } catch (_) { /* storage blocked */ }
+        }
+
+        const sel = $('fse3d-tuning-active');
+        if (!sel) return;
+        const listEl = $('fse3d-tuning-list');
+        const nameInput = $('fse3d-tuning-name');
+        const stringInputs = Array.from(document.querySelectorAll('.fse3d-tuning-string'));
+        const errorP = $('fse3d-tuning-form-error');
+        const saveBtn = $('fse3d-tuning-save');
+        const cancelBtn = $('fse3d-tuning-cancel');
+        const formHeading = $('fse3d-tuning-form-heading');
+
+        let editingId = null; // null = "add new"
+
+        function showError(msg) {
+            if (!errorP) return;
+            errorP.textContent = msg;
+            errorP.classList.remove('hidden');
+        }
+        function clearError() {
+            if (!errorP) return;
+            errorP.textContent = '';
+            errorP.classList.add('hidden');
+        }
+
+        function renderActiveDropdown() {
+            const activeId = readActiveId();
+            const custom = readCustom();
+            sel.innerHTML = '';
+            const beadgOpt = document.createElement('option');
+            beadgOpt.value = BUILTIN_ID;
+            beadgOpt.textContent = 'BEADG (default)';
+            sel.appendChild(beadgOpt);
+            for (const p of custom) {
+                const opt = document.createElement('option');
+                opt.value = p.id;
+                opt.textContent = p.name + ' (' + p.strings.join(' ') + ')';
+                sel.appendChild(opt);
+            }
+            // A stale/deleted id falls back to the built-in default rather
+            // than leaving the dropdown on a nonexistent selection.
+            sel.value = (activeId === BUILTIN_ID || custom.some((p) => p.id === activeId)) ? activeId : BUILTIN_ID;
+        }
+
+        function renderManageList() {
+            if (!listEl) return;
+            const custom = readCustom();
+            listEl.innerHTML = '';
+            if (custom.length === 0) {
+                const p = document.createElement('p');
+                p.className = 'text-[10px] text-gray-500';
+                p.textContent = 'No saved custom tunings yet.';
+                listEl.appendChild(p);
+                return;
+            }
+            for (const profile of custom) {
+                const row = document.createElement('div');
+                row.className = 'flex items-center justify-between gap-2 text-xs bg-dark-700/40 border border-gray-800 rounded px-2 py-1.5';
+                const label = document.createElement('span');
+                label.className = 'text-gray-300 truncate';
+                label.textContent = profile.name + ' — ' + profile.strings.join(' ');
+                row.appendChild(label);
+                const btns = document.createElement('div');
+                btns.className = 'flex items-center gap-1 shrink-0';
+                const editBtn = document.createElement('button');
+                editBtn.type = 'button';
+                editBtn.className = 'text-[10px] px-2 py-1 rounded bg-dark-700 border border-gray-800 text-gray-400 hover:text-gray-200';
+                editBtn.textContent = 'Edit';
+                editBtn.addEventListener('click', () => startEdit(profile));
+                const delBtn = document.createElement('button');
+                delBtn.type = 'button';
+                delBtn.className = 'text-[10px] px-2 py-1 rounded bg-dark-700 border border-gray-800 text-red-400 hover:text-red-300';
+                delBtn.textContent = 'Delete';
+                delBtn.addEventListener('click', () => deleteProfile(profile));
+                btns.appendChild(editBtn);
+                btns.appendChild(delBtn);
+                row.appendChild(btns);
+                listEl.appendChild(row);
+            }
+        }
+
+        function startEdit(profile) {
+            editingId = profile.id;
+            if (nameInput) nameInput.value = profile.name;
+            stringInputs.forEach((inp, i) => { inp.value = profile.strings[i] || ''; inp.classList.remove('border-red-500'); });
+            if (formHeading) formHeading.textContent = 'Edit tuning';
+            if (saveBtn) saveBtn.textContent = 'Save changes';
+            if (cancelBtn) cancelBtn.classList.remove('hidden');
+            clearError();
+        }
+        function resetForm() {
+            editingId = null;
+            if (nameInput) nameInput.value = '';
+            stringInputs.forEach((inp) => { inp.value = ''; inp.classList.remove('border-red-500'); });
+            if (formHeading) formHeading.textContent = 'Add a tuning';
+            if (saveBtn) saveBtn.textContent = 'Save';
+            if (cancelBtn) cancelBtn.classList.add('hidden');
+            clearError();
+        }
+
+        function deleteProfile(profile) {
+            if (!window.confirm('Delete tuning "' + profile.name + '"?')) return;
+            if (window.fse3dDeleteCustomTuning) {
+                window.fse3dDeleteCustomTuning(profile.id);
+            } else {
+                writeCustomFallback(readCustom().filter((p) => p.id !== profile.id));
+                if (readActiveId() === profile.id) writeActiveFallback(BUILTIN_ID);
+            }
+            if (editingId === profile.id) resetForm();
+            renderActiveDropdown();
+            renderManageList();
+        }
+
+        sel.addEventListener('change', () => {
+            if (window.fse3dSetActiveTuning) window.fse3dSetActiveTuning(sel.value);
+            else writeActiveFallback(sel.value);
+        });
+
+        if (cancelBtn) cancelBtn.addEventListener('click', resetForm);
+
+        if (saveBtn) {
+            saveBtn.addEventListener('click', () => {
+                clearError();
+                const name = nameInput ? nameInput.value.trim() : '';
+                if (!name) { showError('Enter a name for this tuning.'); return; }
+                const strings = stringInputs.map((inp) => inp.value.trim());
+                let bad = false;
+                stringInputs.forEach((inp, i) => {
+                    const ok = NOTE_RE.test(strings[i]);
+                    inp.classList.toggle('border-red-500', !ok);
+                    if (!ok) bad = true;
+                });
+                if (bad) { showError('Each string needs a note + octave, e.g. B0, Bb1, F#2.'); return; }
+                const profile = { name: name, strings: strings };
+                if (editingId) profile.id = editingId;
+                let savedId = null;
+                if (window.fse3dSaveCustomTuning) {
+                    savedId = window.fse3dSaveCustomTuning(profile);
+                } else {
+                    const list = readCustom();
+                    const id = editingId || ('custom_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8));
+                    const entry = { id: id, name: name, strings: strings };
+                    const idx = list.findIndex((p) => p.id === id);
+                    if (idx >= 0) list[idx] = entry; else list.push(entry);
+                    writeCustomFallback(list);
+                    savedId = id;
+                }
+                if (!savedId) { showError('Could not save — check each string is a valid note + octave.'); return; }
+                resetForm();
+                renderActiveDropdown();
+                renderManageList();
+            });
+        }
+
+        renderActiveDropdown();
+        renderManageList();
+    })();
+    </script>
 </div>
 
 <div role="group" aria-labelledby="fse3d-fretboard-heading" class="mt-6">
@@ -295,9 +572,9 @@
         <h3 id="fse3d-fret-look-heading" class="text-sm font-medium text-gray-400 mb-2">3D Highway — Nut &amp; headstock</h3>
         <p class="text-xs text-gray-500 mb-3">
             The 3D neck shows a nut, headstock, and a pitch label per string
-            (always B/E/A/D/G, this plugin's fixed BEADG target — not the
-            original chart's tuning). Turn pieces off or pick colors to
-            match your taste.
+            (your active target tuning from the Bass Tuning section above —
+            B/E/A/D/G by default — not the original chart's tuning). Turn
+            pieces off or pick colors to match your taste.
         </p>
         <div class="flex flex-col gap-3 mt-2">
             <label class="flex items-start gap-2 text-sm text-gray-300 cursor-pointer">

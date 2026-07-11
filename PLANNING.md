@@ -91,7 +91,11 @@ files live at the repo root, not nested under a `plugins/` directory.
 **Scope guardrails for MVP** (explicitly out of scope, can revisit later):
 - Bass arrangements only (`matchesArrangement` gates on `/bass/i`, same as
   the is-bass assumption baked into the offset engine).
-- Fixed 5-string BEADG target tuning — no tuning picker.
+- Fixed 5-string BEADG target tuning — no tuning picker. **Lifted
+  post-MVP:** the target string COUNT stays fixed at 5, but which pitches
+  those 5 strings are tuned to is now user-configurable (settings' Bass
+  Tuning section — BEADG remains the built-in default). See
+  `FSE.resolveTargetTuning` / `FSE.parseTargetNote` in `src/fse-retune.js`.
 - `cent_offset` (RS2014 global pitch-shift field) is ignored, same as it's
   excluded from `lib/song.py`'s own note-pitch formula. Songs with a nonzero
   `cent_offset` will remap incorrectly; document as a known limitation.

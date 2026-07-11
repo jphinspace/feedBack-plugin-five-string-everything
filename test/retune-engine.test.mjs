@@ -9,8 +9,14 @@ import { FSE } from '../src/fse-retune.js';
 
 const {
     TARGET_MAX_FRET,
+    TARGET_STRING_COUNT,
+    DEFAULT_TARGET_MIDI_TUNING,
+    DEFAULT_TARGET_TUNING,
+    parseTargetNote,
+    resolveTargetTuning,
     computeOpenStringMidiByString,
     computeArrangementShift,
+    resolveTargetForFret,
     remapNote,
     remapSlide,
     resolveChordCollisions,
@@ -27,9 +33,11 @@ function check(label, actual, expected) {
 
 // Helper mirroring what FSE.createRetuner()'s apply() does once per song:
 // compute k, then per-string open-note MIDI pitches and natural targets.
-function songContext(sourceStringCount, tuning, capo) {
+// `targetMidiTuning` (optional) mirrors createRetuner()'s optional target param —
+// omit for the built-in BEADG default.
+function songContext(sourceStringCount, tuning, capo, targetMidiTuning) {
     const sourceOpenMidiByString = computeOpenStringMidiByString(sourceStringCount, tuning, capo);
-    const k = computeArrangementShift(sourceStringCount, tuning, capo, sourceOpenMidiByString);
+    const k = computeArrangementShift(sourceStringCount, tuning, capo, sourceOpenMidiByString, targetMidiTuning);
     const naturalTargetByString = [];
     for (let s = 0; s < sourceStringCount; s++) {
         naturalTargetByString.push(s + k);
@@ -339,6 +347,236 @@ function songContext(sourceStringCount, tuning, capo) {
     check('remapChordTemplates keeps the array length/order (id indexing)', remapped.length, 2);
     check('remapChordTemplates id 0 shifted per EADG identity (string+1, fret unchanged)', remapped[0].frets, [-1, 0, -1, -1, -1]);
     check('remapChordTemplates id 1 shifted per EADG identity (string+1, fret unchanged)', remapped[1].frets, [-1, -1, 2, -1, -1]);
+}
+
+// Custom target tuning (feedback: some 5-string bassists tune AEADG or a
+// half-step-flat BbEbAbDbGb rather than BEADG — the target must be
+// user-configurable, not just the source). parseTargetNote / resolveTargetTuning.
+{
+    check('parseTargetNote: natural note + octave 0', parseTargetNote('B0'), { midi: 23, label: 'B' });
+    check('parseTargetNote: sharp, lowercase letter', parseTargetNote('f#2'), { midi: 42, label: 'F#' });
+    check('parseTargetNote: flat', parseTargetNote('Bb1'), { midi: 34, label: 'Bb' });
+    check('parseTargetNote: negative octave', parseTargetNote('A-1'), { midi: 9, label: 'A' });
+    check('parseTargetNote: rejects garbage', parseTargetNote('H0'), null);
+    check('parseTargetNote: rejects missing octave', parseTargetNote('B'), null);
+    check('parseTargetNote: rejects non-string', parseTargetNote(undefined), null);
+
+    // Full BEADG spec round-trips to the same values as the built-in default.
+    const beadg = resolveTargetTuning(DEFAULT_TARGET_TUNING);
+    check('resolveTargetTuning(BEADG) midi matches the built-in default', beadg.midiTuning, DEFAULT_TARGET_MIDI_TUNING);
+    check('resolveTargetTuning(BEADG) labels', beadg.labels, ['B', 'E', 'A', 'D', 'G']);
+
+    // Per-string fallback: a malformed entry degrades just that string
+    // rather than the whole tuning.
+    const partial = resolveTargetTuning(['B0', 'garbage', 'A1', 'D2', 'G2']);
+    check('resolveTargetTuning: malformed string falls back to BEADG default for that slot only',
+        partial.midiTuning, [23, 28, 33, 38, 43]);
+
+    // Non-array / wrong-length spec falls back to BEADG entirely.
+    check('resolveTargetTuning: non-array spec falls back to full BEADG default',
+        resolveTargetTuning(null).midiTuning, DEFAULT_TARGET_MIDI_TUNING);
+    check('resolveTargetTuning: short array falls back to full BEADG default',
+        resolveTargetTuning(['B0', 'E1']).midiTuning, DEFAULT_TARGET_MIDI_TUNING);
+}
+
+// AEADG target (drops only the lowest open string a whole step below
+// BEADG's B0->A0; upper four strings E/A/D/G unchanged) — a 4-string EADG
+// source should land identically to the BEADG-target EADG-identity test
+// above (strings 1-4, fret unchanged), since the target's own string-0
+// pitch never enters that computation for a source that never reaches it.
+{
+    const aeadg = resolveTargetTuning(['A0', 'E1', 'A1', 'D2', 'G2']);
+    check('AEADG target labels', aeadg.labels, ['A', 'E', 'A', 'D', 'G']);
+    const ctx = songContext(4, [0, 0, 0, 0], 0, aeadg.midiTuning);
+    assert.strictEqual(ctx.k, 1, `AEADG target, EADG source arrangement shift: expected k=1, got ${ctx.k}`); passed++;
+    for (let s = 0; s < 4; s++) {
+        for (let f = 0; f <= 20; f++) {
+            check(`AEADG target EADG source s=${s} f=${f}`,
+                remapNote(ctx.sourceOpenMidiByString[s], ctx.naturalTargetByString[s], f, aeadg.midiTuning), { s: s + 1, f });
+        }
+    }
+
+    // A 5-string source already tuned AEADG is a full identity onto the
+    // AEADG target (mirrors the already-BEADG identity test above, just
+    // on a different target).
+    const ctx5 = songContext(5, [-2, 0, 0, 0, 0], 0, aeadg.midiTuning); // 5-string standard base is BEADG; -2 on string 0 (B0->A0, a whole step)
+    assert.strictEqual(ctx5.k, 0, `AEADG identity arrangement shift: expected k=0, got ${ctx5.k}`); passed++;
+    for (let s = 0; s < 5; s++) {
+        for (let f = 0; f <= 20; f++) {
+            check(`AEADG identity s=${s} f=${f}`,
+                remapNote(ctx5.sourceOpenMidiByString[s], ctx5.naturalTargetByString[s], f, aeadg.midiTuning), { s, f });
+        }
+    }
+}
+
+// BbEbAbDbGb target (every string a half-step flat of BEADG) — a 5-string
+// source tuned identically is a full identity remap, exercising
+// computeArrangementShift/remapNote/resolveChordCollisions all the way
+// through the optional targetMidiTuning parameter.
+{
+    const flat = resolveTargetTuning(['Bb0', 'Eb1', 'Ab1', 'Db2', 'Gb2']);
+    check('BbEbAbDbGb target midi', flat.midiTuning, [22, 27, 32, 37, 42]);
+    check('BbEbAbDbGb target labels', flat.labels, ['Bb', 'Eb', 'Ab', 'Db', 'Gb']);
+    const ctx = songContext(5, [-1, -1, -1, -1, -1], 0, flat.midiTuning);
+    assert.strictEqual(ctx.k, 0, `BbEbAbDbGb identity arrangement shift: expected k=0, got ${ctx.k}`); passed++;
+    for (let s = 0; s < 5; s++) {
+        for (let f = 0; f <= 20; f++) {
+            check(`BbEbAbDbGb identity s=${s} f=${f}`,
+                remapNote(ctx.sourceOpenMidiByString[s], ctx.naturalTargetByString[s], f, flat.midiTuning), { s, f });
+        }
+    }
+
+    // Chord-collision resolution also threads the custom target through
+    // correctly (mirrors the default-target collision test above).
+    const sourceOpenMidiByString = [32, 32, 37]; // two strings sharing Ab1 (target index 2), one at Db2 (target index 3)
+    const naturalTargetByString = [2, 2, 3];
+    const survivors = resolveChordCollisions(sourceOpenMidiByString, naturalTargetByString,
+        [{ s: 0, f: 5 }, { s: 1, f: 2 }, { s: 2, f: 0 }], flat.midiTuning);
+    check('custom-target chord collision: 2 of 3 notes survive', survivors.length, 2);
+    check('custom-target chord collision: lower-pitched note wins the shared slot',
+        survivors.find(x => x.note.s === 1).entry, { s: 2, f: 2 });
+}
+
+// createRetuner().apply(bundle, targetMidiTuning) end-to-end, including cache
+// invalidation when the active target tuning changes (feedback: switching
+// tunings mid-session, e.g. via the settings picker, must not serve a
+// stale remap from a previous tuning for the same unchanged chart data).
+{
+    const { createRetuner } = FSE;
+    const retuner = createRetuner();
+    // Fixed raw chart references — core re-supplies these SAME array
+    // references on bundle.notes/etc. every frame for an unchanged song
+    // (only reference-swapped when the chart itself changes), overwriting
+    // whatever the previous frame's apply() call left there. Simulate that
+    // per-frame reset explicitly rather than letting the test reuse
+    // apply()'s own prior output as if it were fresh raw input.
+    const rawNotes = [{ t: 0, s: 0, f: 0 }];
+    const rawChords = [], rawAnchors = [], rawTemplates = [];
+    const bundle = {
+        notes: rawNotes,
+        chords: rawChords,
+        anchors: rawAnchors,
+        chordTemplates: rawTemplates,
+        tuning: [0, 0, 0, 0, 0], // 5-string BEADG-standard-base source, no offsets
+        capo: 0,
+        stringCount: 5,
+    };
+    retuner.apply(bundle); // default (BEADG) target
+    check('createRetuner default target: identity remap of the open low string', { s: bundle.notes[0].s, f: bundle.notes[0].f }, { s: 0, f: 0 });
+    const beforeAeadg = bundle.notes[0];
+
+    const aeadg = resolveTargetTuning(['A0', 'E1', 'A1', 'D2', 'G2']);
+    bundle.notes = rawNotes; // simulate core re-supplying the pristine raw array next frame
+    retuner.apply(bundle, aeadg.midiTuning);
+    // Source string 0 is B0 (standard 5-string base, no offset); against an
+    // AEADG target its natural/best target is still index 0 (A0), but B0 is
+    // a whole step above A0, so it lands at fret 2, not fret 0.
+    check('createRetuner: changing target tuning invalidates the cache and re-remaps', bundle.notes[0].f, 2);
+    assert.notStrictEqual(bundle.notes[0], beforeAeadg, 'a target-tuning change must not reuse the previous remap object'); passed++;
+
+    // Re-applying the ORIGINAL (default) target on the same unchanged chart
+    // data must also bust the cache and restore the original remap, not
+    // serve the AEADG-target result.
+    bundle.notes = rawNotes;
+    retuner.apply(bundle);
+    check('createRetuner: switching back to the default target re-remaps correctly', bundle.notes[0].f, 0);
+}
+
+// Requirement: switching the active tuning mid-playthrough must re-add a
+// note that was previously dropped as unplayable, if it's now in range
+// under the new target — not just change already-kept notes' frets (the
+// block above). Real scenario: a chart for an AEADG-tuned bass (tuning =
+// [-2,0,0,0,0], open low string = A0) is unplayable on a BEADG target (A0
+// is a whole step BELOW BEADG's lowest open note, B0 — there's no negative
+// fret to reach it) but is a perfect identity match on an AEADG target.
+{
+    const { createRetuner } = FSE;
+    const retuner = createRetuner();
+    const rawNotes = [{ t: 0, s: 0, f: 0 }]; // open low string
+    const bundle = {
+        notes: rawNotes, chords: [], anchors: [], chordTemplates: [],
+        tuning: [-2, 0, 0, 0, 0], capo: 0, stringCount: 5,
+    };
+
+    retuner.apply(bundle); // default (BEADG) target
+    check('un-drop test: open low A is unplayable on the BEADG target and gets dropped', bundle.notes.length, 0);
+
+    const aeadg = resolveTargetTuning(['A0', 'E1', 'A1', 'D2', 'G2']);
+    bundle.notes = rawNotes; // simulate core's per-frame reset (see the cache-invalidation test above)
+    retuner.apply(bundle, aeadg.midiTuning);
+    check('un-drop test: switching to the AEADG target re-adds the note, no longer dropped', bundle.notes.length, 1);
+    check('un-drop test: re-added note is an exact identity match', { s: bundle.notes[0].s, f: bundle.notes[0].f }, { s: 0, f: 0 });
+
+    // Switching back to BEADG drops it again — proving this is a
+    // stateless full re-evaluation every time, not a one-way "un-drop".
+    bundle.notes = rawNotes;
+    retuner.apply(bundle);
+    check('un-drop test: switching back to BEADG drops the note again', bundle.notes.length, 0);
+}
+
+// Duplicate note+octave across strings is allowed (feedback: e.g. an
+// intentional unison pair on some basses/tunings) — no uniqueness
+// constraint exists anywhere in the engine; every target string is looked
+// up independently by its own index, never by searching for "the" string
+// matching a given pitch.
+{
+    const dup = resolveTargetTuning(['B0', 'B0', 'A1', 'D2', 'G2']);
+    check('duplicate-note target midiTuning', dup.midiTuning, [23, 23, 33, 38, 43]);
+    check('duplicate-note target labels', dup.labels, ['B', 'B', 'A', 'D', 'G']);
+
+    // The same source pitch lands correctly on EITHER duplicate slot,
+    // depending purely on which target string it naturally belongs to.
+    check('duplicate target: source lands on the first B0 slot',
+        remapNote(23, 0, 0, dup.midiTuning), { s: 0, f: 0 });
+    check('duplicate target: source lands on the second B0 slot',
+        remapNote(23, 1, 0, dup.midiTuning), { s: 1, f: 0 });
+
+    // Two chord notes that each naturally resolve to their OWN
+    // duplicate-pitch target string are two independent target strings,
+    // not a collision — collision resolution keys on target STRING INDEX,
+    // never on the resulting pitch, so two unison strings never spuriously
+    // eat each other's notes.
+    const survivors = resolveChordCollisions([23, 23], [0, 1], [{ s: 0, f: 0 }, { s: 1, f: 0 }], dup.midiTuning);
+    check('duplicate target: both unison notes survive as independent target strings', survivors.length, 2);
+}
+
+// Irregular-interval target tuning (feedback: don't assume adjacent target
+// strings are always a fourth or fifth apart — the algorithm must work for
+// ANY per-string target pitches, uniform or not). Target = B0,E1,A1,D2,F#2:
+// the first three intervals are the usual fourth (5 half-steps), but the
+// last (D2->F#2) is a major third (4 half-steps) — deliberately irregular.
+{
+    const irregular = resolveTargetTuning(['B0', 'E1', 'A1', 'D2', 'F#2']);
+    check('irregular target midiTuning', irregular.midiTuning, [23, 28, 33, 38, 42]);
+
+    // A standard BEADG-base 5-string source (no offsets) still lands via
+    // ordinary identity math on strings 0-3 (matching fourths) and via the
+    // ACTUAL (not an assumed uniform) +1 adjustment on string 4, where the
+    // irregular interval lives.
+    const ctx = songContext(5, [0, 0, 0, 0, 0], 0, irregular.midiTuning);
+    assert.strictEqual(ctx.k, 0, `irregular target arrangement shift: expected k=0, got ${ctx.k}`); passed++;
+    for (let s = 0; s < 4; s++) {
+        for (let f = 0; f <= 20; f++) {
+            check(`irregular target identity s=${s} f=${f}`,
+                remapNote(ctx.sourceOpenMidiByString[s], ctx.naturalTargetByString[s], f, irregular.midiTuning), { s, f });
+        }
+    }
+    // String 4 (source open G2=43) against target string 4 (F#2=42):
+    // adjustment = +1, so fret 0 (open G) actually lands on fret 1, not 0.
+    check('irregular target: string 4 open note offset by the real (non-fourth) interval',
+        remapNote(ctx.sourceOpenMidiByString[4], ctx.naturalTargetByString[4], 0, irregular.midiTuning), { s: 4, f: 1 });
+    check('irregular target: string 4 fret 19 -> 20 (top of range)',
+        remapNote(ctx.sourceOpenMidiByString[4], ctx.naturalTargetByString[4], 19, irregular.midiTuning), { s: 4, f: 20 });
+    check('irregular target: string 4 fret 20 overflows (no 6th string to cascade to) and drops',
+        remapNote(ctx.sourceOpenMidiByString[4], ctx.naturalTargetByString[4], 20, irregular.midiTuning), null);
+
+    // Cascade from string 3 into string 4 must use the REAL 4-half-step
+    // D2->F#2 interval, not an assumed 5 — hand-verified: source string 3
+    // (D2=38) sounding at a synthetic out-of-range "fret 21" probe is
+    // pitch 59; on target string 4 (F#2=42) that's fret 59-42=17, not the
+    // 16 a hardcoded-fourth assumption would produce.
+    check('irregular target: cascade uses the actual interval, not an assumed fourth/fifth',
+        resolveTargetForFret(38, 3, 21, irregular.midiTuning), { s: 4, f: 17, adjustment: -4 });
 }
 
 console.log(`OK - ${passed} assertions passed`);
