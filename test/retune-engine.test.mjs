@@ -372,11 +372,23 @@ function songContext(sourceStringCount, tuning, capo, targetMidiTuning) {
     check('resolveTargetTuning: malformed string falls back to BEADG default for that slot only',
         partial.midiTuning, [23, 28, 33, 38, 43]);
 
-    // Non-array / wrong-length spec falls back to BEADG entirely.
+    // Non-array spec (not even an array) falls back to BEADG entirely.
     check('resolveTargetTuning: non-array spec falls back to full BEADG default',
         resolveTargetTuning(null).midiTuning, DEFAULT_TARGET_MIDI_TUNING);
-    check('resolveTargetTuning: short array falls back to full BEADG default',
-        resolveTargetTuning(['B0', 'E1']).midiTuning, DEFAULT_TARGET_MIDI_TUNING);
+
+    // Short array (still an array, just missing trailing entries): the
+    // PROVIDED slots are kept as given, only the missing ones fall back —
+    // same per-slot contract as the malformed-entry case above, not a
+    // "whole spec discarded" special case. Deliberately uses non-BEADG
+    // values for the provided slots so this is distinguishable from that
+    // per-slot fallback reconstructing BEADG by coincidence (as it would
+    // if this used 'B0'/'E1', which already equal the BEADG defaults for
+    // those two positions).
+    const short = resolveTargetTuning(['A0', 'F1']);
+    check('resolveTargetTuning: short array keeps its provided slots',
+        short.midiTuning, [21, 29, 33, 38, 43]);
+    check('resolveTargetTuning: short array per-slot-falls-back the missing slots to BEADG',
+        short.labels, ['A', 'F', 'A', 'D', 'G']);
 }
 
 // AEADG target (drops only the lowest open string a whole step below

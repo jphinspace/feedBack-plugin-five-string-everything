@@ -969,3 +969,71 @@ patch point or a Phase 7 rename.
 
 **Bumped this plugin's own `version` to `0.1.2`** (`plugin.json`, which
 also gained `"scriptType": "module"`) to reflect the change.
+
+---
+
+## Phase 10 — Configurable target tuning (2026-07-11)
+
+Lifts the MVP guardrail noted in Phase 1 ("Fixed 5-string BEADG target
+tuning — no tuning picker"): the target string COUNT stays fixed at 5 (the
+whole point of the plugin), but which pitches those 5 strings are tuned to
+is now user-configurable — some bassists tune AEADG, others a
+half-step-flat BbEbAbDbGb, and the engine needs to support any 5-string
+tuning, not just BEADG.
+
+**`src/fse-retune.js`:** added `parseTargetNote(spec)` (note-name + octave
+parser, e.g. `"B0"`, `"Bb1"`, `"F#2"`, scientific pitch notation) and
+`resolveTargetTuning(spec)` (5-entry spec → `{ midiTuning, labels }`,
+falling back per-string to the BEADG default on anything malformed or
+missing — a corrupt/partial custom tuning degrades one string at a time,
+never breaks the whole render). Every remap function
+(`resolveTargetForFret`, `remapNote`, `remapSlide`, `remapNoteEntry`,
+`resolveChordCollisions`, `remapChordTemplate(s)`, `computeArrangementShift`,
+`createRetuner().apply()`) gained an optional trailing `targetMidiTuning`
+parameter, defaulting to the BEADG constant (`DEFAULT_TARGET_MIDI_TUNING`)
+so every pre-existing call site keeps working unchanged. `createRetuner()`
+cache-invalidates on a target-tuning signature in addition to its existing
+chart-identity keys, so a tuning switch forces a full from-scratch remap of
+the chart's raw (unfiltered) data — not an incremental patch — which is
+also what makes a previously-dropped-as-unplayable note transparently
+reappear if it's in range under the new target. The algorithm makes no
+assumption that target strings are evenly spaced (a fourth, a fifth, or
+anything else apart); every lookup is `target[j]`, not an assumed interval.
+Duplicate note+octave across strings (e.g. an intentional unison pair) is
+allowed — nothing keys off pitch uniqueness, only target string index.
+
+**`screen.js`:** new per-panel state `_activeTargetTuning` (`{ midiTuning,
+labels }`), refreshed by `_bgLoadSettings()` off two new global-only
+settings keys (`targetTuningId`, `customTunings` — global because the
+active tuning describes the player's real physical instrument, not a
+per-panel aesthetic). `window.fse3dSetActiveTuning` / `fse3dSaveCustomTuning`
+/ `fse3dDeleteCustomTuning` / `fse3dListCustomTunings` are the settings.html
+bridge (same `_bgWriteGlobal`/`_bgEmitChange` pub-sub plumbing every other
+live-updating setting already uses), so switching tunings mid-playthrough
+takes effect on the very next rendered frame of the CURRENT song, not just
+the next song load. The nut/headstock open-string-pitch labels read
+`_activeTargetTuning.labels` instead of a hardcoded BEADG array. Per-string
+colors were already keyed by target string INDEX (0-4), never by note name
+(the dedicated "Low B" slot for index 0 predates this phase), so BEADG's
+color layout is preserved automatically for every tuning with no change
+needed there.
+
+**`settings.html`:** new "Bass Tuning" section — an active-tuning dropdown
+(BEADG + saved custom profiles) and an add/edit/delete form (name + 5
+note+octave fields, each showing the standard BEADG value as a reference
+underneath). Client-side regex validation mirrors
+`FSE.parseTargetNote`'s pattern for immediate field feedback; the
+authoritative validation is still `window.fse3dSaveCustomTuning`, which
+calls the real parser.
+
+**Verify:** `node test/retune-engine.test.mjs` (899 assertions — the
+existing suite plus new cases for AEADG/BbEbAbDbGb full round-trips, the
+un-drop-on-tuning-switch behavior, duplicate-note-across-strings, and an
+irregular (non-fourth/fifth) interval target), `node --check screen.js`,
+`node --check src/fse-retune.js`, and `bash build-tailwind.sh` to pick up
+the new settings.html markup's Tailwind classes.
+
+**Bumped this plugin's own `version`** from `0.1.2` to `0.1.3` (the new
+settings.html markup's Tailwind classes) and then to **`0.1.4`** (the
+BEADG-reference-hint markup added in a follow-up pass) — the version now
+declared in `plugin.json`.
