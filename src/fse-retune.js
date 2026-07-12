@@ -4,10 +4,14 @@
 // highway_3d/screen.js) imports it as the `FSE` namespace, so screen.js
 // itself stays close to upstream for easy syncing.
 //
-// String/fret offset arithmetic: one fret = one half-step, and adjacent
-// BEADG target strings are a perfect fourth apart = 5 half-steps. The
-// tables below are fixed MIDI note references (same numbers as
-// lib/song.py's _TUNING_BASE_MIDI).
+// String/fret offset arithmetic: one fret = one half-step. Adjacent BEADG
+// target strings happen to be a perfect fourth apart (5 half-steps), but
+// that's a fact about BEADG specifically, not an assumption baked into the
+// algorithm — every function below looks up each target string's own open
+// pitch from the target array (`target[j]`), so a custom target tuning with
+// irregular string-to-string intervals (not uniformly fourths, fifths, or
+// anything else) works with zero special-casing. The tables below are fixed
+// MIDI note references (same numbers as lib/song.py's _TUNING_BASE_MIDI).
 //
 // Loaded as a real ES module (plugin.json "scriptType":"module", served via
 // feedBack core's /api/plugins/<id>/src/... route) — imported by both
@@ -27,13 +31,65 @@ const STANDARD_OPEN_STRING_MIDI = {
     8: [30, 35, 40, 45, 50, 55, 59, 64],
 };
 
-// Fixed target: 5-string bass, standard BEADG, no capo. Index 0 = B, 4 = G.
-const TARGET_OPEN_STRING_MIDI = [23, 28, 33, 38, 43]; // B0 E1 A1 D2 G2
-const TARGET_STRING_COUNT = TARGET_OPEN_STRING_MIDI.length;
+// Target is always a 5-string bass (5SE never changes string COUNT — only
+// which pitches those 5 strings are tuned to is user-configurable, see
+// resolveTargetTuning below). BEADG remains the built-in default.
+const TARGET_STRING_COUNT = 5;
 const TARGET_MAX_FRET = 20;
+const DEFAULT_TARGET_TUNING = ['B0', 'E1', 'A1', 'D2', 'G2'];
 
-// Fretboard string labels for the fixed BEADG target.
-const TARGET_OPEN_STRING_LABELS = ['B', 'E', 'A', 'D', 'G'];
+// Pitch class (0=C .. 11=B) for the natural note letters, before applying
+// a #/b accidental.
+const NOTE_LETTER_PITCH_CLASS = { c: 0, d: 2, e: 4, f: 5, g: 7, a: 9, b: 11 };
+
+// Parses one target-tuning string spec, e.g. "B0", "Bb1", "F#2", "A-1" —
+// note letter (A-G, case-insensitive) + optional single #/b accidental +
+// signed octave number, scientific pitch notation (C4 = MIDI 60, matching
+// lib/song.py's _TUNING_BASE_MIDI convention used elsewhere in this file).
+// Returns { midi, label } (label preserves the input's own letter case /
+// accidental spelling, e.g. "Bb" not the enharmonic "A#") or null if the
+// spec doesn't parse.
+function parseTargetNote(spec) {
+    if (typeof spec !== 'string') return null;
+    const m = /^([A-Ga-g])([#b]?)(-?\d+)$/.exec(spec.trim());
+    if (!m) return null;
+    const letter = m[1], accidental = m[2], octave = parseInt(m[3], 10);
+    let pc = NOTE_LETTER_PITCH_CLASS[letter.toLowerCase()];
+    if (accidental === '#') pc += 1;
+    else if (accidental === 'b') pc -= 1;
+    return { midi: pc + 12 * (octave + 1), label: letter.toUpperCase() + accidental };
+}
+
+// Resolves a 5-entry tuning spec (array of note-name strings, low string
+// first) into { midiTuning: number[5], labels: string[5] }. Any string that
+// fails to parse (missing, malformed, wrong array length) falls back to
+// the corresponding BEADG default entry — a corrupt/partial custom tuning
+// degrades one string at a time rather than breaking the whole render.
+//
+// No uniqueness constraint: two (or more) strings resolving to the exact
+// same note + octave is allowed (e.g. an intentional unison pair) and
+// requires no special handling below — every remap function looks up a
+// string's OWN target pitch independently, it never searches for "the"
+// string matching a pitch.
+function resolveTargetTuning(spec) {
+    const src = Array.isArray(spec) ? spec : DEFAULT_TARGET_TUNING;
+    const midiTuning = new Array(TARGET_STRING_COUNT);
+    const labels = new Array(TARGET_STRING_COUNT);
+    for (let i = 0; i < TARGET_STRING_COUNT; i++) {
+        const parsed = parseTargetNote(src[i]) || parseTargetNote(DEFAULT_TARGET_TUNING[i]);
+        midiTuning[i] = parsed.midi;
+        labels[i] = parsed.label;
+    }
+    return { midiTuning, labels };
+}
+
+// Fixed BEADG default target — used whenever a caller omits the optional
+// `targetMidiTuning` parameter on the remap functions below (keeps every
+// existing call site, including test/retune-engine.test.mjs, working
+// unchanged) and as the fallback inside resolveTargetTuning.
+const DEFAULT_TARGET = resolveTargetTuning(DEFAULT_TARGET_TUNING);
+const DEFAULT_TARGET_MIDI_TUNING = DEFAULT_TARGET.midiTuning;
+const TARGET_OPEN_STRING_LABELS = DEFAULT_TARGET.labels;
 
 // Falls back to the 6-string (guitar) table for a string count not listed
 // above.
@@ -70,8 +126,9 @@ function computeOpenStringMidiByString(sourceStringCount, tuningOffsets, capo) {
 // "zero-offset" 4-string tunings — they sit at different absolute
 // pitches.) Compute once per song; `sourceOpenMidiByString` is optional,
 // pass it when already available.
-function computeArrangementShift(sourceStringCount, tuningOffsets, capo, sourceOpenMidiByString) {
+function computeArrangementShift(sourceStringCount, tuningOffsets, capo, sourceOpenMidiByString, targetMidiTuning) {
     const midiByString = sourceOpenMidiByString || computeOpenStringMidiByString(sourceStringCount, tuningOffsets, capo);
+    const target = targetMidiTuning || DEFAULT_TARGET_MIDI_TUNING;
     let bestK = 0, bestExact = -1, bestTotalAbs = Infinity;
     for (let k = 1 - sourceStringCount; k <= TARGET_STRING_COUNT - 1; k++) {
         let exact = 0, totalAbs = 0, counted = 0;
@@ -80,7 +137,7 @@ function computeArrangementShift(sourceStringCount, tuningOffsets, capo, sourceO
             if (j < 0 || j >= TARGET_STRING_COUNT) continue;
             const midi = midiByString[s];
             if (midi === null) continue;
-            const adjustment = midi - TARGET_OPEN_STRING_MIDI[j];
+            const adjustment = midi - target[j];
             counted++;
             totalAbs += Math.abs(adjustment);
             if (adjustment === 0) exact++;
@@ -109,11 +166,12 @@ function computeArrangementShift(sourceStringCount, tuningOffsets, capo, sourceO
 // earlier version compared |adjustment| across all 5 strings globally and
 // flipped to preferring B too early — correct for Drop D's -2 half-step
 // drop, wrong for Drop C#'s -3.
-function resolveTargetForFret(sourceOpenMidi, naturalTargetString, fret) {
+function resolveTargetForFret(sourceOpenMidi, naturalTargetString, fret, targetMidiTuning) {
     if (sourceOpenMidi === null || sourceOpenMidi === undefined) return null;
+    const target = targetMidiTuning || DEFAULT_TARGET_MIDI_TUNING;
     let j = Math.max(0, Math.min(TARGET_STRING_COUNT - 1, naturalTargetString));
     while (j >= 0 && j < TARGET_STRING_COUNT) {
-        const adjustment = sourceOpenMidi - TARGET_OPEN_STRING_MIDI[j];
+        const adjustment = sourceOpenMidi - target[j];
         const targetFret = fret + adjustment;
         if (targetFret < 0) { j -= 1; continue; }
         if (targetFret > TARGET_MAX_FRET) { j += 1; continue; }
@@ -123,8 +181,10 @@ function resolveTargetForFret(sourceOpenMidi, naturalTargetString, fret) {
 }
 
 // Ordinary (non-sliding) note: { s, f } on the target, or null if dropped.
-function remapNote(sourceOpenMidi, naturalTargetString, fret) {
-    const best = resolveTargetForFret(sourceOpenMidi, naturalTargetString, fret);
+// `targetMidiTuning` (optional) is a 5-entry open-string MIDI array for the
+// active target tuning; omit for the built-in BEADG default.
+function remapNote(sourceOpenMidi, naturalTargetString, fret, targetMidiTuning) {
+    const best = resolveTargetForFret(sourceOpenMidi, naturalTargetString, fret, targetMidiTuning);
     return best ? { s: best.s, f: best.f } : null;
 }
 
@@ -134,12 +194,12 @@ function remapNote(sourceOpenMidi, naturalTargetString, fret) {
 // in range), retrying on the higher endpoint if that fails. An
 // overflowing slide clamps to fret 20 instead of dropping (unlike an
 // ordinary out-of-range note).
-function remapSlide(sourceOpenMidi, naturalTargetString, fret, slideToFret) {
+function remapSlide(sourceOpenMidi, naturalTargetString, fret, slideToFret, targetMidiTuning) {
     if (sourceOpenMidi === null || sourceOpenMidi === undefined) return null;
     const lowFret = Math.min(fret, slideToFret);
     const highFret = Math.max(fret, slideToFret);
-    let anchor = resolveTargetForFret(sourceOpenMidi, naturalTargetString, lowFret);
-    if (!anchor) anchor = resolveTargetForFret(sourceOpenMidi, naturalTargetString, highFret);
+    let anchor = resolveTargetForFret(sourceOpenMidi, naturalTargetString, lowFret, targetMidiTuning);
+    if (!anchor) anchor = resolveTargetForFret(sourceOpenMidi, naturalTargetString, highFret, targetMidiTuning);
     if (!anchor) return null;
     const clamp = v => Math.max(0, Math.min(TARGET_MAX_FRET, v));
     return {
@@ -160,18 +220,18 @@ function noteHalfstepRank(sourceOpenMidi, fret) {
 // dispatches to remapSlide when the note carries a slide (sl/slu default
 // to -1 = "no slide"), otherwise remapNote. Returns { s, f } plus, only
 // when present on the input, a remapped `sl` or `slu`.
-function remapNoteEntry(sourceOpenMidi, naturalTargetString, note) {
+function remapNoteEntry(sourceOpenMidi, naturalTargetString, note, targetMidiTuning) {
     const hasSl = Number.isInteger(note.sl) && note.sl >= 0;
     const hasSlu = !hasSl && Number.isInteger(note.slu) && note.slu >= 0;
     if (hasSl || hasSlu) {
         const dest = hasSl ? note.sl : note.slu;
-        const r = remapSlide(sourceOpenMidi, naturalTargetString, note.f, dest);
+        const r = remapSlide(sourceOpenMidi, naturalTargetString, note.f, dest, targetMidiTuning);
         if (!r) return null;
         const out = { s: r.s, f: r.f };
         if (hasSl) out.sl = r.slideTo; else out.slu = r.slideTo;
         return out;
     }
-    return remapNote(sourceOpenMidi, naturalTargetString, note.f);
+    return remapNote(sourceOpenMidi, naturalTargetString, note.f, targetMidiTuning);
 }
 
 // Remaps every note independently, groups survivors by target string, and
@@ -181,12 +241,12 @@ function remapNoteEntry(sourceOpenMidi, naturalTargetString, note) {
 // `slu`). Returns { entry, note } per survivor, where `entry` is
 // remapNoteEntry's result and `note` is the original input (for field
 // passthrough and keying bundle.getNoteState).
-function resolveChordCollisions(sourceOpenMidiByString, naturalTargetByString, notes) {
+function resolveChordCollisions(sourceOpenMidiByString, naturalTargetByString, notes, targetMidiTuning) {
     const candidates = [];
     for (const note of notes) {
         const midi = sourceOpenMidiByString[note.s];
         if (midi === null || midi === undefined) continue;
-        const entry = remapNoteEntry(midi, naturalTargetByString[note.s], note);
+        const entry = remapNoteEntry(midi, naturalTargetByString[note.s], note, targetMidiTuning);
         if (!entry) continue;
         candidates.push({ entry, note, rank: noteHalfstepRank(midi, note.f) });
     }
@@ -244,14 +304,14 @@ function remapAnchors(anchors, remappedNotes) {
 // remap can turn adjacent frets on adjacent strings into a wide stretch
 // across different strings, so this only keeps the original hint from
 // going stale-indexed rather than trying to recompute "correct" fingering.
-function remapChordTemplate(sourceOpenMidiByString, naturalTargetByString, template) {
+function remapChordTemplate(sourceOpenMidiByString, naturalTargetByString, template, targetMidiTuning) {
     if (!template || !Array.isArray(template.frets)) return template;
     const notes = [];
     for (let si = 0; si < template.frets.length; si++) {
         const f = template.frets[si];
         if (f >= 0) notes.push({ s: si, f });
     }
-    const survivors = resolveChordCollisions(sourceOpenMidiByString, naturalTargetByString, notes);
+    const survivors = resolveChordCollisions(sourceOpenMidiByString, naturalTargetByString, notes, targetMidiTuning);
     const frets = new Array(TARGET_STRING_COUNT).fill(-1);
     const hasFingers = Array.isArray(template.fingers);
     const fingers = hasFingers ? new Array(TARGET_STRING_COUNT).fill(-1) : template.fingers;
@@ -264,31 +324,38 @@ function remapChordTemplate(sourceOpenMidiByString, naturalTargetByString, templ
 
 // Remaps every template in `chordTemplates` (array indexed by chord_id,
 // untouched — only each entry's own frets/fingers change).
-function remapChordTemplates(sourceOpenMidiByString, naturalTargetByString, templates) {
+function remapChordTemplates(sourceOpenMidiByString, naturalTargetByString, templates, targetMidiTuning) {
     if (!Array.isArray(templates)) return templates || [];
-    return templates.map(t => remapChordTemplate(sourceOpenMidiByString, naturalTargetByString, t));
+    return templates.map(t => remapChordTemplate(sourceOpenMidiByString, naturalTargetByString, t, targetMidiTuning));
 }
 
 // PATCH POINT: remaps bundle.notes/.chords/.anchors/.chordTemplates to the
-// fixed BEADG target IN PLACE, once per song (cached), so every downstream
-// reader in screen.js sees the remapped chart automatically. Safe to
-// mutate: `bundle` is this createHighway() instance's own object.
+// active target tuning IN PLACE, once per song/tuning-change (cached), so
+// every downstream reader in screen.js sees the remapped chart
+// automatically. Safe to mutate: `bundle` is this createHighway()
+// instance's own object.
 //
-// Returns a fresh { apply(bundle) } per call so each createFactory()
-// instance (one per splitscreen panel) gets its own cache, keeping
-// different songs in different panels from cross-contaminating.
+// Returns a fresh { apply(bundle, targetMidiTuning) } per call so each
+// createFactory() instance (one per splitscreen panel) gets its own cache,
+// keeping different songs in different panels from cross-contaminating.
+// `targetMidiTuning` (optional, passed to apply()) is the active target tuning's
+// 5-entry open-string MIDI array — omit for the built-in BEADG default.
 function createRetuner() {
     let cacheNotesRef = null, cacheChordsRef = null, cacheAnchorsRef = null, cacheTemplatesRef = null;
-    let cacheTuningRef = null, cacheCapo = null, cacheStringCount = null;
+    let cacheTuningRef = null, cacheCapo = null, cacheStringCount = null, cacheTargetSig = null;
     let remappedNotes = [], remappedChords = [], remappedAnchors = [], remappedTemplates = [];
 
-    function apply(bundle) {
+    function apply(bundle, targetMidiTuning) {
+        const target = (Array.isArray(targetMidiTuning) && targetMidiTuning.length === TARGET_STRING_COUNT)
+            ? targetMidiTuning : DEFAULT_TARGET_MIDI_TUNING;
         const rawNotes = bundle.notes, rawChords = bundle.chords, rawAnchors = bundle.anchors;
         const rawTemplates = bundle.chordTemplates;
         const tuning = bundle.tuning, capo = bundle.capo | 0, sc = bundle.stringCount;
+        const targetSig = target.join(',');
         const cacheHit = rawNotes === cacheNotesRef && rawChords === cacheChordsRef
             && rawAnchors === cacheAnchorsRef && rawTemplates === cacheTemplatesRef
-            && tuning === cacheTuningRef && capo === cacheCapo && sc === cacheStringCount;
+            && tuning === cacheTuningRef && capo === cacheCapo && sc === cacheStringCount
+            && targetSig === cacheTargetSig;
 
         if (!cacheHit) {
             cacheNotesRef = rawNotes;
@@ -298,6 +365,7 @@ function createRetuner() {
             cacheTuningRef = tuning;
             cacheCapo = capo;
             cacheStringCount = sc;
+            cacheTargetSig = targetSig;
 
             if (!Number.isFinite(sc) || sc < 1 || !Array.isArray(tuning)) {
                 // Fail safe (shouldn't happen once draw() is gated by
@@ -311,7 +379,7 @@ function createRetuner() {
                 // song — see computeArrangementShift for the Drop C# bug
                 // a per-note global search caused.
                 const sourceOpenMidiByString = computeOpenStringMidiByString(sc, tuning, capo);
-                const shiftK = computeArrangementShift(sc, tuning, capo, sourceOpenMidiByString);
+                const shiftK = computeArrangementShift(sc, tuning, capo, sourceOpenMidiByString, target);
                 const naturalTargetByString = [];
                 for (let s = 0; s < sc; s++) {
                     naturalTargetByString.push(s + shiftK);
@@ -333,7 +401,7 @@ function createRetuner() {
                         bucket.push(n);
                     }
                     for (const bucket of byTime.values()) {
-                        const survivors = resolveChordCollisions(sourceOpenMidiByString, naturalTargetByString, bucket);
+                        const survivors = resolveChordCollisions(sourceOpenMidiByString, naturalTargetByString, bucket, target);
                         for (const { entry, note } of survivors) {
                             const copy = Object.assign({}, note, entry);
                             copy._origNote = note; // keyed against by the note-state provider
@@ -348,7 +416,7 @@ function createRetuner() {
                 const newChords = [];
                 if (Array.isArray(rawChords)) {
                     for (const ch of rawChords) {
-                        const survivors = resolveChordCollisions(sourceOpenMidiByString, naturalTargetByString, ch.notes || []);
+                        const survivors = resolveChordCollisions(sourceOpenMidiByString, naturalTargetByString, ch.notes || [], target);
                         if (survivors.length === 0) continue; // every note collided/unplayable
                         const notesCopy = survivors.map(({ entry, note }) => {
                             const c = Object.assign({}, note, entry);
@@ -361,7 +429,7 @@ function createRetuner() {
                 remappedNotes = newNotes;
                 remappedChords = newChords;
                 remappedAnchors = remapAnchors(rawAnchors, newNotes);
-                remappedTemplates = remapChordTemplates(sourceOpenMidiByString, naturalTargetByString, rawTemplates);
+                remappedTemplates = remapChordTemplates(sourceOpenMidiByString, naturalTargetByString, rawTemplates, target);
             }
         }
 
@@ -374,7 +442,7 @@ function createRetuner() {
     return { apply };
 }
 
-// The added B string has no slot in highway_3d's raw per-index palette —
+// The added low string has no slot in highway_3d's raw per-index palette —
 // under target indexing it would reuse whatever color sits at slot 0 (the
 // color players associate with a 4-string chart's E). Core's named-color
 // system has the right slot for an added low string: "low7" ("Low B",
@@ -382,6 +450,13 @@ function createRetuner() {
 // off the chart's TRUE string count, so it won't assign our synthesized
 // 5th string a color on its own. Read the same "Low B" storage directly
 // instead, so a real user override still applies.
+//
+// This slot is keyed by TARGET STRING INDEX (0), never by the pitch that
+// happens to be tuned there. With custom target tunings (AEADG, drop
+// tunings, ...) string 0 is often not actually a B — deliberately unchanged:
+// per-string colors are a "which string is this" cue for muscle memory, not
+// a note-name indicator, so they stay pinned to BEADG's slot layout for
+// every 5-string tuning rather than being remapped per note.
 //
 // Hex parsing is duplicated from screen.js's _h3dHexToInt rather than
 // imported, to avoid this module depending back on screen.js.
@@ -408,6 +483,10 @@ export const FSE = {
     TARGET_MAX_FRET,
     TARGET_STRING_COUNT,
     TARGET_OPEN_STRING_LABELS,
+    DEFAULT_TARGET_MIDI_TUNING,
+    DEFAULT_TARGET_TUNING,
+    parseTargetNote,
+    resolveTargetTuning,
     standardOpenStringMidi,
     sourceOpenStringMidi,
     computeOpenStringMidiByString,

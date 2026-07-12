@@ -8,10 +8,14 @@
 //
 // Five-String Everything: this file is a fork of highway_3d/screen.js,
 // patched at a small set of PATCH POINTs to draw every note remapped onto a
-// fixed 5-string BEADG target instead of the chart's own tuning. All of that
-// new logic lives in ./src/fse-retune.js (imported as the `FSE` namespace
-// below) rather than inline here, so this file stays as close as possible
-// to upstream highway_3d/screen.js and periodic syncs stay a mechanical diff.
+// 5-string bass target instead of the chart's own tuning. The target string
+// COUNT is always 5 (that's the whole point of the plugin), but which
+// pitches those 5 strings are tuned to is user-configurable via the
+// settings picker (default BEADG; AEADG, BbEbAbDbGb, or any other 5-string
+// tuning also work) — see FSE.resolveTargetTuning. All of that new logic
+// lives in ./src/fse-retune.js (imported as the `FSE` namespace below)
+// rather than inline here, so this file stays as close as possible to
+// upstream highway_3d/screen.js and periodic syncs stay a mechanical diff.
 import { FSE } from './src/fse-retune.js';
 
 (function () {
@@ -815,8 +819,10 @@ import { FSE } from './src/fse-retune.js';
     // for older feedBack cores that don't emit the field. Clamp to the
     // palette size so a malformed bundle or a 12-string chart doesn't
     // index past the per-string material arrays.
-    // PATCH POINT (five-string retune): always the fixed 5-string BEADG
-    // target, never the chart's own string count.
+    // PATCH POINT (five-string retune): always 5 strings — the target
+    // string COUNT is fixed, never the chart's own string count. Which
+    // pitches those 5 strings are tuned to is separately configurable
+    // (see _activeTargetTuning) and has no bearing on the count.
     function resolveStringCount(bundle) {
         return FSE.TARGET_STRING_COUNT;
     }
@@ -825,12 +831,15 @@ import { FSE } from './src/fse-retune.js';
      * @param {number} nEffective string count clamped like nStr / resolveStringCount
      * @param {Record<string, unknown>} songInfo WS song_info blob (subset)
      */
-    // PATCH POINT (five-string retune): fixed BEADG labels
-    // (FSE.TARGET_OPEN_STRING_LABELS) instead of labels derived from the
-    // chart's own tuning.
-    function _openStringPitchLabelsForTuning(bundle, songInfo, nEffective) {
+    // PATCH POINT (five-string retune): labels come from the panel's
+    // active target tuning (custom tunings, feedback: AEADG / BbEbAbDbGb
+    // bassists) rather than the chart's own tuning or a hardcoded BEADG
+    // array. `labels` is this panel's `_activeTargetTuning.labels`, passed
+    // in by the caller (a module-level function can't close over per-panel
+    // state).
+    function _openStringPitchLabelsForTuning(bundle, songInfo, nEffective, labels) {
         const n = Number.isFinite(nEffective) ? Math.min(Math.max(1, Math.trunc(nEffective)), MAX_RENDER_STRINGS) : resolveStringCount(bundle);
-        return FSE.TARGET_OPEN_STRING_LABELS.slice(0, n);
+        return labels.slice(0, n);
     }
 
     const STR_THICK = 0.25 * K;
@@ -2274,7 +2283,12 @@ import { FSE } from './src/fse-retune.js';
         return _bgBandsCache;
     }
 
-    const BG_DEFAULTS = { style: 'particles', intensity: 0.5, reactive: true, palette: 'default', bgTheme: 'default', hwTheme: 'default', showFretOnNote: true, fretNumberGhostScope: 'chords', cameraSmoothing: 0.5, zoomSmoothing: 0.5, tiltSmoothing: 0.5, cameraLockLow: false, cameraLockZoom: 0.5, cameraMode: 'lookahead', nutHeadstockVisible: true, tuningLabelsVisible: true, nutColor: '#f5f3f0', headstockColor: '#d4b48a', textSize: 0.5, vibrancy: 0.85, glow: 0.25, customImageDataUrl: '', customImageName: '', customVideoName: '', chordDiagramVisible: true, chordDiagramSize: 0.5, chordDiagramPosition: 'tl', fretColumnMarkerCadence: 1, projectionVisible: true, inlayLabelsVisible: false, sectionLabelsOnHighway: false, sectionHudVisible: false, sectionHudPosition: 'tr', sectionHudSize: 0.5, toneHudVisible: false, toneHudPosition: 'tl', toneHudSize: 0.5, fpsVisible: false, fretDividersVisible: true, slideArrowApproachVisible: true, slideArrowNeckVisible: true, slideArrowChainPreviewVisible: true, hitFx: 0.7, sparks: true, cinematic: true, verdictMarks: true, timingFx: true, streakFx: true, bloom: true };
+    const BG_DEFAULTS = { style: 'particles', intensity: 0.5, reactive: true, palette: 'default', bgTheme: 'default', hwTheme: 'default', showFretOnNote: true, fretNumberGhostScope: 'chords', cameraSmoothing: 0.5, zoomSmoothing: 0.5, tiltSmoothing: 0.5, cameraLockLow: false, cameraLockZoom: 0.5, cameraMode: 'lookahead', nutHeadstockVisible: true, tuningLabelsVisible: true, nutColor: '#f5f3f0', headstockColor: '#d4b48a', textSize: 0.5, vibrancy: 0.85, glow: 0.25, customImageDataUrl: '', customImageName: '', customVideoName: '', chordDiagramVisible: true, chordDiagramSize: 0.5, chordDiagramPosition: 'tl', fretColumnMarkerCadence: 1, projectionVisible: true, inlayLabelsVisible: false, sectionLabelsOnHighway: false, sectionHudVisible: false, sectionHudPosition: 'tr', sectionHudSize: 0.5, toneHudVisible: false, toneHudPosition: 'tl', toneHudSize: 0.5, fpsVisible: false, fretDividersVisible: true, slideArrowApproachVisible: true, slideArrowNeckVisible: true, slideArrowChainPreviewVisible: true, hitFx: 0.7, sparks: true, cinematic: true, verdictMarks: true, timingFx: true, streakFx: true, bloom: true, targetTuningId: 'beadg', customTunings: '[]' };
+    // Built-in target-tuning id — always available, never deletable. Its
+    // note spec lives in FSE.DEFAULT_TARGET_TUNING (src/fse-retune.js) so
+    // there's exactly one BEADG definition; this id is just the pointer
+    // settings/localStorage use to select it.
+    const FSE_BUILTIN_TUNING_ID = 'beadg';
     // User-selectable, persistable bg styles — must mirror settings.html's
     // VALID_STYLES. 'venue' is deliberately NOT here: it is an internal effective
     // style reached only via _venueSceneOverride (the viz-picker Venue flow), so
@@ -2643,7 +2657,12 @@ import { FSE } from './src/fse-retune.js';
             // UI, so a panel must never be shadowed by a stale per-panel override
             // (fse_bg_panel<idx>_palette / _customColors). Neither is a
             // BG_DEFAULTS key, so per-panel scoping never applied to them.
-            if (key !== 'palette' && key !== 'customColors') {
+            // 'targetTuningId' + 'customTunings' are GLOBAL-only for the same
+            // reason as customColors above, plus a semantic one: the active
+            // tuning describes the player's REAL physical instrument, not a
+            // per-panel aesthetic choice — every splitscreen panel should
+            // remap onto the same bass.
+            if (key !== 'palette' && key !== 'customColors' && key !== 'targetTuningId' && key !== 'customTunings') {
                 panelVal = localStorage.getItem('fse_bg_' + panelKey + '_' + key);
             }
             globalVal = localStorage.getItem('fse_bg_' + key);
@@ -2831,6 +2850,63 @@ import { FSE } from './src/fse-retune.js';
     window.fse3dBgSetSlideArrowApproachVisible = (v) => _bgWriteGlobal('slideArrowApproachVisible', !!v);
     window.fse3dBgSetSlideArrowNeckVisible     = (v) => _bgWriteGlobal('slideArrowNeckVisible', !!v);
     window.fse3dBgSetSlideArrowChainPreviewVisible = (v) => _bgWriteGlobal('slideArrowChainPreviewVisible', !!v);
+
+    // Target-tuning profiles (feedback: some 5-string bassists tune AEADG or
+    // BbEbAbDbGb rather than BEADG). One built-in profile (FSE_BUILTIN_TUNING_ID
+    // = 'beadg', notes from FSE.DEFAULT_TARGET_TUNING) plus any number of
+    // user-saved profiles in the 'customTunings' global JSON blob:
+    // [{ id, name, strings: string[5] }]. Global-only (see _bgReadSetting) —
+    // every panel remaps onto the same real instrument.
+    function _fseReadCustomTunings() {
+        const raw = _bgReadSetting(null, 'customTunings');
+        let list;
+        try { list = JSON.parse(raw || '[]'); } catch (_) { list = []; }
+        return Array.isArray(list)
+            ? list.filter(p => p && typeof p.id === 'string' && typeof p.name === 'string'
+                && Array.isArray(p.strings) && p.strings.length === FSE.TARGET_STRING_COUNT)
+            : [];
+    }
+    function _fseWriteCustomTunings(list) {
+        _bgWriteGlobal('customTunings', JSON.stringify(list));
+    }
+    // Resolves the currently-active tuning to a 5-entry note-spec array
+    // (FSE.resolveTargetTuning's input shape) — the built-in default when
+    // unset/unknown/deleted, so a stale targetTuningId can never leave the
+    // renderer without a usable tuning.
+    function _fseResolveActiveTuningStrings() {
+        const id = _bgReadSetting(null, 'targetTuningId');
+        if (!id || id === FSE_BUILTIN_TUNING_ID) return FSE.DEFAULT_TARGET_TUNING;
+        const found = _fseReadCustomTunings().find(p => p.id === id);
+        return found ? found.strings : FSE.DEFAULT_TARGET_TUNING;
+    }
+    window.fse3dSetActiveTuning = (id) => _bgWriteGlobal('targetTuningId', String(id || FSE_BUILTIN_TUNING_ID));
+    window.fse3dListCustomTunings = () => _fseReadCustomTunings();
+    // Upserts a custom tuning profile by id (generates one for a new
+    // profile). Validates every string via FSE.parseTargetNote so a
+    // malformed entry never reaches localStorage/the renderer. Returns the
+    // saved profile's id, or null if the input didn't validate.
+    window.fse3dSaveCustomTuning = (profile) => {
+        if (!profile || typeof profile.name !== 'string' || !profile.name.trim()) return null;
+        if (!Array.isArray(profile.strings) || profile.strings.length !== FSE.TARGET_STRING_COUNT) return null;
+        for (const s of profile.strings) { if (!FSE.parseTargetNote(s)) return null; }
+        const list = _fseReadCustomTunings();
+        const id = (typeof profile.id === 'string' && profile.id)
+            ? profile.id
+            : 'custom_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+        const entry = { id, name: profile.name.trim(), strings: profile.strings.slice(0, FSE.TARGET_STRING_COUNT) };
+        const idx = list.findIndex(p => p.id === id);
+        if (idx >= 0) list[idx] = entry; else list.push(entry);
+        _fseWriteCustomTunings(list);
+        return id;
+    };
+    window.fse3dDeleteCustomTuning = (id) => {
+        _fseWriteCustomTunings(_fseReadCustomTunings().filter(p => p.id !== id));
+        // Fall back to the built-in default if the deleted profile was active
+        // — otherwise the renderer would keep the old tuning alive purely
+        // via the (now-orphaned) targetTuningId pointer.
+        if (_bgReadSetting(null, 'targetTuningId') === id) window.fse3dSetActiveTuning(FSE_BUILTIN_TUNING_ID);
+    };
+
     // Custom image asset for the 'image' bg style (#19). Composite setter:
     // writes both the data URL (the bytes that drive the texture) and the
     // display filename, each emitting a change event. The listener
@@ -4131,6 +4207,32 @@ import { FSE } from './src/fse-retune.js';
         // _bgLoadSettings force a retint when the in-place custom palette
         // changes values without changing array identity.
         let _bgPaletteSig = '';
+        // Active target tuning for this panel (custom 5-string tunings).
+        // { midiTuning: number[5], labels: string[5] } — midiTuning feeds
+        // _fseRetuner's apply() (chart remap), labels feed the nut
+        // open-string-name sprites. Set to the BEADG default before any
+        // settings load so the very first frame renders correctly;
+        // _bgLoadSettings refreshes it (keyed on _fseTuningSig) whenever the
+        // user's tuning selection changes.
+        //
+        // Live mid-song switch (feedback: changing the tuning while a song
+        // is already playing must take effect immediately, on the CURRENT
+        // playthrough, not just the next song). This falls out of how
+        // _fseRetuner.apply() is called every frame with whatever
+        // _activeTargetTuning.midiTuning currently is: the moment this
+        // variable is reassigned (see the 'targetTuningId'/'customTunings'
+        // _bgListener case below, which fires the instant the setting
+        // changes), createRetuner's own targetSig cache check (src/fse-
+        // retune.js) detects the mismatch on the very next draw() call and
+        // fully re-derives bundle.notes/.chords/.anchors/.chordTemplates
+        // from the chart's RAW, unfiltered data (not from whatever was
+        // previously kept/dropped) — so a note that was dropped as
+        // unplayable under the old tuning is transparently reconsidered,
+        // and reappears if it's now in range under the new one. No
+        // separate "undo the drop" logic is needed; every tuning switch is
+        // a from-scratch remap, not an incremental patch.
+        let _activeTargetTuning = FSE.resolveTargetTuning(FSE.DEFAULT_TARGET_TUNING);
+        let _fseTuningSig = FSE.DEFAULT_TARGET_TUNING.join('|');
         // Fret digits on the board ghost (hollow preview at Z=0), not on
         // flying note bodies — see fretNumberGhostScope for chord-hand vs all.
         let showFretOnNote = false;
@@ -5457,7 +5559,7 @@ import { FSE } from './src/fse-retune.js';
             ) return;
             // One of the inputs changed — fall through to the canonical signature
             // check (catches value-equal-but-different-ref tuning arrays).
-            const labels = _openStringPitchLabelsForTuning(bundle, si, nStr);
+            const labels = _openStringPitchLabelsForTuning(bundle, si, nStr, _activeTargetTuning.labels);
             const sig = _openStringLabelSignature(bundle, labels);
             // Refresh cheap-key cache regardless of signature outcome so future
             // frames can fast-path even when the sig matched.
@@ -7747,6 +7849,17 @@ import { FSE } from './src/fse-retune.js';
                     if (_tuningLabelSprites.length) _disposeOpenStringPitchSprites();
                     return;
                 }
+                if (changedKey === 'targetTuningId' || changedKey === 'customTunings') {
+                    // Active target tuning changed (or a saved custom
+                    // profile's own notes were edited). _bgLoadSettings
+                    // re-resolves _activeTargetTuning and, on an actual
+                    // change, already disposes the nut label sprites itself
+                    // (see the tuningSig check inside it) — nothing further
+                    // to do here: the chart remap picks up the new
+                    // _activeTargetTuning.midiTuning on the very next draw() call.
+                    _bgLoadSettings();
+                    return;
+                }
                 if (changedKey === 'nutColor' || changedKey === 'headstockColor') {
                     _bgLoadSettings();
                     if (fretG) buildBoard();
@@ -8042,6 +8155,27 @@ import { FSE } from './src/fse-retune.js';
                 _fsePaletteSrcRef = newPalette;
                 _bgPaletteSig = newSig;
                 _applyPaletteToMaterials();
+            }
+            // PATCH POINT (five-string retune, custom tunings): re-resolve
+            // the active target tuning. Cheap (5-entry array join) so it's
+            // safe to check every _bgLoadSettings call rather than only on
+            // the 'targetTuningId'/'customTunings' listener cases — a
+            // custom tuning's OWN string specs can change via Save/Edit
+            // without the active id changing, and _bgLoadSettings is the
+            // only place that runs on every settings reload regardless of
+            // which key triggered it.
+            const tuningStrings = _fseResolveActiveTuningStrings();
+            const tuningSig = tuningStrings.join('|');
+            if (tuningSig !== _fseTuningSig) {
+                _activeTargetTuning = FSE.resolveTargetTuning(tuningStrings);
+                _fseTuningSig = tuningSig;
+                // Force the nut open-string-name sprites to rebuild next
+                // frame — the cheap-key fast path in _syncOpenStringPitchLabels
+                // doesn't itself notice a tuning change, only a disposed
+                // sprite pool does (mirrors the tuningLabelsVisible listener
+                // case below).
+                _lastOpenStringLblSig = '';
+                if (_tuningLabelSprites.length) _disposeOpenStringPitchSprites();
             }
             bgThemeId = _bgReadSetting(panelKey, 'bgTheme');
             // Highway axis. ONE-TIME BACKWARD-COMPAT BACKFILL: the first time we
@@ -15167,8 +15301,9 @@ import { FSE } from './src/fse-retune.js';
         }
 
         // PATCH POINT (five-string retune): remaps bundle.notes/.chords/
-        // .anchors/.chordTemplates to the fixed BEADG target IN PLACE, so
-        // every downstream reader in this file sees the remapped chart with
+        // .anchors/.chordTemplates to the active target tuning (BEADG by
+        // default, user-configurable) IN PLACE, so every downstream reader
+        // in this file sees the remapped chart with
         // no per-usage-site changes needed. Safe to mutate: `bundle` is this
         // createHighway() instance's own object. One retuner per
         // createFactory() instance (not module scope) so splitscreen panels
@@ -15283,7 +15418,7 @@ import { FSE } from './src/fse-retune.js';
             draw(bundle) {
                 if (!_isReady) return;
                 if (_ctxLost) return;   // GPU context lost (alt-tab / reset) — skip until restored
-                _fseRetuner.apply(bundle); // PATCH POINT (five-string retune) — before anything else reads bundle.notes/chords
+                _fseRetuner.apply(bundle, _activeTargetTuning.midiTuning); // PATCH POINT (five-string retune) — before anything else reads bundle.notes/chords
                 if (!_chartPrewarmed) {
                     _chartPrewarmed = true;
                     _prewarmChart(bundle);

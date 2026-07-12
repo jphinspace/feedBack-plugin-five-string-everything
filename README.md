@@ -1,10 +1,16 @@
 # Five-String Everything
 
 A [feedBack](https://github.com/got-feedBack/feedBack) plugin that lets a
-5-string BEADG bass play **any** bass chart, in any source tuning (Drop D,
+5-string bass play **any** bass chart, in any source tuning (Drop D,
 Drop C#, whatever), by remapping each note to the correct string/fret for a
-fixed BEADG target instead of the chart's original tuning. Notes outside a
-20-fret BEADG bass's range are dropped.
+fixed 5-string target instead of the chart's original tuning. Notes outside a
+20-fret target bass's range are dropped.
+
+The target tuning defaults to BEADG but is fully configurable in the
+plugin's settings (Bass Tuning section) — save your own (AEADG, a
+half-step-flat BbEbAbDbGb, or anything else) and switch between them live,
+no reload required. Per-string colors stay pinned to string position, not
+note name, so switching tunings never reshuffles them.
 
 It's a fork of the bundled [`highway_3d`](https://github.com/got-feedBack/feedBack/tree/main/plugins/highway_3d)
 plugin — same 3D highway, same settings, same everything, except note gems
@@ -13,7 +19,8 @@ string/fret. It runs alongside `highway_3d` without modifying it; **`highway_3d`
 must stay installed** — this plugin depends on it for shared features
 (Highway String Colors) and reuses its whole rendering engine as a base.
 
-MVP scope: bass arrangements only, fixed BEADG target (no tuning picker yet).
+MVP scope: bass arrangements only (no guitar lead/rhythm support), fixed
+5-string target (no 4/6/7/8-string target support).
 
 See [`PLANNING.md`](PLANNING.md) for the full design writeup — the algorithm,
 every patch point against `highway_3d`, and why each one exists.
