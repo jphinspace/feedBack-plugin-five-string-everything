@@ -1,7 +1,7 @@
-// Five-String Everything — per-string color role resolution + hex
-// handling. One of four modules fse-retune.js aggregates into `FSE`.
+// Chart Retuner — per-string color role resolution + hex
+// handling. One of four modules chart-retune.js aggregates into `CR`.
 // screen.js owns the actual palette values (PALETTES.default,
-// FSE.lowBColor()); this module only produces symbolic roles.
+// CR.lowBColor()); this module only produces symbolic roles.
 
 import { parseTargetNote } from './pitch.js';
 import { EXTENDED_DEFAULT_TARGET_TUNING } from './target-tuning.js';
@@ -14,7 +14,7 @@ const _colorRoleByMidi = new Map(
     EXTENDED_DEFAULT_TARGET_TUNING.map((spec, i) => [parseTargetNote(spec).midi, EXTENDED_COLOR_ROLES[i]])
 );
 
-// Color role for a note produced by FSE.defaultExtensionNote — used to
+// Color role for a note produced by CR.defaultExtensionNote — used to
 // pick a default color for a newly added string. 'gray' for anything
 // outside the known chain. Note-based, not position-based, since an
 // added string's only stable identity is its own note (see

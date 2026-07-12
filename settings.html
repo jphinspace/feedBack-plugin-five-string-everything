@@ -1,5 +1,5 @@
 <div class="p-4">
-    <div class="fb-text font-semibold">Five-String Everything</div>
+    <div class="fb-text font-semibold">Chart Retuner</div>
     <div class="fb-textDim text-sm">v0.1.5</div>
     <p class="fb-textDim text-xs mt-1">
         Controls below mirror 3D Highway's own settings — this plugin
@@ -10,8 +10,8 @@
     </p>
 </div>
 
-<div role="group" aria-labelledby="fse3d-tuning-heading" class="mt-6">
-    <h3 id="fse3d-tuning-heading" class="text-sm font-medium text-gray-400 mb-2">Bass Tuning</h3>
+<div role="group" aria-labelledby="cr3d-tuning-heading" class="mt-6">
+    <h3 id="cr3d-tuning-heading" class="text-sm font-medium text-gray-400 mb-2">Bass Tuning</h3>
     <p class="text-xs text-gray-500 mb-3">
         Every chart, in any source tuning, is remapped onto this target
         tuning — which pitches, and how many strings (4-8), are up to you.
@@ -27,8 +27,8 @@
     </p>
 
     <div class="mt-3">
-        <label for="fse3d-tuning-active" class="text-xs font-medium text-gray-400 mb-1 block">Active tuning</label>
-        <select id="fse3d-tuning-active"
+        <label for="cr3d-tuning-active" class="text-xs font-medium text-gray-400 mb-1 block">Active tuning</label>
+        <select id="cr3d-tuning-active"
             class="w-full bg-dark-700 border border-gray-800 rounded-lg px-3 py-2 text-xs text-gray-300 outline-none">
         </select>
         <p class="text-[10px] text-gray-500 mt-1">Applies to the highway immediately — no reload required.</p>
@@ -36,27 +36,27 @@
 
     <div class="mt-4">
         <p class="text-xs font-medium text-gray-400 mb-1">Saved custom tunings</p>
-        <div id="fse3d-tuning-list" class="space-y-1"></div>
+        <div id="cr3d-tuning-list" class="space-y-1"></div>
     </div>
 
     <div class="mt-4 rounded-lg border border-gray-800 bg-dark-700/40 p-3">
-        <p class="text-xs font-medium text-gray-400 mb-2" id="fse3d-tuning-form-heading">Add a tuning</p>
+        <p class="text-xs font-medium text-gray-400 mb-2" id="cr3d-tuning-form-heading">Add a tuning</p>
         <div class="mt-1">
-            <label for="fse3d-tuning-name" class="text-xs font-medium text-gray-400 mb-1 block">Name</label>
-            <input type="text" id="fse3d-tuning-name" placeholder="e.g. AEADG"
+            <label for="cr3d-tuning-name" class="text-xs font-medium text-gray-400 mb-1 block">Name</label>
+            <input type="text" id="cr3d-tuning-name" placeholder="e.g. AEADG"
                 class="w-full bg-dark-700 border border-gray-800 rounded-lg px-3 py-2 text-xs text-gray-300 outline-none">
         </div>
 
         <div class="mt-3">
-            <button type="button" id="fse3d-tuning-add-low"
+            <button type="button" id="cr3d-tuning-add-low"
                 class="w-full text-xs px-3 py-1.5 rounded bg-dark-700 border border-gray-800 text-gray-300 hover:text-white">+ Add string below (low)</button>
         </div>
-        <div id="fse3d-tuning-rows" class="space-y-2 mt-2"></div>
+        <div id="cr3d-tuning-rows" class="space-y-2 mt-2"></div>
         <div class="mt-2">
-            <button type="button" id="fse3d-tuning-add-high"
+            <button type="button" id="cr3d-tuning-add-high"
                 class="w-full text-xs px-3 py-1.5 rounded bg-dark-700 border border-gray-800 text-gray-300 hover:text-white">+ Add string above (high)</button>
         </div>
-        <p id="fse3d-tuning-limit-note" class="text-[10px] text-gray-500 mt-1 hidden"></p>
+        <p id="cr3d-tuning-limit-note" class="text-[10px] text-gray-500 mt-1 hidden"></p>
 
         <p class="text-[10px] text-gray-500 mt-2">
             Pick each string's open note from the dropdown, low string
@@ -69,11 +69,11 @@
             be different octaves (<code>D2</code> and <code>D3</code>).
             4-8 strings, C-1 to E5 (covers violin's open high E).
         </p>
-        <p id="fse3d-tuning-form-error" class="text-xs text-red-400 mt-2 hidden"></p>
+        <p id="cr3d-tuning-form-error" class="text-xs text-red-400 mt-2 hidden"></p>
         <div class="flex gap-2 mt-3">
-            <button type="button" id="fse3d-tuning-save"
+            <button type="button" id="cr3d-tuning-save"
                 class="text-xs px-3 py-1.5 rounded bg-accent text-white">Save</button>
-            <button type="button" id="fse3d-tuning-cancel"
+            <button type="button" id="cr3d-tuning-cancel"
                 class="text-xs px-3 py-1.5 rounded bg-dark-700 border border-gray-800 text-gray-400 hover:text-gray-200 hidden">Cancel edit</button>
         </div>
     </div>
@@ -83,7 +83,7 @@
         const $ = (id) => document.getElementById(id);
         const BUILTIN_ID = 'beadg';
         const BEADG_STRINGS = ['B0', 'E1', 'A1', 'D2', 'G2'];
-        // Mirrors FSE.BUILTIN_PRESET_TUNINGS (src/target-tuning.js) — this
+        // Mirrors CR.BUILTIN_PRESET_TUNINGS (src/target-tuning.js) — this
         // script isn't a module and can't import it (same reason every other
         // local mirror in this file exists). BEADG is always first and is
         // the default (colors: null — resolved live off the global palette
@@ -96,10 +96,10 @@
             { id: BUILTIN_ID, label: 'BEADG (default)', strings: BEADG_STRINGS, colors: null },
             { id: 'cello_cgda', label: 'Cello (CGDA)', strings: ['C2', 'G2', 'D3', 'A3'], colors: ['#cc00aa', '#f18313', '#3fc413', '#ecd234'] },
         ];
-        // Mirrors FSE.MIN_TARGET_STRING_COUNT / MAX_TARGET_STRING_COUNT
-        // (src/fse-retune.js) for immediate client-side feedback (button
+        // Mirrors CR.MIN_TARGET_STRING_COUNT / MAX_TARGET_STRING_COUNT
+        // (src/chart-retune.js) for immediate client-side feedback (button
         // disabling) — the authoritative floor/ceiling is enforced in
-        // window.fse3dSaveCustomTuning.
+        // window.cr3dSaveCustomTuning.
         const MIN_STRINGS = 4;
         const MAX_STRINGS = 8;
         // Fixed note range offered in each per-string dropdown (MIDI 0-76,
@@ -111,11 +111,11 @@
         const NOTE_OPTION_MAX_MIDI = 76;
 
         function readActiveId() {
-            try { return localStorage.getItem('fse_bg_targetTuningId') || BUILTIN_ID; } catch (_) { return BUILTIN_ID; }
+            try { return localStorage.getItem('chart_retuner_bg_targetTuningId') || BUILTIN_ID; } catch (_) { return BUILTIN_ID; }
         }
         function readCustom() {
             let raw = null;
-            try { raw = localStorage.getItem('fse_bg_customTunings'); } catch (_) { /* storage blocked */ }
+            try { raw = localStorage.getItem('chart_retuner_bg_customTunings'); } catch (_) { /* storage blocked */ }
             let list;
             try { list = JSON.parse(raw || '[]'); } catch (_) { list = []; }
             return Array.isArray(list)
@@ -124,25 +124,25 @@
                 : [];
         }
         // Fallback persistence for the narrow window before screen.js has
-        // registered window.fse3d* (settings.html usually renders first —
+        // registered window.cr3d* (settings.html usually renders first —
         // see the NOTE on the custom-image style-correction path below in
         // this same file). Live-apply won't happen until the next reload
         // in that case, but the setting itself is never lost.
         function writeCustomFallback(list) {
-            try { localStorage.setItem('fse_bg_customTunings', JSON.stringify(list)); } catch (_) { /* storage blocked */ }
+            try { localStorage.setItem('chart_retuner_bg_customTunings', JSON.stringify(list)); } catch (_) { /* storage blocked */ }
         }
         function writeActiveFallback(id) {
-            try { localStorage.setItem('fse_bg_targetTuningId', id); } catch (_) { /* storage blocked */ }
+            try { localStorage.setItem('chart_retuner_bg_targetTuningId', id); } catch (_) { /* storage blocked */ }
         }
 
-        // --- Local fallbacks for window.fse3dDefaultStringFor /
-        // window.fse3dResolveDisplayColor, for the same narrow pre-load
-        // window as above. Mirrors FSE.defaultExtensionNote's note math and
-        // FSE.colorRoleForNote's note->role table (resolved to actual
-        // colors via screen.js's own _fseColorForRole, mirrored here too
+        // --- Local fallbacks for window.cr3dDefaultStringFor /
+        // window.cr3dResolveDisplayColor, for the same narrow pre-load
+        // window as above. Mirrors CR.defaultExtensionNote's note math and
+        // CR.colorRoleForNote's note->role table (resolved to actual
+        // colors via screen.js's own _crColorForRole, mirrored here too
         // as LOCAL_DEFAULT_COLOR_BY_MIDI) verbatim — a static duplicate
         // rather than a shared import (this script isn't a module and
-        // can't import src/fse-retune.js). Only used until screen.js
+        // can't import src/chart-retune.js). Only used until screen.js
         // registers the real bridge, so a stale palette customization here
         // just means the very first suggested default
         // color may not match the user's own "Low B"/palette pick until
@@ -173,10 +173,10 @@
             return (midi != null && LOCAL_DEFAULT_COLOR_BY_MIDI[midi]) || (index === 0 ? '#cc00aa' : '#e61f26');
         }
         function defaultStringFor(direction, edgeNoteSpec) {
-            return window.fse3dDefaultStringFor ? window.fse3dDefaultStringFor(direction, edgeNoteSpec) : localDefaultStringFor(direction, edgeNoteSpec);
+            return window.cr3dDefaultStringFor ? window.cr3dDefaultStringFor(direction, edgeNoteSpec) : localDefaultStringFor(direction, edgeNoteSpec);
         }
         function resolveDisplayColor(strings, colors, index) {
-            return window.fse3dResolveDisplayColor ? window.fse3dResolveDisplayColor(strings, colors, index) : localResolveDisplayColor(strings, colors, index);
+            return window.cr3dResolveDisplayColor ? window.cr3dResolveDisplayColor(strings, colors, index) : localResolveDisplayColor(strings, colors, index);
         }
 
         // Every BEADG-default note (B0/E1/A1/D2/G2), by MIDI — highlighted
@@ -207,18 +207,18 @@
             if (currentMidi != null) selectEl.value = localNoteFromMidi(currentMidi);
         }
 
-        const sel = $('fse3d-tuning-active');
+        const sel = $('cr3d-tuning-active');
         if (!sel) return;
-        const listEl = $('fse3d-tuning-list');
-        const nameInput = $('fse3d-tuning-name');
-        const rowsEl = $('fse3d-tuning-rows');
-        const addLowBtn = $('fse3d-tuning-add-low');
-        const addHighBtn = $('fse3d-tuning-add-high');
-        const limitNoteP = $('fse3d-tuning-limit-note');
-        const errorP = $('fse3d-tuning-form-error');
-        const saveBtn = $('fse3d-tuning-save');
-        const cancelBtn = $('fse3d-tuning-cancel');
-        const formHeading = $('fse3d-tuning-form-heading');
+        const listEl = $('cr3d-tuning-list');
+        const nameInput = $('cr3d-tuning-name');
+        const rowsEl = $('cr3d-tuning-rows');
+        const addLowBtn = $('cr3d-tuning-add-low');
+        const addHighBtn = $('cr3d-tuning-add-high');
+        const limitNoteP = $('cr3d-tuning-limit-note');
+        const errorP = $('cr3d-tuning-form-error');
+        const saveBtn = $('cr3d-tuning-save');
+        const cancelBtn = $('cr3d-tuning-cancel');
+        const formHeading = $('cr3d-tuning-form-heading');
 
         let editingId = null; // null = "add new"
         let rows = []; // [{ note, color }], low to high — the editor's working state
@@ -307,7 +307,7 @@
                 rowDiv.appendChild(label);
 
                 const noteSelect = document.createElement('select');
-                noteSelect.className = 'fse3d-row-note flex-1 min-w-0 bg-dark-700 border border-gray-800 rounded px-2 py-1 text-xs text-gray-300 outline-none';
+                noteSelect.className = 'cr3d-row-note flex-1 min-w-0 bg-dark-700 border border-gray-800 rounded px-2 py-1 text-xs text-gray-300 outline-none';
                 populateNoteOptions(noteSelect, r.note);
                 noteSelect.addEventListener('change', () => { rows[i].note = noteSelect.value; });
                 rowDiv.appendChild(noteSelect);
@@ -316,7 +316,7 @@
                 colorInput.type = 'color';
                 colorInput.value = r.color;
                 colorInput.title = 'String ' + (i + 1) + ' color';
-                colorInput.className = 'fse3d-row-color w-8 h-8 rounded border border-gray-800 bg-dark-700 shrink-0 p-0';
+                colorInput.className = 'cr3d-row-color w-8 h-8 rounded border border-gray-800 bg-dark-700 shrink-0 p-0';
                 colorInput.addEventListener('input', () => { rows[i].color = colorInput.value; });
                 rowDiv.appendChild(colorInput);
 
@@ -385,8 +385,8 @@
 
         function deleteProfile(profile) {
             if (!window.confirm('Delete tuning "' + profile.name + '"?')) return;
-            if (window.fse3dDeleteCustomTuning) {
-                window.fse3dDeleteCustomTuning(profile.id);
+            if (window.cr3dDeleteCustomTuning) {
+                window.cr3dDeleteCustomTuning(profile.id);
             } else {
                 writeCustomFallback(readCustom().filter((p) => p.id !== profile.id));
                 if (readActiveId() === profile.id) writeActiveFallback(BUILTIN_ID);
@@ -397,7 +397,7 @@
         }
 
         sel.addEventListener('change', () => {
-            if (window.fse3dSetActiveTuning) window.fse3dSetActiveTuning(sel.value);
+            if (window.cr3dSetActiveTuning) window.cr3dSetActiveTuning(sel.value);
             else writeActiveFallback(sel.value);
         });
 
@@ -434,8 +434,8 @@
                 const profile = { name: name, strings: strings, colors: colors };
                 if (editingId) profile.id = editingId;
                 let savedId = null;
-                if (window.fse3dSaveCustomTuning) {
-                    savedId = window.fse3dSaveCustomTuning(profile);
+                if (window.cr3dSaveCustomTuning) {
+                    savedId = window.cr3dSaveCustomTuning(profile);
                 } else {
                     const list = readCustom();
                     const id = editingId || ('custom_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8));
@@ -459,14 +459,14 @@
     </script>
 </div>
 
-<div role="group" aria-labelledby="fse3d-fretboard-heading" class="mt-6">
-    <h3 id="fse3d-fretboard-heading" class="text-sm font-medium text-gray-400 mb-2">3D Highway — Fretboard</h3>
+<div role="group" aria-labelledby="cr3d-fretboard-heading" class="mt-6">
+    <h3 id="cr3d-fretboard-heading" class="text-sm font-medium text-gray-400 mb-2">3D Highway — Fretboard</h3>
 
     <!-- Fret spacing -->
     <div class="mt-3">
-        <label for="fse3d-fret-spacing" class="text-xs font-medium text-gray-400 mb-1 block">Fret spacing</label>
-        <select id="fse3d-fret-spacing"
-            onchange="window.fse3dSetFretSpacing && window.fse3dSetFretSpacing(this.value)"
+        <label for="cr3d-fret-spacing" class="text-xs font-medium text-gray-400 mb-1 block">Fret spacing</label>
+        <select id="cr3d-fret-spacing"
+            onchange="window.cr3dSetFretSpacing && window.cr3dSetFretSpacing(this.value)"
             class="w-full bg-dark-700 border border-gray-800 rounded-lg px-3 py-2 text-xs text-gray-300 outline-none">
             <option value="uniform">Uniform (equal width per fret)</option>
             <option value="logarithmic">Instrument (logarithmic — decreasing toward bridge)</option>
@@ -476,10 +476,10 @@
 
     <script>
     (function () {
-        const sel = document.getElementById('fse3d-fret-spacing');
+        const sel = document.getElementById('cr3d-fret-spacing');
         if (sel) {
             try {
-                sel.value = localStorage.getItem('five_string_everything.fretSpacing') === 'logarithmic' ? 'logarithmic' : 'uniform';
+                sel.value = localStorage.getItem('chart_retuner.fretSpacing') === 'logarithmic' ? 'logarithmic' : 'uniform';
             } catch (_) {
                 sel.value = 'uniform';
             }
@@ -488,8 +488,8 @@
     </script>
 </div>
 
-<div role="group" aria-labelledby="fse3d-bg-heading" class="mt-6">
-    <h3 id="fse3d-bg-heading" class="text-sm font-medium text-gray-400 mb-2">3D Highway — Background</h3>
+<div role="group" aria-labelledby="cr3d-bg-heading" class="mt-6">
+    <h3 id="cr3d-bg-heading" class="text-sm font-medium text-gray-400 mb-2">3D Highway — Background</h3>
     <p class="text-xs text-gray-500 mb-3">
         Subtle ambient animation in the distant fog area beyond the highway.
         Settings here apply to all 3D Highway panels by default; per-panel
@@ -498,9 +498,9 @@
 
     <!-- Style -->
     <div class="mt-3">
-        <label for="fse3d-bg-style" class="text-xs font-medium text-gray-400 mb-1 block">Style</label>
-        <select id="fse3d-bg-style"
-            onchange="window.fse3dBgSetStyle && window.fse3dBgSetStyle(this.value)"
+        <label for="cr3d-bg-style" class="text-xs font-medium text-gray-400 mb-1 block">Style</label>
+        <select id="cr3d-bg-style"
+            onchange="window.cr3dBgSetStyle && window.cr3dBgSetStyle(this.value)"
             class="w-full bg-dark-700 border border-gray-800 rounded-lg px-3 py-2 text-xs text-gray-300 outline-none">
             <option value="off">Off</option>
             <option value="particles" selected>Particles (drifting)</option>
@@ -519,11 +519,11 @@
          same in both gives the original "matched" look. "Default" is the
          original look on both. -->
     <div class="mt-3">
-        <label for="fse3d-bg-theme" class="text-xs font-medium text-gray-400 mb-1 block">Background</label>
+        <label for="cr3d-bg-theme" class="text-xs font-medium text-gray-400 mb-1 block">Background</label>
         <!-- Options are populated from SCENE_THEMES (the single id+label source)
              in the hydration script below, so the two dropdowns can't drift. -->
-        <select id="fse3d-bg-theme"
-            onchange="window.fse3dBgSetBgTheme && window.fse3dBgSetBgTheme(this.value)"
+        <select id="cr3d-bg-theme"
+            onchange="window.cr3dBgSetBgTheme && window.cr3dBgSetBgTheme(this.value)"
             class="w-full bg-dark-700 border border-gray-800 rounded-lg px-3 py-2 text-xs text-gray-300 outline-none">
         </select>
         <p class="text-[10px] text-gray-500 mt-1">
@@ -531,11 +531,11 @@
         </p>
     </div>
     <div class="mt-3">
-        <label for="fse3d-hw-theme" class="text-xs font-medium text-gray-400 mb-1 block">Highway (surface + lane)</label>
+        <label for="cr3d-hw-theme" class="text-xs font-medium text-gray-400 mb-1 block">Highway (surface + lane)</label>
         <!-- Options populated from SCENE_THEMES (see below), same source as the
              Background dropdown so the two stay in lockstep. -->
-        <select id="fse3d-hw-theme"
-            onchange="window.fse3dBgSetHwTheme && window.fse3dBgSetHwTheme(this.value)"
+        <select id="cr3d-hw-theme"
+            onchange="window.cr3dBgSetHwTheme && window.cr3dBgSetHwTheme(this.value)"
             class="w-full bg-dark-700 border border-gray-800 rounded-lg px-3 py-2 text-xs text-gray-300 outline-none">
         </select>
         <p class="text-[10px] text-gray-500 mt-1">
@@ -547,83 +547,83 @@
          Background style. They used to live in a floating in-canvas panel; the
          on/off + slider controls now live here in the standard settings UI.
          The live preset browser (pick / favorite / ban / cycle) stays in-canvas.
-         Persisted in the 'fse_fse_viz3d_settings' localStorage blob (shared with the
-         in-canvas preset controls); window.fse3dBcApplySettings() pushes changes
+         Persisted in the 'chart_retuner_viz3d_settings' localStorage blob (shared with the
+         in-canvas preset controls); window.cr3dBcApplySettings() pushes changes
          to a mounted highway live. -->
-    <div id="fse3d-bc-section" class="mt-4">
+    <div id="cr3d-bc-section" class="mt-4">
         <h3 class="text-sm font-medium text-gray-400 mb-2">Butterchurn (visualizer)</h3>
         <p class="text-xs text-gray-500 mb-2">Active when Background style is set to <em>Butterchurn (visualizer)</em>.</p>
         <div class="flex items-center gap-3 mt-3">
             <label class="flex items-center gap-2 text-sm text-gray-300">
-                <input type="checkbox" id="fse3d-bc-enabled" class="accent-accent"> Background on
+                <input type="checkbox" id="cr3d-bc-enabled" class="accent-accent"> Background on
             </label>
         </div>
         <div class="mt-3">
-            <label for="fse3d-bc-opacity" class="text-xs font-medium text-gray-400 mb-1 block">Opacity: <span id="fse3d-bc-opacity-label">100%</span></label>
-            <input type="range" id="fse3d-bc-opacity" min="0" max="100" class="w-full accent-accent">
+            <label for="cr3d-bc-opacity" class="text-xs font-medium text-gray-400 mb-1 block">Opacity: <span id="cr3d-bc-opacity-label">100%</span></label>
+            <input type="range" id="cr3d-bc-opacity" min="0" max="100" class="w-full accent-accent">
         </div>
         <div class="flex items-center gap-3 mt-3">
             <label class="flex items-center gap-2 text-sm text-gray-300">
-                <input type="checkbox" id="fse3d-bc-laneDim" class="accent-accent"> Dim behind lane
+                <input type="checkbox" id="cr3d-bc-laneDim" class="accent-accent"> Dim behind lane
             </label>
         </div>
         <div class="mt-3">
-            <label for="fse3d-bc-laneDimStrength" class="text-xs font-medium text-gray-400 mb-1 block">Dim strength</label>
-            <input type="range" id="fse3d-bc-laneDimStrength" min="0" max="100" class="w-full accent-accent">
+            <label for="cr3d-bc-laneDimStrength" class="text-xs font-medium text-gray-400 mb-1 block">Dim strength</label>
+            <input type="range" id="cr3d-bc-laneDimStrength" min="0" max="100" class="w-full accent-accent">
         </div>
         <div class="flex items-center gap-3 mt-3">
             <label class="flex items-center gap-2 text-sm text-gray-300">
-                <input type="checkbox" id="fse3d-bc-chartAccents" class="accent-accent"> Chart accents
+                <input type="checkbox" id="cr3d-bc-chartAccents" class="accent-accent"> Chart accents
             </label>
         </div>
         <div class="mt-3">
-            <label for="fse3d-bc-chartStrength" class="text-xs font-medium text-gray-400 mb-1 block">Chart strength</label>
-            <input type="range" id="fse3d-bc-chartStrength" min="0" max="200" class="w-full accent-accent">
+            <label for="cr3d-bc-chartStrength" class="text-xs font-medium text-gray-400 mb-1 block">Chart strength</label>
+            <input type="range" id="cr3d-bc-chartStrength" min="0" max="200" class="w-full accent-accent">
         </div>
         <div class="flex items-center gap-3 mt-3">
             <label class="flex items-center gap-2 text-sm text-gray-300">
-                <input type="checkbox" id="fse3d-bc-colorTint" class="accent-accent"> Color tint
+                <input type="checkbox" id="cr3d-bc-colorTint" class="accent-accent"> Color tint
             </label>
         </div>
         <div class="mt-3">
-            <label for="fse3d-bc-tintStrength" class="text-xs font-medium text-gray-400 mb-1 block">Tint strength</label>
-            <input type="range" id="fse3d-bc-tintStrength" min="0" max="100" class="w-full accent-accent">
+            <label for="cr3d-bc-tintStrength" class="text-xs font-medium text-gray-400 mb-1 block">Tint strength</label>
+            <input type="range" id="cr3d-bc-tintStrength" min="0" max="100" class="w-full accent-accent">
         </div>
         <div class="mt-3">
-            <label for="fse3d-bc-guitarGain" class="text-xs font-medium text-gray-400 mb-1 block">Guitar gain: <span id="fse3d-bc-guitarGain-label">×6</span></label>
-            <input type="range" id="fse3d-bc-guitarGain" min="1" max="12" step="0.5" class="w-full accent-accent">
+            <label for="cr3d-bc-guitarGain" class="text-xs font-medium text-gray-400 mb-1 block">Guitar gain: <span id="cr3d-bc-guitarGain-label">×6</span></label>
+            <input type="range" id="cr3d-bc-guitarGain" min="1" max="12" step="0.5" class="w-full accent-accent">
         </div>
         <div class="mt-3">
-            <label for="fse3d-bc-songGain" class="text-xs font-medium text-gray-400 mb-1 block">Song gain: <span id="fse3d-bc-songGain-label">×1.8</span></label>
-            <input type="range" id="fse3d-bc-songGain" min="0" max="5" step="0.1" class="w-full accent-accent">
+            <label for="cr3d-bc-songGain" class="text-xs font-medium text-gray-400 mb-1 block">Song gain: <span id="cr3d-bc-songGain-label">×1.8</span></label>
+            <input type="range" id="cr3d-bc-songGain" min="0" max="5" step="0.1" class="w-full accent-accent">
         </div>
     </div>
     <script>
         // Self-contained Butterchurn settings wiring. Reads/writes the same
-        // 'fse_fse_viz3d_settings' blob the in-canvas preset controls use (read-modify-
+        // 'chart_retuner_viz3d_settings' blob the in-canvas preset controls use (read-modify-
         // write preserves cyclePool/hold and the favorites/bans lists), then
-        // calls window.fse3dBcApplySettings() so a mounted highway applies the
+        // calls window.cr3dBcApplySettings() so a mounted highway applies the
         // change live. Guarded so it no-ops if the section isn't present.
         (function () {
-            const BC_LS = 'fse_fse_viz3d_settings';
+            const BC_LS = 'chart_retuner_viz3d_settings';
             const BC_DEFAULTS = { enabled: true, opacity: 1.0, laneDim: true, laneDimStrength: 0.45, chartAccents: true, colorTint: true, chartStrength: 1.0, tintStrength: 0.65, guitarGain: 6, songGain: 1.8 };
             function readBlob() { let s = {}; try { s = JSON.parse(localStorage.getItem(BC_LS) || '{}') || {}; } catch (e) {} return s; }
             function patch(p) {
                 const s = readBlob();
                 Object.assign(s, p);
                 try { localStorage.setItem(BC_LS, JSON.stringify(s)); } catch (e) {}
-                try { if (typeof window.fse3dBcApplySettings === 'function') window.fse3dBcApplySettings(); } catch (e) {}
+                try { if (typeof window.cr3dBcApplySettings === 'function') window.cr3dBcApplySettings(); } catch (e) {}
             }
             const s = Object.assign({}, BC_DEFAULTS, readBlob());
             const $ = (id) => document.getElementById(id);
-            const en = $('fse3d-bc-enabled');
+            const en = $('cr3d-bc-enabled');
             if (!en) return;
-            const op = $('fse3d-bc-opacity'), opv = $('fse3d-bc-opacity-label');
-            const ld = $('fse3d-bc-laneDim'), lds = $('fse3d-bc-laneDimStrength');
-            const ca = $('fse3d-bc-chartAccents'), cs = $('fse3d-bc-chartStrength');
-            const ct = $('fse3d-bc-colorTint'), ts = $('fse3d-bc-tintStrength');
-            const gg = $('fse3d-bc-guitarGain'), ggv = $('fse3d-bc-guitarGain-label');
-            const sg = $('fse3d-bc-songGain'), sgv = $('fse3d-bc-songGain-label');
+            const op = $('cr3d-bc-opacity'), opv = $('cr3d-bc-opacity-label');
+            const ld = $('cr3d-bc-laneDim'), lds = $('cr3d-bc-laneDimStrength');
+            const ca = $('cr3d-bc-chartAccents'), cs = $('cr3d-bc-chartStrength');
+            const ct = $('cr3d-bc-colorTint'), ts = $('cr3d-bc-tintStrength');
+            const gg = $('cr3d-bc-guitarGain'), ggv = $('cr3d-bc-guitarGain-label');
+            const sg = $('cr3d-bc-songGain'), sgv = $('cr3d-bc-songGain-label');
             // Hydrate from saved settings.
             en.checked = !!s.enabled;
             op.value = Math.round((s.opacity != null ? s.opacity : 1) * 100); if (opv) opv.textContent = op.value + '%';
@@ -648,55 +648,55 @@
 
     <!-- Intensity -->
     <div class="mt-3">
-        <label for="fse3d-bg-intensity" class="text-xs font-medium text-gray-400 mb-1 block">
-            Intensity: <span id="fse3d-bg-intensity-label">0.50</span>
+        <label for="cr3d-bg-intensity" class="text-xs font-medium text-gray-400 mb-1 block">
+            Intensity: <span id="cr3d-bg-intensity-label">0.50</span>
         </label>
-        <input type="range" id="fse3d-bg-intensity" min="0" max="1" step="0.05" value="0.5"
-            oninput="document.getElementById('fse3d-bg-intensity-label').textContent = parseFloat(this.value).toFixed(2);"
-            onchange="window.fse3dBgSetIntensity && window.fse3dBgSetIntensity(this.value)"
+        <input type="range" id="cr3d-bg-intensity" min="0" max="1" step="0.05" value="0.5"
+            oninput="document.getElementById('cr3d-bg-intensity-label').textContent = parseFloat(this.value).toFixed(2);"
+            onchange="window.cr3dBgSetIntensity && window.cr3dBgSetIntensity(this.value)"
             class="w-full accent-accent">
     </div>
 
     <!-- Audio reactivity -->
     <div class="flex items-center gap-3 mt-3">
         <label class="flex items-center gap-2 text-sm text-gray-300">
-            <input type="checkbox" id="fse3d-bg-reactive" checked
-                   onchange="window.fse3dBgSetReactive && window.fse3dBgSetReactive(this.checked)"
+            <input type="checkbox" id="cr3d-bg-reactive" checked
+                   onchange="window.cr3dBgSetReactive && window.cr3dBgSetReactive(this.checked)"
                    class="accent-accent">
             React to audio
         </label>
     </div>
 
     <!-- Custom image upload (#19). Persisted in localStorage under
-         fse_bg_customImageDataUrl (the base64 data URL that drives
-         the texture) and fse_bg_customImageName (display-only
+         chart_retuner_bg_customImageDataUrl (the base64 data URL that drives
+         the texture) and chart_retuner_bg_customImageName (display-only
          filename). Renders as the `image` bg style; the picker
          option above auto-enables once an asset is uploaded. -->
     <div class="mt-3">
-        <label for="fse3d-bg-custom-image-file" class="text-xs font-medium text-gray-400 mb-1 block">Custom image</label>
+        <label for="cr3d-bg-custom-image-file" class="text-xs font-medium text-gray-400 mb-1 block">Custom image</label>
         <p class="text-xs text-gray-500 mb-2">
             Upload a JPG/PNG/WebP (&le;1.5&nbsp;MB). Renders as a slowly
             drifting backdrop in the fog band when the style above is set
             to <em>Custom image</em>.
         </p>
         <div class="flex items-center gap-2">
-            <input type="file" id="fse3d-bg-custom-image-file"
+            <input type="file" id="cr3d-bg-custom-image-file"
                    accept="image/png,image/jpeg,image/webp"
                    class="text-xs text-gray-300 file:mr-2 file:px-2 file:py-1 file:rounded file:border-0 file:bg-dark-600 file:text-gray-300">
-            <button type="button" id="fse3d-bg-custom-image-clear"
+            <button type="button" id="cr3d-bg-custom-image-clear"
                     class="text-xs px-2 py-1 rounded bg-dark-700 border border-gray-800 text-gray-400 hover:text-gray-200">Clear</button>
         </div>
-        <p id="fse3d-bg-custom-image-name" class="text-xs text-gray-500 mt-1"></p>
-        <p id="fse3d-bg-custom-image-error" class="text-xs text-red-400 mt-1 hidden"></p>
+        <p id="cr3d-bg-custom-image-name" class="text-xs text-gray-500 mt-1"></p>
+        <p id="cr3d-bg-custom-image-error" class="text-xs text-red-400 mt-1 hidden"></p>
     </div>
 
     <!-- Custom video upload (#19 follow-up). Bytes live on disk via
          the plugin's routes.py upload route; localStorage holds only
-         the server-side filename (fse_bg_customVideoName). Renders as
+         the server-side filename (chart_retuner_bg_customVideoName). Renders as
          the `video` bg style; the picker option above auto-enables
          once an asset is uploaded. -->
     <div class="mt-3">
-        <label for="fse3d-bg-custom-video-file" class="text-xs font-medium text-gray-400 mb-1 block">Custom video</label>
+        <label for="cr3d-bg-custom-video-file" class="text-xs font-medium text-gray-400 mb-1 block">Custom video</label>
         <p class="text-xs text-gray-500 mb-2">
             Upload an MP4 or WebM (&le;50&nbsp;MB). Plays muted, looped
             in the fog band when the style above is set to
@@ -704,19 +704,19 @@
             not in the browser.
         </p>
         <div class="flex items-center gap-2">
-            <input type="file" id="fse3d-bg-custom-video-file"
+            <input type="file" id="cr3d-bg-custom-video-file"
                    accept="video/mp4,video/webm"
                    class="text-xs text-gray-300 file:mr-2 file:px-2 file:py-1 file:rounded file:border-0 file:bg-dark-600 file:text-gray-300">
-            <button type="button" id="fse3d-bg-custom-video-clear"
+            <button type="button" id="cr3d-bg-custom-video-clear"
                     class="text-xs px-2 py-1 rounded bg-dark-700 border border-gray-800 text-gray-400 hover:text-gray-200">Clear</button>
         </div>
-        <p id="fse3d-bg-custom-video-name" class="text-xs text-gray-500 mt-1"></p>
-        <p id="fse3d-bg-custom-video-error" class="text-xs text-red-400 mt-1 hidden"></p>
+        <p id="cr3d-bg-custom-video-name" class="text-xs text-gray-500 mt-1"></p>
+        <p id="cr3d-bg-custom-video-error" class="text-xs text-red-400 mt-1 hidden"></p>
     </div>
 </div>
 
-<div role="group" aria-labelledby="fse3d-camera-heading" class="mt-6">
-    <h3 id="fse3d-camera-heading" class="text-sm font-medium text-gray-400 mb-2">3D Highway — Camera</h3>
+<div role="group" aria-labelledby="cr3d-camera-heading" class="mt-6">
+    <h3 id="cr3d-camera-heading" class="text-sm font-medium text-gray-400 mb-2">3D Highway — Camera</h3>
     <p class="text-xs text-gray-500 mb-3">
         The camera tracks your upcoming notes — panning along the
         fretboard, zooming for wide chords, and tilting to keep the
@@ -728,9 +728,9 @@
     </p>
 
     <div class="mt-3">
-        <label for="fse3d-camera-mode" class="text-xs font-medium text-gray-400 mb-1 block">Camera view</label>
-        <select id="fse3d-camera-mode"
-            onchange="window.fse3dBgSetCameraMode && window.fse3dBgSetCameraMode(this.value)"
+        <label for="cr3d-camera-mode" class="text-xs font-medium text-gray-400 mb-1 block">Camera view</label>
+        <select id="cr3d-camera-mode"
+            onchange="window.cr3dBgSetCameraMode && window.cr3dBgSetCameraMode(this.value)"
             class="w-full bg-dark-700 border border-gray-800 rounded-lg px-3 py-2 text-xs text-gray-300 outline-none">
             <option value="lookahead">Wide ahead (default)</option>
             <option value="steady">Steady &amp; close-in</option>
@@ -741,8 +741,8 @@
         </p>
     </div>
 
-    <div role="group" aria-labelledby="fse3d-fret-look-heading" class="mt-5">
-        <h3 id="fse3d-fret-look-heading" class="text-sm font-medium text-gray-400 mb-2">3D Highway — Nut &amp; headstock</h3>
+    <div role="group" aria-labelledby="cr3d-fret-look-heading" class="mt-5">
+        <h3 id="cr3d-fret-look-heading" class="text-sm font-medium text-gray-400 mb-2">3D Highway — Nut &amp; headstock</h3>
         <p class="text-xs text-gray-500 mb-3">
             The 3D neck shows a nut, headstock, and a pitch label per string
             (your active target tuning from the Bass Tuning section above —
@@ -752,26 +752,26 @@
         </p>
         <div class="flex flex-col gap-3 mt-2">
             <label class="flex items-start gap-2 text-sm text-gray-300 cursor-pointer">
-                <input type="checkbox" id="fse3d-nut-headstock-visible" checked class="mt-1 accent-accent"
-                    onchange="window.fse3dBgSetNutHeadstockVisible && window.fse3dBgSetNutHeadstockVisible(this.checked)">
+                <input type="checkbox" id="cr3d-nut-headstock-visible" checked class="mt-1 accent-accent"
+                    onchange="window.cr3dBgSetNutHeadstockVisible && window.cr3dBgSetNutHeadstockVisible(this.checked)">
                 <span>Show nut &amp; headstock</span>
             </label>
             <label class="flex items-start gap-2 text-sm text-gray-300 cursor-pointer">
-                <input type="checkbox" id="fse3d-tuning-labels-visible" checked class="mt-1 accent-accent"
-                    onchange="window.fse3dBgSetTuningLabelsVisible && window.fse3dBgSetTuningLabelsVisible(this.checked)">
+                <input type="checkbox" id="cr3d-tuning-labels-visible" checked class="mt-1 accent-accent"
+                    onchange="window.cr3dBgSetTuningLabelsVisible && window.cr3dBgSetTuningLabelsVisible(this.checked)">
                 <span>Show open-string note name per string</span>
             </label>
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-1">
                 <div>
-                    <label for="fse3d-nut-color" class="text-xs font-medium text-gray-400 mb-1 block">Nut color</label>
-                    <input type="color" id="fse3d-nut-color" value="#f5f3f0"
-                        onchange="window.fse3dBgSetNutColor && window.fse3dBgSetNutColor(this.value)"
+                    <label for="cr3d-nut-color" class="text-xs font-medium text-gray-400 mb-1 block">Nut color</label>
+                    <input type="color" id="cr3d-nut-color" value="#f5f3f0"
+                        onchange="window.cr3dBgSetNutColor && window.cr3dBgSetNutColor(this.value)"
                         class="h-9 w-full max-w-[12rem] cursor-pointer rounded border border-gray-800 bg-dark-700 p-0.5">
                 </div>
                 <div>
-                    <label for="fse3d-headstock-color" class="text-xs font-medium text-gray-400 mb-1 block">Headstock color</label>
-                    <input type="color" id="fse3d-headstock-color" value="#d4b48a"
-                        onchange="window.fse3dBgSetHeadstockColor && window.fse3dBgSetHeadstockColor(this.value)"
+                    <label for="cr3d-headstock-color" class="text-xs font-medium text-gray-400 mb-1 block">Headstock color</label>
+                    <input type="color" id="cr3d-headstock-color" value="#d4b48a"
+                        onchange="window.cr3dBgSetHeadstockColor && window.cr3dBgSetHeadstockColor(this.value)"
                         class="h-9 w-full max-w-[12rem] cursor-pointer rounded border border-gray-800 bg-dark-700 p-0.5">
                 </div>
             </div>
@@ -790,12 +790,12 @@
             </p>
 
             <div class="mt-3">
-                <label for="fse3d-camera-smoothing" class="text-xs font-medium text-gray-400 mb-1 block">
-                    Camera smoothing (X-pan): <span id="fse3d-camera-smoothing-label">0.50</span>
+                <label for="cr3d-camera-smoothing" class="text-xs font-medium text-gray-400 mb-1 block">
+                    Camera smoothing (X-pan): <span id="cr3d-camera-smoothing-label">0.50</span>
                 </label>
-                <input type="range" id="fse3d-camera-smoothing" min="0" max="1" step="0.05" value="0.5"
-                    oninput="document.getElementById('fse3d-camera-smoothing-label').textContent = parseFloat(this.value).toFixed(2);"
-                    onchange="window.fse3dBgSetCameraSmoothing && window.fse3dBgSetCameraSmoothing(this.value)"
+                <input type="range" id="cr3d-camera-smoothing" min="0" max="1" step="0.05" value="0.5"
+                    oninput="document.getElementById('cr3d-camera-smoothing-label').textContent = parseFloat(this.value).toFixed(2);"
+                    onchange="window.cr3dBgSetCameraSmoothing && window.cr3dBgSetCameraSmoothing(this.value)"
                     class="w-full accent-accent">
                 <p class="text-[10px] text-gray-500 mt-1">
                     How aggressively the camera chases your upcoming notes
@@ -817,12 +817,12 @@
             </div>
 
             <div class="mt-3">
-                <label for="fse3d-zoom-smoothing" class="text-xs font-medium text-gray-400 mb-1 block">
-                    Zoom smoothing: <span id="fse3d-zoom-smoothing-label">0.50</span>
+                <label for="cr3d-zoom-smoothing" class="text-xs font-medium text-gray-400 mb-1 block">
+                    Zoom smoothing: <span id="cr3d-zoom-smoothing-label">0.50</span>
                 </label>
-                <input type="range" id="fse3d-zoom-smoothing" min="0" max="1" step="0.05" value="0.5"
-                    oninput="document.getElementById('fse3d-zoom-smoothing-label').textContent = parseFloat(this.value).toFixed(2);"
-                    onchange="window.fse3dBgSetZoomSmoothing && window.fse3dBgSetZoomSmoothing(this.value)"
+                <input type="range" id="cr3d-zoom-smoothing" min="0" max="1" step="0.05" value="0.5"
+                    oninput="document.getElementById('cr3d-zoom-smoothing-label').textContent = parseFloat(this.value).toFixed(2);"
+                    onchange="window.cr3dBgSetZoomSmoothing && window.cr3dBgSetZoomSmoothing(this.value)"
                     class="w-full accent-accent">
                 <p class="text-[10px] text-gray-500 mt-1">
                     Calmness of the camera pulling back for wide chords. Calm settings
@@ -836,12 +836,12 @@
             </div>
 
             <div class="mt-3">
-                <label for="fse3d-tilt-smoothing" class="text-xs font-medium text-gray-400 mb-1 block">
-                    Tilt smoothing: <span id="fse3d-tilt-smoothing-label">0.50</span>
+                <label for="cr3d-tilt-smoothing" class="text-xs font-medium text-gray-400 mb-1 block">
+                    Tilt smoothing: <span id="cr3d-tilt-smoothing-label">0.50</span>
                 </label>
-                <input type="range" id="fse3d-tilt-smoothing" min="0" max="1" step="0.05" value="0.5"
-                    oninput="document.getElementById('fse3d-tilt-smoothing-label').textContent = parseFloat(this.value).toFixed(2);"
-                    onchange="window.fse3dBgSetTiltSmoothing && window.fse3dBgSetTiltSmoothing(this.value)"
+                <input type="range" id="cr3d-tilt-smoothing" min="0" max="1" step="0.05" value="0.5"
+                    oninput="document.getElementById('cr3d-tilt-smoothing-label').textContent = parseFloat(this.value).toFixed(2);"
+                    onchange="window.cr3dBgSetTiltSmoothing && window.cr3dBgSetTiltSmoothing(this.value)"
                     class="w-full accent-accent">
                 <p class="text-[10px] text-gray-500 mt-1">
                     How aggressively the camera re-frames vertically when the fretboard
@@ -854,9 +854,9 @@
             </div>
 
             <div class="mt-4 flex items-start gap-2">
-                <input type="checkbox" id="fse3d-camera-lock-low" class="mt-1 accent-accent"
-                    onchange="window.fse3dBgSetCameraLockLow && window.fse3dBgSetCameraLockLow(this.checked)">
-                <label for="fse3d-camera-lock-low" class="text-xs text-gray-300 cursor-pointer">
+                <input type="checkbox" id="cr3d-camera-lock-low" class="mt-1 accent-accent"
+                    onchange="window.cr3dBgSetCameraLockLow && window.cr3dBgSetCameraLockLow(this.checked)">
+                <label for="cr3d-camera-lock-low" class="text-xs text-gray-300 cursor-pointer">
                     <span class="font-medium">Lock camera at frets 1–12.</span>
                     <span class="block text-[10px] text-gray-500 mt-1">
                         When enabled, the camera stops moving as long as all upcoming
@@ -870,12 +870,12 @@
             </div>
 
             <div class="mt-3 ml-6">
-                <label for="fse3d-camera-lock-zoom" class="text-xs font-medium text-gray-400 mb-1 block">
-                    Locked zoom: <span id="fse3d-camera-lock-zoom-label">0.50</span>
+                <label for="cr3d-camera-lock-zoom" class="text-xs font-medium text-gray-400 mb-1 block">
+                    Locked zoom: <span id="cr3d-camera-lock-zoom-label">0.50</span>
                 </label>
-                <input type="range" id="fse3d-camera-lock-zoom" min="0" max="1" step="0.05" value="0.5"
-                    oninput="document.getElementById('fse3d-camera-lock-zoom-label').textContent = parseFloat(this.value).toFixed(2);"
-                    onchange="window.fse3dBgSetCameraLockZoom && window.fse3dBgSetCameraLockZoom(this.value)"
+                <input type="range" id="cr3d-camera-lock-zoom" min="0" max="1" step="0.05" value="0.5"
+                    oninput="document.getElementById('cr3d-camera-lock-zoom-label').textContent = parseFloat(this.value).toFixed(2);"
+                    onchange="window.cr3dBgSetCameraLockZoom && window.cr3dBgSetCameraLockZoom(this.value)"
                     class="w-full accent-accent">
                 <p class="text-[10px] text-gray-500 mt-1">
                     Adjusts the camera distance while the lock is engaged. Drag toward
@@ -890,12 +890,12 @@
             </div>
 
             <div class="mt-4">
-                <label for="fse3d-text-size" class="text-xs font-medium text-gray-400 mb-1 block">
-                    Text size: <span id="fse3d-text-size-label">0.50</span>
+                <label for="cr3d-text-size" class="text-xs font-medium text-gray-400 mb-1 block">
+                    Text size: <span id="cr3d-text-size-label">0.50</span>
                 </label>
-                <input type="range" id="fse3d-text-size" min="0" max="1" step="0.05" value="0.5"
-                    oninput="document.getElementById('fse3d-text-size-label').textContent = parseFloat(this.value).toFixed(2);"
-                    onchange="window.fse3dBgSetTextSize && window.fse3dBgSetTextSize(this.value)"
+                <input type="range" id="cr3d-text-size" min="0" max="1" step="0.05" value="0.5"
+                    oninput="document.getElementById('cr3d-text-size-label').textContent = parseFloat(this.value).toFixed(2);"
+                    onchange="window.cr3dBgSetTextSize && window.cr3dBgSetTextSize(this.value)"
                     class="w-full accent-accent">
                 <p class="text-[10px] text-gray-500 mt-1">
                     Scales every text sprite in the scene — chord names, fret
@@ -910,9 +910,9 @@
 
             <!-- FPS counter -->
             <div class="mt-4 flex items-start gap-2">
-                <input type="checkbox" id="fse3d-fps-visible" class="mt-1 accent-accent"
-                    onchange="window.fse3dBgSetFpsVisible && window.fse3dBgSetFpsVisible(this.checked)">
-                <label for="fse3d-fps-visible" class="text-xs text-gray-300 cursor-pointer">
+                <input type="checkbox" id="cr3d-fps-visible" class="mt-1 accent-accent"
+                    onchange="window.cr3dBgSetFpsVisible && window.cr3dBgSetFpsVisible(this.checked)">
+                <label for="cr3d-fps-visible" class="text-xs text-gray-300 cursor-pointer">
                     <span class="font-medium">Show FPS counter.</span>
                     <span class="block text-[10px] text-gray-500 mt-1">
                         Displays a live frame-rate readout in the top-right corner of the
@@ -922,12 +922,12 @@
             </div>
 
             <div class="mt-4">
-                <label for="fse3d-vibrancy" class="text-xs font-medium text-gray-400 mb-1 block">
-                    Vibrancy: <span id="fse3d-vibrancy-label">0.85</span>
+                <label for="cr3d-vibrancy" class="text-xs font-medium text-gray-400 mb-1 block">
+                    Vibrancy: <span id="cr3d-vibrancy-label">0.85</span>
                 </label>
-                <input type="range" id="fse3d-vibrancy" min="0" max="1" step="0.05" value="0.85"
-                    oninput="document.getElementById('fse3d-vibrancy-label').textContent = parseFloat(this.value).toFixed(2); window.fse3dBgSetVibrancy && window.fse3dBgSetVibrancy(this.value)"
-                    onchange="window.fse3dBgSetVibrancy && window.fse3dBgSetVibrancy(this.value)"
+                <input type="range" id="cr3d-vibrancy" min="0" max="1" step="0.05" value="0.85"
+                    oninput="document.getElementById('cr3d-vibrancy-label').textContent = parseFloat(this.value).toFixed(2); window.cr3dBgSetVibrancy && window.cr3dBgSetVibrancy(this.value)"
+                    onchange="window.cr3dBgSetVibrancy && window.cr3dBgSetVibrancy(this.value)"
                     class="w-full accent-accent">
                 <p class="text-[10px] text-gray-500 mt-1">
                     How vivid idle strings, note bodies, and sustains read against
@@ -943,12 +943,12 @@
             </div>
 
             <div class="mt-4">
-                <label for="fse3d-glow" class="text-xs font-medium text-gray-400 mb-1 block">
-                    Glow: <span id="fse3d-glow-label">0.25</span>
+                <label for="cr3d-glow" class="text-xs font-medium text-gray-400 mb-1 block">
+                    Glow: <span id="cr3d-glow-label">0.25</span>
                 </label>
-                <input type="range" id="fse3d-glow" min="0" max="1" step="0.05" value="0.25"
-                    oninput="document.getElementById('fse3d-glow-label').textContent = parseFloat(this.value).toFixed(2); window.fse3dBgSetGlow && window.fse3dBgSetGlow(this.value)"
-                    onchange="window.fse3dBgSetGlow && window.fse3dBgSetGlow(this.value)"
+                <input type="range" id="cr3d-glow" min="0" max="1" step="0.05" value="0.25"
+                    oninput="document.getElementById('cr3d-glow-label').textContent = parseFloat(this.value).toFixed(2); window.cr3dBgSetGlow && window.cr3dBgSetGlow(this.value)"
+                    onchange="window.cr3dBgSetGlow && window.cr3dBgSetGlow(this.value)"
                     class="w-full accent-accent">
                 <p class="text-[10px] text-gray-500 mt-1">
                     How much halo / bloom builds up around hit notes, sustain
@@ -965,12 +965,12 @@
             </div>
 
             <div class="mt-4">
-                <label for="fse3d-hitfx" class="text-xs font-medium text-gray-400 mb-1 block">
-                    Hit feedback intensity: <span id="fse3d-hitfx-label">0.70</span>
+                <label for="cr3d-hitfx" class="text-xs font-medium text-gray-400 mb-1 block">
+                    Hit feedback intensity: <span id="cr3d-hitfx-label">0.70</span>
                 </label>
-                <input type="range" id="fse3d-hitfx" min="0" max="1" step="0.05" value="0.70"
-                    oninput="document.getElementById('fse3d-hitfx-label').textContent = parseFloat(this.value).toFixed(2); window.fse3dBgSetHitFx && window.fse3dBgSetHitFx(this.value)"
-                    onchange="window.fse3dBgSetHitFx && window.fse3dBgSetHitFx(this.value)"
+                <input type="range" id="cr3d-hitfx" min="0" max="1" step="0.05" value="0.70"
+                    oninput="document.getElementById('cr3d-hitfx-label').textContent = parseFloat(this.value).toFixed(2); window.cr3dBgSetHitFx && window.cr3dBgSetHitFx(this.value)"
+                    onchange="window.cr3dBgSetHitFx && window.cr3dBgSetHitFx(this.value)"
                     class="w-full accent-accent">
                 <p class="text-[10px] text-gray-500 mt-1">
                     How much "juice" a nailed note gets — the strike-line flash and the
@@ -979,70 +979,70 @@
             </div>
 
             <div class="mt-3 flex items-start justify-between gap-3">
-                <label for="fse3d-sparks" class="text-xs font-medium text-gray-400">
+                <label for="cr3d-sparks" class="text-xs font-medium text-gray-400">
                     Hit sparks
                     <span class="block text-[10px] text-gray-500 font-normal">The particle burst that pops off a note the instant it's detected as a hit. Turn off for a calmer highway — the strike-line flash and colour verdict stay.</span>
                 </label>
-                <input type="checkbox" id="fse3d-sparks" checked
-                    onchange="window.fse3dBgSetSparks && window.fse3dBgSetSparks(this.checked)"
+                <input type="checkbox" id="cr3d-sparks" checked
+                    onchange="window.cr3dBgSetSparks && window.cr3dBgSetSparks(this.checked)"
                     class="accent-accent mt-0.5">
             </div>
 
             <div class="mt-3 flex items-start justify-between gap-3">
-                <label for="fse3d-cinematic" class="text-xs font-medium text-gray-400">
+                <label for="cr3d-cinematic" class="text-xs font-medium text-gray-400">
                     Cinematic lighting
                     <span class="block text-[10px] text-gray-500 font-normal">Darker stage so the glowing notes pop against it. Turn off for the brighter, flatter look.</span>
                 </label>
-                <input type="checkbox" id="fse3d-cinematic" checked
-                    onchange="window.fse3dBgSetCinematic && window.fse3dBgSetCinematic(this.checked)"
+                <input type="checkbox" id="cr3d-cinematic" checked
+                    onchange="window.cr3dBgSetCinematic && window.cr3dBgSetCinematic(this.checked)"
                     class="accent-accent mt-0.5">
             </div>
 
             <div class="mt-3 flex items-start justify-between gap-3">
-                <label for="fse3d-streakfx" class="text-xs font-medium text-gray-400">
+                <label for="cr3d-streakfx" class="text-xs font-medium text-gray-400">
                     Streak feedback
                     <span class="block text-[10px] text-gray-500 font-normal">A clean run quietly "heats up" — bigger sparks the longer you stay accurate. Eases back on a miss.</span>
                 </label>
-                <input type="checkbox" id="fse3d-streakfx" checked
-                    onchange="window.fse3dBgSetStreakFx && window.fse3dBgSetStreakFx(this.checked)"
+                <input type="checkbox" id="cr3d-streakfx" checked
+                    onchange="window.cr3dBgSetStreakFx && window.cr3dBgSetStreakFx(this.checked)"
                     class="accent-accent mt-0.5">
             </div>
 
             <div class="mt-3 flex items-start justify-between gap-3">
-                <label for="fse3d-verdictmarks" class="text-xs font-medium text-gray-400">
+                <label for="cr3d-verdictmarks" class="text-xs font-medium text-gray-400">
                     Accessible verdict marks (✓ / ✗)
                     <span class="block text-[10px] text-gray-500 font-normal">Adds a shape mark to each hit/miss so the result doesn't rely on the green/red colour pair alone.</span>
                 </label>
-                <input type="checkbox" id="fse3d-verdictmarks" checked
-                    onchange="window.fse3dBgSetVerdictMarks && window.fse3dBgSetVerdictMarks(this.checked)"
+                <input type="checkbox" id="cr3d-verdictmarks" checked
+                    onchange="window.cr3dBgSetVerdictMarks && window.cr3dBgSetVerdictMarks(this.checked)"
                     class="accent-accent mt-0.5">
             </div>
 
             <div class="mt-3 flex items-start justify-between gap-3">
-                <label for="fse3d-bloom" class="text-xs font-medium text-gray-400">
+                <label for="cr3d-bloom" class="text-xs font-medium text-gray-400">
                     Glow bloom
                     <span class="block text-[10px] text-gray-500 font-normal">Real light-bleed around the glowing notes and hit flash (higher fidelity). Turns itself off in split-screen. If your machine struggles, turn this off first.</span>
                 </label>
-                <input type="checkbox" id="fse3d-bloom" checked
-                    onchange="window.fse3dBgSetBloom && window.fse3dBgSetBloom(this.checked)"
+                <input type="checkbox" id="cr3d-bloom" checked
+                    onchange="window.cr3dBgSetBloom && window.cr3dBgSetBloom(this.checked)"
                     class="accent-accent mt-0.5">
             </div>
 
             <div class="mt-3 flex items-start justify-between gap-3">
-                <label for="fse3d-timingfx" class="text-xs font-medium text-gray-400">
+                <label for="cr3d-timingfx" class="text-xs font-medium text-gray-400">
                     Timing feedback
                     <span class="block text-[10px] text-gray-500 font-normal">Colours a hit by your timing — on-time green, a touch <span style="color:#35d6ff">early (cyan)</span> or <span style="color:#ffb84d">late (amber)</span> — so you can feel where you sit in the beat.</span>
                 </label>
-                <input type="checkbox" id="fse3d-timingfx" checked
-                    onchange="window.fse3dBgSetTimingFx && window.fse3dBgSetTimingFx(this.checked)"
+                <input type="checkbox" id="cr3d-timingfx" checked
+                    onchange="window.cr3dBgSetTimingFx && window.cr3dBgSetTimingFx(this.checked)"
                     class="accent-accent mt-0.5">
             </div>
         </div>
     </details>
 </div>
 
-<div role="group" aria-labelledby="fse3d-notes-heading" class="mt-6">
-    <h3 id="fse3d-notes-heading" class="text-sm font-medium text-gray-400 mb-2">3D Highway — Notes</h3>
+<div role="group" aria-labelledby="cr3d-notes-heading" class="mt-6">
+    <h3 id="cr3d-notes-heading" class="text-sm font-medium text-gray-400 mb-2">3D Highway — Notes</h3>
     <p class="text-xs text-gray-500 mb-3">
         Per-note display options.
     </p>
@@ -1050,22 +1050,22 @@
     <!-- Fret digits on board ghost (#12) — not on flying notes -->
     <div class="mt-3 space-y-2">
         <label class="flex items-center gap-2 text-sm text-gray-300">
-            <input type="checkbox" id="fse3d-show-fret-on-note" checked
+            <input type="checkbox" id="cr3d-show-fret-on-note" checked
                    class="accent-accent">
             Show fret numbers on fretboard ghost
         </label>
         <p class="text-[10px] text-gray-500 ml-6">
             Numbers appear on the hollow preview on the fretboard only (not on gems coming down the highway).
         </p>
-        <div id="fse3d-fret-ghost-scope-wrap" class="ml-6 mt-2 space-y-2 border-l border-gray-700 pl-3">
+        <div id="cr3d-fret-ghost-scope-wrap" class="ml-6 mt-2 space-y-2 border-l border-gray-700 pl-3">
             <p class="text-xs font-medium text-gray-400">Where to show</p>
             <label class="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
-                <input type="radio" name="fse3d-fret-ghost-scope" id="fse3d-fret-ghost-scope-chords" value="chords"
+                <input type="radio" name="cr3d-fret-ghost-scope" id="cr3d-fret-ghost-scope-chords" value="chords"
                        class="accent-accent">
                 In chords &amp; arpeggios (chord-hand events only)
             </label>
             <label class="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
-                <input type="radio" name="fse3d-fret-ghost-scope" id="fse3d-fret-ghost-scope-all" value="all"
+                <input type="radio" name="cr3d-fret-ghost-scope" id="cr3d-fret-ghost-scope-all" value="all"
                        class="accent-accent">
                 All notes
             </label>
@@ -1079,8 +1079,8 @@
          way a slide is headed. -->
     <div class="mt-4">
         <label class="flex items-center gap-2 text-xs text-gray-300 cursor-pointer">
-            <input type="checkbox" id="fse3d-slide-arrow-approach-visible" checked
-                   onchange="window.fse3dBgSetSlideArrowApproachVisible && window.fse3dBgSetSlideArrowApproachVisible(this.checked)"
+            <input type="checkbox" id="cr3d-slide-arrow-approach-visible" checked
+                   onchange="window.cr3dBgSetSlideArrowApproachVisible && window.cr3dBgSetSlideArrowApproachVisible(this.checked)"
                    class="accent-accent">
             Show slide direction arrow on the note
         </label>
@@ -1091,8 +1091,8 @@
     </div>
     <div class="mt-4">
         <label class="flex items-center gap-2 text-xs text-gray-300 cursor-pointer">
-            <input type="checkbox" id="fse3d-slide-arrow-neck-visible" checked
-                   onchange="window.fse3dBgSetSlideArrowNeckVisible && window.fse3dBgSetSlideArrowNeckVisible(this.checked)"
+            <input type="checkbox" id="cr3d-slide-arrow-neck-visible" checked
+                   onchange="window.cr3dBgSetSlideArrowNeckVisible && window.cr3dBgSetSlideArrowNeckVisible(this.checked)"
                    class="accent-accent">
             Show slide direction arrow on the neck preview
         </label>
@@ -1103,8 +1103,8 @@
     </div>
     <div class="mt-4">
         <label class="flex items-center gap-2 text-xs text-gray-300 cursor-pointer">
-            <input type="checkbox" id="fse3d-slide-arrow-chain-preview-visible" checked
-                   onchange="window.fse3dBgSetSlideArrowChainPreviewVisible && window.fse3dBgSetSlideArrowChainPreviewVisible(this.checked)"
+            <input type="checkbox" id="cr3d-slide-arrow-chain-preview-visible" checked
+                   onchange="window.cr3dBgSetSlideArrowChainPreviewVisible && window.cr3dBgSetSlideArrowChainPreviewVisible(this.checked)"
                    class="accent-accent">
             Show early arrow for slide-into-slide notes
         </label>
@@ -1116,8 +1116,8 @@
     </div>
 </div>
 
-<div role="group" aria-labelledby="fse3d-sections-heading" class="mt-6">
-    <h3 id="fse3d-sections-heading" class="text-sm font-medium text-gray-400 mb-2">3D Highway — Sections</h3>
+<div role="group" aria-labelledby="cr3d-sections-heading" class="mt-6">
+    <h3 id="cr3d-sections-heading" class="text-sm font-medium text-gray-400 mb-2">3D Highway — Sections</h3>
     <p class="text-xs text-gray-500 mb-3">
         Surfaces upcoming song sections (Verse, Chorus, Bridge, …) so you can
         anticipate what's coming. The "Up Next" card is a fixed 2D overlay
@@ -1127,8 +1127,8 @@
     <!-- Show "Up Next" card -->
     <div class="flex items-center gap-3 mt-3">
         <label class="flex items-center gap-2 text-sm text-gray-300">
-            <input type="checkbox" id="fse3d-section-hud-visible"
-                   onchange="window.fse3dBgSetSectionHudVisible && window.fse3dBgSetSectionHudVisible(this.checked)"
+            <input type="checkbox" id="cr3d-section-hud-visible"
+                   onchange="window.cr3dBgSetSectionHudVisible && window.cr3dBgSetSectionHudVisible(this.checked)"
                    class="accent-accent">
             Show "Up Next" section card
         </label>
@@ -1136,9 +1136,9 @@
 
     <!-- Position -->
     <div class="mt-3">
-        <label for="fse3d-section-hud-position" class="text-xs font-medium text-gray-400 mb-1 block">Position</label>
-        <select id="fse3d-section-hud-position"
-            onchange="window.fse3dBgSetSectionHudPosition && window.fse3dBgSetSectionHudPosition(this.value)"
+        <label for="cr3d-section-hud-position" class="text-xs font-medium text-gray-400 mb-1 block">Position</label>
+        <select id="cr3d-section-hud-position"
+            onchange="window.cr3dBgSetSectionHudPosition && window.cr3dBgSetSectionHudPosition(this.value)"
             class="w-full bg-dark-700 border border-gray-800 rounded-lg px-3 py-2 text-xs text-gray-300 outline-none">
             <option value="tl">Top-left</option>
             <option value="tr" selected>Top-right</option>
@@ -1149,12 +1149,12 @@
 
     <!-- Size slider -->
     <div class="mt-3">
-        <label for="fse3d-section-hud-size" class="text-xs font-medium text-gray-400 mb-1 block">
-            Size: <span id="fse3d-section-hud-size-label">0.50</span>
+        <label for="cr3d-section-hud-size" class="text-xs font-medium text-gray-400 mb-1 block">
+            Size: <span id="cr3d-section-hud-size-label">0.50</span>
         </label>
-        <input type="range" id="fse3d-section-hud-size" min="0" max="1" step="0.05" value="0.5"
-            oninput="document.getElementById('fse3d-section-hud-size-label').textContent = parseFloat(this.value).toFixed(2); window.fse3dBgSetSectionHudSize && window.fse3dBgSetSectionHudSize(this.value)"
-            onchange="window.fse3dBgSetSectionHudSize && window.fse3dBgSetSectionHudSize(this.value)"
+        <input type="range" id="cr3d-section-hud-size" min="0" max="1" step="0.05" value="0.5"
+            oninput="document.getElementById('cr3d-section-hud-size-label').textContent = parseFloat(this.value).toFixed(2); window.cr3dBgSetSectionHudSize && window.cr3dBgSetSectionHudSize(this.value)"
+            onchange="window.cr3dBgSetSectionHudSize && window.cr3dBgSetSectionHudSize(this.value)"
             class="w-full accent-accent">
         <div class="flex justify-between text-[10px] text-gray-500 mt-1"><span>Small</span><span>Large</span></div>
     </div>
@@ -1167,8 +1167,8 @@
         <div class="px-3 pb-3 pt-1">
             <div class="mt-2">
                 <label class="flex items-center gap-2 text-xs text-gray-300 cursor-pointer">
-                    <input type="checkbox" id="fse3d-section-labels-on-highway"
-                           onchange="window.fse3dBgSetSectionLabelsOnHighway && window.fse3dBgSetSectionLabelsOnHighway(this.checked)"
+                    <input type="checkbox" id="cr3d-section-labels-on-highway"
+                           onchange="window.cr3dBgSetSectionLabelsOnHighway && window.cr3dBgSetSectionLabelsOnHighway(this.checked)"
                            class="accent-accent">
                     Show section labels on the highway
                 </label>
@@ -1183,8 +1183,8 @@
     </details>
 </div>
 
-<div role="group" aria-labelledby="fse3d-tone-hud-heading" class="mt-6">
-    <h3 id="fse3d-tone-hud-heading" class="text-sm font-medium text-gray-400 mb-2">3D Highway — Tone Changes</h3>
+<div role="group" aria-labelledby="cr3d-tone-hud-heading" class="mt-6">
+    <h3 id="cr3d-tone-hud-heading" class="text-sm font-medium text-gray-400 mb-2">3D Highway — Tone Changes</h3>
     <p class="text-xs text-gray-500 mb-3">
         Overlay card showing the active tone and the next upcoming tone with a
         countdown. Only appears on songs that carry tone-change data. Displayed
@@ -1194,8 +1194,8 @@
     <!-- Show card -->
     <div class="flex items-center gap-3 mt-3">
         <label class="flex items-center gap-2 text-sm text-gray-300">
-            <input type="checkbox" id="fse3d-tone-hud-visible"
-                   onchange="window.fse3dBgSetToneHudVisible && window.fse3dBgSetToneHudVisible(this.checked)"
+            <input type="checkbox" id="cr3d-tone-hud-visible"
+                   onchange="window.cr3dBgSetToneHudVisible && window.cr3dBgSetToneHudVisible(this.checked)"
                    class="accent-accent">
             Show tone change card
         </label>
@@ -1203,9 +1203,9 @@
 
     <!-- Position -->
     <div class="mt-3">
-        <label for="fse3d-tone-hud-position" class="text-xs font-medium text-gray-400 mb-1 block">Position</label>
-        <select id="fse3d-tone-hud-position"
-            onchange="window.fse3dBgSetToneHudPosition && window.fse3dBgSetToneHudPosition(this.value)"
+        <label for="cr3d-tone-hud-position" class="text-xs font-medium text-gray-400 mb-1 block">Position</label>
+        <select id="cr3d-tone-hud-position"
+            onchange="window.cr3dBgSetToneHudPosition && window.cr3dBgSetToneHudPosition(this.value)"
             class="w-full bg-dark-700 border border-gray-800 rounded-lg px-3 py-2 text-xs text-gray-300 outline-none">
             <option value="tl" selected>Top-left</option>
             <option value="tr">Top-right</option>
@@ -1216,19 +1216,19 @@
 
     <!-- Size slider -->
     <div class="mt-3">
-        <label for="fse3d-tone-hud-size" class="text-xs font-medium text-gray-400 mb-1 block">
-            Size: <span id="fse3d-tone-hud-size-label">0.50</span>
+        <label for="cr3d-tone-hud-size" class="text-xs font-medium text-gray-400 mb-1 block">
+            Size: <span id="cr3d-tone-hud-size-label">0.50</span>
         </label>
-        <input type="range" id="fse3d-tone-hud-size" min="0" max="1" step="0.05" value="0.5"
-            oninput="document.getElementById('fse3d-tone-hud-size-label').textContent = parseFloat(this.value).toFixed(2); window.fse3dBgSetToneHudSize && window.fse3dBgSetToneHudSize(this.value)"
-            onchange="window.fse3dBgSetToneHudSize && window.fse3dBgSetToneHudSize(this.value)"
+        <input type="range" id="cr3d-tone-hud-size" min="0" max="1" step="0.05" value="0.5"
+            oninput="document.getElementById('cr3d-tone-hud-size-label').textContent = parseFloat(this.value).toFixed(2); window.cr3dBgSetToneHudSize && window.cr3dBgSetToneHudSize(this.value)"
+            onchange="window.cr3dBgSetToneHudSize && window.cr3dBgSetToneHudSize(this.value)"
             class="w-full accent-accent">
         <div class="flex justify-between text-[10px] text-gray-500 mt-1"><span>Small</span><span>Large</span></div>
     </div>
 </div>
 
-<div role="group" aria-labelledby="fse3d-chord-diag-heading" class="mt-6">
-    <h3 id="fse3d-chord-diag-heading" class="text-sm font-medium text-gray-400 mb-2">3D Highway — Chord Diagram</h3>
+<div role="group" aria-labelledby="cr3d-chord-diag-heading" class="mt-6">
+    <h3 id="cr3d-chord-diag-heading" class="text-sm font-medium text-gray-400 mb-2">3D Highway — Chord Diagram</h3>
     <p class="text-xs text-gray-500 mb-3">
         Overlay shown when a named chord is hit. Fades out after impact.
     </p>
@@ -1236,8 +1236,8 @@
     <!-- Visibility toggle -->
     <div class="flex items-center gap-3 mt-1 mb-4">
         <label class="flex items-center gap-2 text-sm text-gray-300">
-            <input type="checkbox" id="fse3d-chord-diagram-visible" checked
-                   onchange="window.fse3dBgSetChordDiagramVisible && window.fse3dBgSetChordDiagramVisible(this.checked)"
+            <input type="checkbox" id="cr3d-chord-diagram-visible" checked
+                   onchange="window.cr3dBgSetChordDiagramVisible && window.cr3dBgSetChordDiagramVisible(this.checked)"
                    class="accent-accent">
             Show chord diagram
         </label>
@@ -1245,21 +1245,21 @@
 
     <!-- Size slider -->
     <div class="mt-3">
-        <label for="fse3d-chord-diagram-size" class="text-xs font-medium text-gray-400 mb-1 block">
-            Size: <span id="fse3d-chord-diagram-size-label">0.50</span>
+        <label for="cr3d-chord-diagram-size" class="text-xs font-medium text-gray-400 mb-1 block">
+            Size: <span id="cr3d-chord-diagram-size-label">0.50</span>
         </label>
-        <input type="range" id="fse3d-chord-diagram-size" min="0" max="1" step="0.05" value="0.5"
-            oninput="document.getElementById('fse3d-chord-diagram-size-label').textContent = parseFloat(this.value).toFixed(2); window.fse3dBgSetChordDiagramSize && window.fse3dBgSetChordDiagramSize(this.value)"
-            onchange="window.fse3dBgSetChordDiagramSize && window.fse3dBgSetChordDiagramSize(this.value)"
+        <input type="range" id="cr3d-chord-diagram-size" min="0" max="1" step="0.05" value="0.5"
+            oninput="document.getElementById('cr3d-chord-diagram-size-label').textContent = parseFloat(this.value).toFixed(2); window.cr3dBgSetChordDiagramSize && window.cr3dBgSetChordDiagramSize(this.value)"
+            onchange="window.cr3dBgSetChordDiagramSize && window.cr3dBgSetChordDiagramSize(this.value)"
             class="w-full accent-accent">
         <div class="flex justify-between text-[10px] text-gray-500 mt-1"><span>Small</span><span>Large</span></div>
     </div>
 
     <!-- Position dropdown -->
     <div class="mt-3">
-        <label for="fse3d-chord-diagram-position" class="text-xs font-medium text-gray-400 mb-1 block">Position</label>
-        <select id="fse3d-chord-diagram-position"
-            onchange="window.fse3dBgSetChordDiagramPosition && window.fse3dBgSetChordDiagramPosition(this.value)"
+        <label for="cr3d-chord-diagram-position" class="text-xs font-medium text-gray-400 mb-1 block">Position</label>
+        <select id="cr3d-chord-diagram-position"
+            onchange="window.cr3dBgSetChordDiagramPosition && window.cr3dBgSetChordDiagramPosition(this.value)"
             class="w-full bg-dark-700 border border-gray-800 rounded-lg px-3 py-2 text-xs text-gray-300 outline-none">
             <option value="tl" selected>Top-left</option>
             <option value="tr">Top-right</option>
@@ -1268,11 +1268,11 @@
 
     <!-- Fret-column reference markers cadence -->
     <div class="mt-6 pt-4 border-t border-gray-800">
-        <label for="fse3d-fret-column-marker-cadence" class="text-xs font-medium text-gray-400 mb-1 block">
+        <label for="cr3d-fret-column-marker-cadence" class="text-xs font-medium text-gray-400 mb-1 block">
             Fret-column marker cadence (measures)
         </label>
-        <input type="number" id="fse3d-fret-column-marker-cadence" min="0" max="16" step="1" value="1"
-            onchange="window.fse3dBgSetFretColumnMarkerCadence && window.fse3dBgSetFretColumnMarkerCadence(this.value)"
+        <input type="number" id="cr3d-fret-column-marker-cadence" min="0" max="16" step="1" value="1"
+            onchange="window.cr3dBgSetFretColumnMarkerCadence && window.cr3dBgSetFretColumnMarkerCadence(this.value)"
             class="w-24 bg-dark-700 border border-gray-800 rounded-lg px-3 py-2 text-xs text-gray-300 outline-none">
         <p class="text-[10px] text-gray-500 mt-1">
             How often a row of fret-number reference markers slides down
@@ -1290,8 +1290,8 @@
          Storage `projectionVisible` (true = shown), natural polarity. -->
     <div class="mt-4">
         <label class="flex items-center gap-2 text-xs text-gray-300 cursor-pointer">
-            <input type="checkbox" id="fse3d-projection-visible"
-                   onchange="window.fse3dBgSetProjectionVisible && window.fse3dBgSetProjectionVisible(this.checked)"
+            <input type="checkbox" id="cr3d-projection-visible"
+                   onchange="window.cr3dBgSetProjectionVisible && window.cr3dBgSetProjectionVisible(this.checked)"
                    class="accent-accent">
             Show note preview on the fretboard
         </label>
@@ -1308,8 +1308,8 @@
          so the renderer reads the natural-direction flag. -->
     <div class="mt-4">
         <label class="flex items-center gap-2 text-xs text-gray-300 cursor-pointer">
-            <input type="checkbox" id="fse3d-inlay-labels-visible"
-                   onchange="window.fse3dBgSetInlayLabelsVisible && window.fse3dBgSetInlayLabelsVisible(!this.checked)"
+            <input type="checkbox" id="cr3d-inlay-labels-visible"
+                   onchange="window.cr3dBgSetInlayLabelsVisible && window.cr3dBgSetInlayLabelsVisible(!this.checked)"
                    class="accent-accent">
             Hide static fret-inlay number labels
         </label>
@@ -1324,8 +1324,8 @@
     <!-- Fret boundary divider lines -->
     <div class="mt-4">
         <label class="flex items-center gap-2 text-xs text-gray-300 cursor-pointer">
-            <input type="checkbox" id="fse3d-fret-dividers-visible" checked
-                   onchange="window.fse3dBgSetFretDividersVisible && window.fse3dBgSetFretDividersVisible(this.checked)"
+            <input type="checkbox" id="cr3d-fret-dividers-visible" checked
+                   onchange="window.cr3dBgSetFretDividersVisible && window.cr3dBgSetFretDividersVisible(this.checked)"
                    class="accent-accent">
             Show fret boundary divider lines
         </label>
@@ -1417,7 +1417,7 @@
             // lowercase. Callers are responsible for lowercasing the
             // candidate name before testing.
             const VIDEO_FILENAME_RE = /^current\.(mp4|webm)$/;
-            const VIDEO_UPLOAD_URL = '/api/plugins/five_string_everything/files';
+            const VIDEO_UPLOAD_URL = '/api/plugins/chart_retuner/files';
 
             function coerceStyle(v) { return VALID_STYLES.has(v) ? v : DEFAULTS.style; }
             function coerceBgTheme(v) { return VALID_BG_THEMES.has(v) ? v : DEFAULTS.bgTheme; }
@@ -1499,47 +1499,47 @@
             let storedSlideArrowNeckVisible = null;
             let storedSlideArrowChainPreviewVisible = null;
             try {
-                storedStyle = localStorage.getItem('fse_bg_style');
-                storedBgTheme = localStorage.getItem('fse_bg_bgTheme');
-                storedHwTheme = localStorage.getItem('fse_bg_hwTheme');
-                storedI = localStorage.getItem('fse_bg_intensity');
-                storedR = localStorage.getItem('fse_bg_reactive');
-                storedFretOnNote = localStorage.getItem('fse_bg_showFretOnNote');
-                storedFretNumberGhostScope = localStorage.getItem('fse_bg_fretNumberGhostScope');
-                storedCameraSmoothing = localStorage.getItem('fse_bg_cameraSmoothing');
-                storedCameraMode = localStorage.getItem('fse_bg_cameraMode');
-                storedZoomSmoothing = localStorage.getItem('fse_bg_zoomSmoothing');
-                storedTiltSmoothing = localStorage.getItem('fse_bg_tiltSmoothing');
-                storedCameraLockLow = localStorage.getItem('fse_bg_cameraLockLow');
-                storedCameraLockZoom = localStorage.getItem('fse_bg_cameraLockZoom');
-                storedTextSize = localStorage.getItem('fse_bg_textSize');
-                storedVibrancy = localStorage.getItem('fse_bg_vibrancy');
-                storedGlow = localStorage.getItem('fse_bg_glow');
-                storedChordDiagramVisible = localStorage.getItem('fse_bg_chordDiagramVisible');
-                storedChordDiagramSize = localStorage.getItem('fse_bg_chordDiagramSize');
-                storedChordDiagramPosition = localStorage.getItem('fse_bg_chordDiagramPosition');
-                storedFretColumnMarkerCadence = localStorage.getItem('fse_bg_fretColumnMarkerCadence');
-                storedInlayLabelsVisible = localStorage.getItem('fse_bg_inlayLabelsVisible');
-                storedSectionLabelsOnHighway = localStorage.getItem('fse_bg_sectionLabelsOnHighway');
-                storedSectionHudVisible = localStorage.getItem('fse_bg_sectionHudVisible');
-                storedSectionHudPosition = localStorage.getItem('fse_bg_sectionHudPosition');
-                storedSectionHudSize = localStorage.getItem('fse_bg_sectionHudSize');
-                storedToneHudVisible = localStorage.getItem('fse_bg_toneHudVisible');
-                storedToneHudPosition = localStorage.getItem('fse_bg_toneHudPosition');
-                storedToneHudSize = localStorage.getItem('fse_bg_toneHudSize');
-                storedNutHeadstockVisible = localStorage.getItem('fse_bg_nutHeadstockVisible');
-                storedTuningLabelsVisible = localStorage.getItem('fse_bg_tuningLabelsVisible');
-                storedNutColor = localStorage.getItem('fse_bg_nutColor');
-                storedHeadstockColor = localStorage.getItem('fse_bg_headstockColor');
-                storedFpsVisible = localStorage.getItem('fse_bg_fpsVisible');
-                storedProjectionVisible = localStorage.getItem('fse_bg_projectionVisible');
-                storedFretDividersVisible = localStorage.getItem('fse_bg_fretDividersVisible');
-                storedSlideArrowApproachVisible = localStorage.getItem('fse_bg_slideArrowApproachVisible');
-                storedSlideArrowNeckVisible = localStorage.getItem('fse_bg_slideArrowNeckVisible');
-                storedSlideArrowChainPreviewVisible = localStorage.getItem('fse_bg_slideArrowChainPreviewVisible');
-                storedCustomImageDataUrl = localStorage.getItem('fse_bg_customImageDataUrl');
-                storedCustomImageName = localStorage.getItem('fse_bg_customImageName');
-                storedCustomVideoName = localStorage.getItem('fse_bg_customVideoName');
+                storedStyle = localStorage.getItem('chart_retuner_bg_style');
+                storedBgTheme = localStorage.getItem('chart_retuner_bg_bgTheme');
+                storedHwTheme = localStorage.getItem('chart_retuner_bg_hwTheme');
+                storedI = localStorage.getItem('chart_retuner_bg_intensity');
+                storedR = localStorage.getItem('chart_retuner_bg_reactive');
+                storedFretOnNote = localStorage.getItem('chart_retuner_bg_showFretOnNote');
+                storedFretNumberGhostScope = localStorage.getItem('chart_retuner_bg_fretNumberGhostScope');
+                storedCameraSmoothing = localStorage.getItem('chart_retuner_bg_cameraSmoothing');
+                storedCameraMode = localStorage.getItem('chart_retuner_bg_cameraMode');
+                storedZoomSmoothing = localStorage.getItem('chart_retuner_bg_zoomSmoothing');
+                storedTiltSmoothing = localStorage.getItem('chart_retuner_bg_tiltSmoothing');
+                storedCameraLockLow = localStorage.getItem('chart_retuner_bg_cameraLockLow');
+                storedCameraLockZoom = localStorage.getItem('chart_retuner_bg_cameraLockZoom');
+                storedTextSize = localStorage.getItem('chart_retuner_bg_textSize');
+                storedVibrancy = localStorage.getItem('chart_retuner_bg_vibrancy');
+                storedGlow = localStorage.getItem('chart_retuner_bg_glow');
+                storedChordDiagramVisible = localStorage.getItem('chart_retuner_bg_chordDiagramVisible');
+                storedChordDiagramSize = localStorage.getItem('chart_retuner_bg_chordDiagramSize');
+                storedChordDiagramPosition = localStorage.getItem('chart_retuner_bg_chordDiagramPosition');
+                storedFretColumnMarkerCadence = localStorage.getItem('chart_retuner_bg_fretColumnMarkerCadence');
+                storedInlayLabelsVisible = localStorage.getItem('chart_retuner_bg_inlayLabelsVisible');
+                storedSectionLabelsOnHighway = localStorage.getItem('chart_retuner_bg_sectionLabelsOnHighway');
+                storedSectionHudVisible = localStorage.getItem('chart_retuner_bg_sectionHudVisible');
+                storedSectionHudPosition = localStorage.getItem('chart_retuner_bg_sectionHudPosition');
+                storedSectionHudSize = localStorage.getItem('chart_retuner_bg_sectionHudSize');
+                storedToneHudVisible = localStorage.getItem('chart_retuner_bg_toneHudVisible');
+                storedToneHudPosition = localStorage.getItem('chart_retuner_bg_toneHudPosition');
+                storedToneHudSize = localStorage.getItem('chart_retuner_bg_toneHudSize');
+                storedNutHeadstockVisible = localStorage.getItem('chart_retuner_bg_nutHeadstockVisible');
+                storedTuningLabelsVisible = localStorage.getItem('chart_retuner_bg_tuningLabelsVisible');
+                storedNutColor = localStorage.getItem('chart_retuner_bg_nutColor');
+                storedHeadstockColor = localStorage.getItem('chart_retuner_bg_headstockColor');
+                storedFpsVisible = localStorage.getItem('chart_retuner_bg_fpsVisible');
+                storedProjectionVisible = localStorage.getItem('chart_retuner_bg_projectionVisible');
+                storedFretDividersVisible = localStorage.getItem('chart_retuner_bg_fretDividersVisible');
+                storedSlideArrowApproachVisible = localStorage.getItem('chart_retuner_bg_slideArrowApproachVisible');
+                storedSlideArrowNeckVisible = localStorage.getItem('chart_retuner_bg_slideArrowNeckVisible');
+                storedSlideArrowChainPreviewVisible = localStorage.getItem('chart_retuner_bg_slideArrowChainPreviewVisible');
+                storedCustomImageDataUrl = localStorage.getItem('chart_retuner_bg_customImageDataUrl');
+                storedCustomImageName = localStorage.getItem('chart_retuner_bg_customImageName');
+                storedCustomVideoName = localStorage.getItem('chart_retuner_bg_customVideoName');
             } catch (_) { /* storage blocked */ }
 
             const style = coerceStyle(storedStyle);
@@ -1621,9 +1621,9 @@
             const customImageName    = (typeof storedCustomImageName === 'string')    ? storedCustomImageName    : DEFAULTS.customImageName;
             const customVideoName    = (typeof storedCustomVideoName === 'string')    ? storedCustomVideoName    : DEFAULTS.customVideoName;
 
-            const sel = document.getElementById('fse3d-bg-style');
-            const bgThemeSel = document.getElementById('fse3d-bg-theme');
-            const hwThemeSel = document.getElementById('fse3d-hw-theme');
+            const sel = document.getElementById('cr3d-bg-style');
+            const bgThemeSel = document.getElementById('cr3d-bg-theme');
+            const hwThemeSel = document.getElementById('cr3d-hw-theme');
             // Populate both scene-theme dropdowns from the single SCENE_THEMES
             // source so they can't drift. (Values are selected further below.)
             for (const selEl of [bgThemeSel, hwThemeSel]) {
@@ -1636,84 +1636,84 @@
                     selEl.appendChild(opt);
                 }
             }
-            const sli = document.getElementById('fse3d-bg-intensity');
-            const lbl = document.getElementById('fse3d-bg-intensity-label');
-            const rea = document.getElementById('fse3d-bg-reactive');
-            const fon = document.getElementById('fse3d-show-fret-on-note');
-            const csli = document.getElementById('fse3d-camera-smoothing');
-            const clbl = document.getElementById('fse3d-camera-smoothing-label');
-            const zsli = document.getElementById('fse3d-zoom-smoothing');
-            const zlbl = document.getElementById('fse3d-zoom-smoothing-label');
-            const tsli = document.getElementById('fse3d-tilt-smoothing');
-            const tlbl = document.getElementById('fse3d-tilt-smoothing-label');
-            const cll  = document.getElementById('fse3d-camera-lock-low');
-            const cmod = document.getElementById('fse3d-camera-mode');
-            const lzli = document.getElementById('fse3d-camera-lock-zoom');
-            const lzlbl = document.getElementById('fse3d-camera-lock-zoom-label');
-            const tsi  = document.getElementById('fse3d-text-size');
-            const tslbl = document.getElementById('fse3d-text-size-label');
-            const vsli = document.getElementById('fse3d-vibrancy');
-            const vlbl = document.getElementById('fse3d-vibrancy-label');
-            const gsli  = document.getElementById('fse3d-glow');
-            const glbl  = document.getElementById('fse3d-glow-label');
-            const cdvis = document.getElementById('fse3d-chord-diagram-visible');
-            const cdsli = document.getElementById('fse3d-chord-diagram-size');
-            const cdslbl= document.getElementById('fse3d-chord-diagram-size-label');
-            const cdpos = document.getElementById('fse3d-chord-diagram-position');
-            const fcmc  = document.getElementById('fse3d-fret-column-marker-cadence');
-            const ilv   = document.getElementById('fse3d-inlay-labels-visible');
-            const slhi  = document.getElementById('fse3d-section-labels-on-highway');
-            const shvi  = document.getElementById('fse3d-section-hud-visible');
-            const shpos = document.getElementById('fse3d-section-hud-position');
-            const shsi  = document.getElementById('fse3d-section-hud-size');
-            const shslbl= document.getElementById('fse3d-section-hud-size-label');
-            const thvi  = document.getElementById('fse3d-tone-hud-visible');
-            const thpos = document.getElementById('fse3d-tone-hud-position');
-            const thsi  = document.getElementById('fse3d-tone-hud-size');
-            const thslbl= document.getElementById('fse3d-tone-hud-size-label');
-            const nhv   = document.getElementById('fse3d-nut-headstock-visible');
-            const tlv   = document.getElementById('fse3d-tuning-labels-visible');
-            const nco   = document.getElementById('fse3d-nut-color');
-            const hco   = document.getElementById('fse3d-headstock-color');
-            const fpv   = document.getElementById('fse3d-fps-visible');
-            const pgh   = document.getElementById('fse3d-projection-visible');
-            const saav  = document.getElementById('fse3d-slide-arrow-approach-visible');
-            const sanv  = document.getElementById('fse3d-slide-arrow-neck-visible');
-            const sacpv = document.getElementById('fse3d-slide-arrow-chain-preview-visible');
-            const fileInput = document.getElementById('fse3d-bg-custom-image-file');
-            const clearBtn  = document.getElementById('fse3d-bg-custom-image-clear');
-            const nameP     = document.getElementById('fse3d-bg-custom-image-name');
-            const errorP    = document.getElementById('fse3d-bg-custom-image-error');
-            const videoFileInput = document.getElementById('fse3d-bg-custom-video-file');
-            const videoClearBtn  = document.getElementById('fse3d-bg-custom-video-clear');
-            const videoNameP     = document.getElementById('fse3d-bg-custom-video-name');
-            const videoErrorP    = document.getElementById('fse3d-bg-custom-video-error');
+            const sli = document.getElementById('cr3d-bg-intensity');
+            const lbl = document.getElementById('cr3d-bg-intensity-label');
+            const rea = document.getElementById('cr3d-bg-reactive');
+            const fon = document.getElementById('cr3d-show-fret-on-note');
+            const csli = document.getElementById('cr3d-camera-smoothing');
+            const clbl = document.getElementById('cr3d-camera-smoothing-label');
+            const zsli = document.getElementById('cr3d-zoom-smoothing');
+            const zlbl = document.getElementById('cr3d-zoom-smoothing-label');
+            const tsli = document.getElementById('cr3d-tilt-smoothing');
+            const tlbl = document.getElementById('cr3d-tilt-smoothing-label');
+            const cll  = document.getElementById('cr3d-camera-lock-low');
+            const cmod = document.getElementById('cr3d-camera-mode');
+            const lzli = document.getElementById('cr3d-camera-lock-zoom');
+            const lzlbl = document.getElementById('cr3d-camera-lock-zoom-label');
+            const tsi  = document.getElementById('cr3d-text-size');
+            const tslbl = document.getElementById('cr3d-text-size-label');
+            const vsli = document.getElementById('cr3d-vibrancy');
+            const vlbl = document.getElementById('cr3d-vibrancy-label');
+            const gsli  = document.getElementById('cr3d-glow');
+            const glbl  = document.getElementById('cr3d-glow-label');
+            const cdvis = document.getElementById('cr3d-chord-diagram-visible');
+            const cdsli = document.getElementById('cr3d-chord-diagram-size');
+            const cdslbl= document.getElementById('cr3d-chord-diagram-size-label');
+            const cdpos = document.getElementById('cr3d-chord-diagram-position');
+            const fcmc  = document.getElementById('cr3d-fret-column-marker-cadence');
+            const ilv   = document.getElementById('cr3d-inlay-labels-visible');
+            const slhi  = document.getElementById('cr3d-section-labels-on-highway');
+            const shvi  = document.getElementById('cr3d-section-hud-visible');
+            const shpos = document.getElementById('cr3d-section-hud-position');
+            const shsi  = document.getElementById('cr3d-section-hud-size');
+            const shslbl= document.getElementById('cr3d-section-hud-size-label');
+            const thvi  = document.getElementById('cr3d-tone-hud-visible');
+            const thpos = document.getElementById('cr3d-tone-hud-position');
+            const thsi  = document.getElementById('cr3d-tone-hud-size');
+            const thslbl= document.getElementById('cr3d-tone-hud-size-label');
+            const nhv   = document.getElementById('cr3d-nut-headstock-visible');
+            const tlv   = document.getElementById('cr3d-tuning-labels-visible');
+            const nco   = document.getElementById('cr3d-nut-color');
+            const hco   = document.getElementById('cr3d-headstock-color');
+            const fpv   = document.getElementById('cr3d-fps-visible');
+            const pgh   = document.getElementById('cr3d-projection-visible');
+            const saav  = document.getElementById('cr3d-slide-arrow-approach-visible');
+            const sanv  = document.getElementById('cr3d-slide-arrow-neck-visible');
+            const sacpv = document.getElementById('cr3d-slide-arrow-chain-preview-visible');
+            const fileInput = document.getElementById('cr3d-bg-custom-image-file');
+            const clearBtn  = document.getElementById('cr3d-bg-custom-image-clear');
+            const nameP     = document.getElementById('cr3d-bg-custom-image-name');
+            const errorP    = document.getElementById('cr3d-bg-custom-image-error');
+            const videoFileInput = document.getElementById('cr3d-bg-custom-video-file');
+            const videoClearBtn  = document.getElementById('cr3d-bg-custom-video-clear');
+            const videoNameP     = document.getElementById('cr3d-bg-custom-video-name');
+            const videoErrorP    = document.getElementById('cr3d-bg-custom-video-error');
             if (sli) sli.value = String(intensity);
             if (lbl) lbl.textContent = intensity.toFixed(2);
             if (rea) rea.checked = reactive;
             if (fon) fon.checked = showFretOnNote;
-            const fgsRock = document.getElementById('fse3d-fret-ghost-scope-chords');
-            const fgsAll = document.getElementById('fse3d-fret-ghost-scope-all');
-            const fgsWrap = document.getElementById('fse3d-fret-ghost-scope-wrap');
+            const fgsRock = document.getElementById('cr3d-fret-ghost-scope-chords');
+            const fgsAll = document.getElementById('cr3d-fret-ghost-scope-all');
+            const fgsWrap = document.getElementById('cr3d-fret-ghost-scope-wrap');
             if (fretNumberGhostScope === 'all') { if (fgsAll) fgsAll.checked = true; }
             else { if (fgsRock) fgsRock.checked = true; }
             if (fgsWrap) fgsWrap.classList.toggle('hidden', !showFretOnNote);
 
             function syncH3dFretGhostScopeUi() {
-                const c = document.getElementById('fse3d-show-fret-on-note');
-                const w = document.getElementById('fse3d-fret-ghost-scope-wrap');
+                const c = document.getElementById('cr3d-show-fret-on-note');
+                const w = document.getElementById('cr3d-fret-ghost-scope-wrap');
                 if (w && c) w.classList.toggle('hidden', !c.checked);
             }
             if (fon) {
                 fon.addEventListener('change', function () {
-                    if (window.fse3dBgSetShowFretOnNote) window.fse3dBgSetShowFretOnNote(this.checked);
+                    if (window.cr3dBgSetShowFretOnNote) window.cr3dBgSetShowFretOnNote(this.checked);
                     syncH3dFretGhostScopeUi();
                 });
             }
-            document.querySelectorAll('input[name="fse3d-fret-ghost-scope"]').forEach(function (r) {
+            document.querySelectorAll('input[name="cr3d-fret-ghost-scope"]').forEach(function (r) {
                 r.addEventListener('change', function () {
-                    if (this.checked && window.fse3dBgSetFretNumberGhostScope)
-                        window.fse3dBgSetFretNumberGhostScope(this.value);
+                    if (this.checked && window.cr3dBgSetFretNumberGhostScope)
+                        window.cr3dBgSetFretNumberGhostScope(this.value);
                 });
             });
             if (csli) csli.value = String(cameraSmoothing);
@@ -1744,7 +1744,7 @@
             if (ilv)   ilv.checked  = !inlayLabelsVisible;
             if (fpv)   fpv.checked  = fpsVisible;
             if (pgh)   pgh.checked  = projectionVisible;
-            const fdv = document.getElementById('fse3d-fret-dividers-visible');
+            const fdv = document.getElementById('cr3d-fret-dividers-visible');
             if (fdv)   fdv.checked  = fretDividersVisible;
             if (saav)  saav.checked = slideArrowApproachVisible;
             if (sanv)  sanv.checked = slideArrowNeckVisible;
@@ -1763,27 +1763,27 @@
             // panel reflects persistence on reopen (the renderer already reads
             // these via _bgReadSetting; without this the controls always showed
             // their default markup, misrepresenting a saved non-default). Reads
-            // fse_bg_* directly; defaults mirror BG_DEFAULTS (all bools on,
+            // chart_retuner_bg_* directly; defaults mirror BG_DEFAULTS (all bools on,
             // hitFx 0.70) and the _bgCoerceBool 'true'/'1' vs 'false'/'0' rules.
             try {
                 const _bgBool = (k, def) => {
-                    const v = localStorage.getItem('fse_bg_' + k);
+                    const v = localStorage.getItem('chart_retuner_bg_' + k);
                     return v == null ? def : !(v === 'false' || v === '0');
                 };
                 const _setChk = (id, on) => { const el = document.getElementById(id); if (el) el.checked = on; };
-                _setChk('fse3d-sparks',       _bgBool('sparks', true));
-                _setChk('fse3d-cinematic',    _bgBool('cinematic', true));
-                _setChk('fse3d-streakfx',     _bgBool('streakFx', true));
-                _setChk('fse3d-verdictmarks', _bgBool('verdictMarks', true));
-                _setChk('fse3d-bloom',        _bgBool('bloom', true));
-                _setChk('fse3d-timingfx',     _bgBool('timingFx', true));
-                const _hf = document.getElementById('fse3d-hitfx');
+                _setChk('cr3d-sparks',       _bgBool('sparks', true));
+                _setChk('cr3d-cinematic',    _bgBool('cinematic', true));
+                _setChk('cr3d-streakfx',     _bgBool('streakFx', true));
+                _setChk('cr3d-verdictmarks', _bgBool('verdictMarks', true));
+                _setChk('cr3d-bloom',        _bgBool('bloom', true));
+                _setChk('cr3d-timingfx',     _bgBool('timingFx', true));
+                const _hf = document.getElementById('cr3d-hitfx');
                 if (_hf) {
-                    let v = parseFloat(localStorage.getItem('fse_bg_hitFx'));
+                    let v = parseFloat(localStorage.getItem('chart_retuner_bg_hitFx'));
                     if (!isFinite(v)) v = 0.70;
                     v = Math.max(0, Math.min(1, v));
                     _hf.value = String(v);
-                    const _hfl = document.getElementById('fse3d-hitfx-label');
+                    const _hfl = document.getElementById('cr3d-hitfx-label');
                     if (_hfl) _hfl.textContent = v.toFixed(2);
                 }
             } catch (_) { /* storage blocked — controls keep their default markup */ }
@@ -1893,15 +1893,15 @@
             //
             // NOTE: settings.html normally runs BEFORE screen.js loads
             // (app.js injects settings first, then appends the plugin
-            // script), so window.fse3dBgSetStyle is usually undefined at
+            // script), so window.cr3dBgSetStyle is usually undefined at
             // this point. Write the corrected value directly to
             // localStorage so that when screen.js does load it reads the
             // already-fixed value rather than the stale 'video'/'image'.
             if (sel) {
                 if ((style === 'image' && !hasAsset) || (style === 'video' && !hasVideo)) {
                     sel.value = DEFAULTS.style;
-                    try { localStorage.setItem('fse_bg_style', DEFAULTS.style); } catch (_) { /* storage blocked */ }
-                    if (window.fse3dBgSetStyle) window.fse3dBgSetStyle(DEFAULTS.style);
+                    try { localStorage.setItem('chart_retuner_bg_style', DEFAULTS.style); } catch (_) { /* storage blocked */ }
+                    if (window.cr3dBgSetStyle) window.cr3dBgSetStyle(DEFAULTS.style);
                 } else {
                     sel.value = style;
                 }
@@ -1983,8 +1983,8 @@
                                 fileInput.value = '';
                                 return;
                             }
-                            if (window.fse3dBgSetCustomImage) {
-                                window.fse3dBgSetCustomImage({ dataUrl: dataUrl, name: file.name });
+                            if (window.cr3dBgSetCustomImage) {
+                                window.cr3dBgSetCustomImage({ dataUrl: dataUrl, name: file.name });
                             }
                             // The setter swallows localStorage write
                             // failures (sets in-memory fallback so the
@@ -1997,7 +1997,7 @@
                             refreshImageOptionState(true, file.name);
                             fileInput.value = '';
                             let persisted = false;
-                            try { persisted = localStorage.getItem('fse_bg_customImageDataUrl') === dataUrl; } catch (_) { /* storage blocked */ }
+                            try { persisted = localStorage.getItem('chart_retuner_bg_customImageDataUrl') === dataUrl; } catch (_) { /* storage blocked */ }
                             if (!persisted) {
                                 showError('Image applied for this session, but could not be saved (storage may be full or blocked). It will be lost on refresh.');
                             }
@@ -2014,7 +2014,7 @@
             if (clearBtn) {
                 clearBtn.addEventListener('click', function () {
                     clearError();
-                    if (window.fse3dBgClearCustomImage) window.fse3dBgClearCustomImage();
+                    if (window.cr3dBgClearCustomImage) window.cr3dBgClearCustomImage();
                     refreshImageOptionState(false, '');
                     if (fileInput) fileInput.value = '';
                     // If the picker was on `image`, fall back to a
@@ -2022,7 +2022,7 @@
                     // (now-disabled) option selected.
                     if (sel && sel.value === 'image') {
                         sel.value = DEFAULTS.style;
-                        if (window.fse3dBgSetStyle) window.fse3dBgSetStyle(DEFAULTS.style);
+                        if (window.cr3dBgSetStyle) window.cr3dBgSetStyle(DEFAULTS.style);
                     }
                 });
             }
@@ -2108,8 +2108,8 @@
                             if (!VIDEO_FILENAME_RE.test(name)) {
                                 throw new Error('Server returned an unexpected filename.');
                             }
-                            if (window.fse3dBgSetCustomVideo) {
-                                window.fse3dBgSetCustomVideo({ name: name });
+                            if (window.cr3dBgSetCustomVideo) {
+                                window.cr3dBgSetCustomVideo({ name: name });
                             }
                             refreshVideoOptionState(true, name);
                             videoFileInput.value = '';
@@ -2125,7 +2125,7 @@
                             // because the renderer reads from the
                             // mem-fallback ahead of localStorage.
                             let persisted = false;
-                            try { persisted = localStorage.getItem('fse_bg_customVideoName') === name; } catch (_) { /* storage blocked */ }
+                            try { persisted = localStorage.getItem('chart_retuner_bg_customVideoName') === name; } catch (_) { /* storage blocked */ }
                             if (!persisted) {
                                 showVideoError('Video applied for this session, but the filename pointer could not be saved (storage may be full or blocked). It will be lost on refresh.');
                             }
@@ -2176,12 +2176,12 @@
                             // key so the renderer doesn't lose the reference to
                             // a file that still exists on disk and the user can
                             // retry the clear later.
-                            if (window.fse3dBgClearCustomVideo) window.fse3dBgClearCustomVideo();
+                            if (window.cr3dBgClearCustomVideo) window.cr3dBgClearCustomVideo();
                             refreshVideoOptionState(false, '');
                             if (videoFileInput) videoFileInput.value = '';
                             if (sel && sel.value === 'video') {
                                 sel.value = DEFAULTS.style;
-                                if (window.fse3dBgSetStyle) window.fse3dBgSetStyle(DEFAULTS.style);
+                                if (window.cr3dBgSetStyle) window.cr3dBgSetStyle(DEFAULTS.style);
                             }
                         })
                         .catch(function (err) {

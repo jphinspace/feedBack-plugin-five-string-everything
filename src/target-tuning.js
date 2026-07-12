@@ -1,5 +1,5 @@
-// Five-String Everything — target tuning spec resolution & defaulting.
-// One of four modules fse-retune.js aggregates into `FSE`. The chart-remap
+// Chart Retuner — target tuning spec resolution & defaulting.
+// One of four modules chart-retune.js aggregates into `CR`. The chart-remap
 // math itself lives in retune-engine.js, which imports the constants below.
 
 import { parseTargetNote, midiToNoteLabel } from './pitch.js';
@@ -30,7 +30,7 @@ export const EXTENDED_CORE_INDEX = 2;
 // never user-editable/deletable (no entry in the "Saved custom tunings"
 // list). BEADG (id 'beadg') is always first and is the default; `colors:
 // null` on that one entry is the sentinel resolveActiveTuning/screen.js's
-// _bgLoadSettings read to mean "live-track the global palette" (FSE.
+// _bgLoadSettings read to mean "live-track the global palette" (CR.
 // lowBColor() + PALETTES.default) rather than a fixed set — the only preset
 // this applies to, since that live 5-wide E/A/D/G+lowB mapping is specific
 // to BEADG's own shape. Every other preset carries concrete hand-picked
@@ -76,7 +76,7 @@ export function resolveActiveTuning(id, customTunings) {
 }
 
 // Length in [MIN,MAX] and every entry parses. Shared by
-// window.fse3dSaveCustomTuning and the storage-read filter in screen.js.
+// window.cr3dSaveCustomTuning and the storage-read filter in screen.js.
 export function isValidTuningStringsArray(strings) {
     if (!Array.isArray(strings) || strings.length < MIN_TARGET_STRING_COUNT || strings.length > MAX_TARGET_STRING_COUNT) return false;
     return strings.every(s => !!parseTargetNote(s));

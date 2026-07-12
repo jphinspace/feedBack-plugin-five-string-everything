@@ -1,12 +1,12 @@
 {
-    "id": "five_string_everything",
-    "name": "Five-String Everything",
-    "version": "0.1.5",
+    "id": "chart_retuner",
+    "name": "Chart Retuner",
+    "version": "0.2.0",
     "type": "visualization",
     "script": "screen.js",
     "scriptType": "module",
     "minHost": "0.3.0-alpha.1",
     "styles": "assets/plugin.css",
-    "settings": { "html": "settings.html", "category": "graphics", "server_files": ["plugin_uploads/five_string_everything/current.mp4", "plugin_uploads/five_string_everything/current.webm"] },
+    "settings": { "html": "settings.html", "category": "graphics", "server_files": ["plugin_uploads/chart_retuner/current.mp4", "plugin_uploads/chart_retuner/current.webm"] },
     "routes": "routes.py"
 }

@@ -6,17 +6,17 @@
 // main player and per-panel in splitscreen without any architectural
 // changes.
 //
-// Five-String Everything: this file is a fork of highway_3d/screen.js,
+// Chart Retuner: this file is a fork of highway_3d/screen.js,
 // patched at a small set of PATCH POINTs to draw every note remapped onto a
 // 5-string bass target instead of the chart's own tuning. The target string
 // COUNT is always 5 (that's the whole point of the plugin), but which
 // pitches those 5 strings are tuned to is user-configurable via the
 // settings picker (default BEADG; AEADG, BbEbAbDbGb, or any other 5-string
-// tuning also work) — see FSE.resolveTargetTuning. All of that new logic
-// lives in ./src/fse-retune.js (imported as the `FSE` namespace below)
+// tuning also work) — see CR.resolveTargetTuning. All of that new logic
+// lives in ./src/chart-retune.js (imported as the `CR` namespace below)
 // rather than inline here, so this file stays as close as possible to
 // upstream highway_3d/screen.js and periodic syncs stay a mechanical diff.
-import { FSE } from './src/fse-retune.js';
+import { CR } from './src/chart-retune.js';
 
 (function () {
     'use strict';
@@ -38,9 +38,9 @@ import { FSE } from './src/fse-retune.js';
      * audio lives in JUCE, not the webview <audio>); in a browser it taps
      * the song <audio> directly.
      * ──────────────────────────────────────────────────────────────────── */
-    const BC_VENDOR = '/api/plugins/five_string_everything/assets/vendor/';
+    const BC_VENDOR = '/api/plugins/chart_retuner/assets/vendor/';
     const BC_FRAME = 1024;
-    const BC_WORKLET = '/api/plugins/five_string_everything/assets/viz-worklet.js';
+    const BC_WORKLET = '/api/plugins/chart_retuner/assets/viz-worklet.js';
     const _bcMeters = { gtr: 0, song: 0 }; // live levels shown in the panel readout
     const BC_BTN = 'background:rgba(255,255,255,.09);color:#cfe3ff;border:1px solid rgba(255,255,255,.16);border-radius:5px;padding:3px 8px;cursor:pointer;font:12px system-ui';
     let _bcLoading = null;
@@ -186,7 +186,7 @@ import { FSE } from './src/fse-retune.js';
     // possibly-suspended context and mute playback, and it would miss the stems
     // side-chain that sloppaks expose at window.feedBack.stems.getAnalyser().
     /* ── Controls + readability (localStorage-backed, global config) ───── */
-    const BC_LS = 'fse_viz3d_settings';
+    const BC_LS = 'chart_retuner_viz3d_settings';
     const BC_DEFAULTS = { enabled: true, opacity: 1.0, laneDim: true, laneDimStrength: 0.45, chartAccents: true, colorTint: true, chartStrength: 1.0, tintStrength: 0.65, guitarGain: 6, songGain: 1.8, cyclePool: 'all', hold: false };
     let _bcSettings = null;
     function _bcLoadSettings() {
@@ -205,7 +205,7 @@ import { FSE } from './src/fse-retune.js';
     // highway re-reads and applies them immediately. Defined on window at module
     // scope so it's available regardless of whether a highway is mounted yet;
     // settings.html guards the call with `?.` for the not-yet-loaded case.
-    window.fse3dBcApplySettings = function () {
+    window.cr3dBcApplySettings = function () {
         _bcSettings = null;        // drop the cache so the next read reloads from localStorage
         _bcLoadSettings();
         _bcApplyAll();
@@ -244,26 +244,26 @@ import { FSE } from './src/fse-retune.js';
     let _bcListsLoaded = false;
     function _bcLoadLists() {
         if (_bcListsLoaded) return; _bcListsLoaded = true;
-        try { (JSON.parse(localStorage.getItem('fse_viz3d_favorites') || '[]') || []).forEach((n) => _bcFavorites.add(n)); } catch (e) {}
-        try { (JSON.parse(localStorage.getItem('fse_viz3d_banned') || '[]') || []).forEach((n) => _bcBanned.add(n)); } catch (e) {}
+        try { (JSON.parse(localStorage.getItem('chart_retuner_viz3d_favorites') || '[]') || []).forEach((n) => _bcFavorites.add(n)); } catch (e) {}
+        try { (JSON.parse(localStorage.getItem('chart_retuner_viz3d_banned') || '[]') || []).forEach((n) => _bcBanned.add(n)); } catch (e) {}
         let seeded = false;
-        try { seeded = !!localStorage.getItem('fse_viz3d_seeded'); } catch (e) {}
+        try { seeded = !!localStorage.getItem('chart_retuner_viz3d_seeded'); } catch (e) {}
         if (!seeded) {
             BC_DEFAULT_FAVORITES.forEach((n) => _bcFavorites.add(n));
             BC_DEFAULT_BANS.forEach((n) => _bcBanned.add(n));
-            try { localStorage.setItem('fse_viz3d_seeded', '1'); } catch (e) {}
+            try { localStorage.setItem('chart_retuner_viz3d_seeded', '1'); } catch (e) {}
             _bcSaveLists();
         }
     }
     function _bcSaveLists() {
-        try { localStorage.setItem('fse_viz3d_favorites', JSON.stringify([..._bcFavorites])); } catch (e) {}
-        try { localStorage.setItem('fse_viz3d_banned', JSON.stringify([..._bcBanned])); } catch (e) {}
+        try { localStorage.setItem('chart_retuner_viz3d_favorites', JSON.stringify([..._bcFavorites])); } catch (e) {}
+        try { localStorage.setItem('chart_retuner_viz3d_banned', JSON.stringify([..._bcBanned])); } catch (e) {}
     }
     // Re-add the bundled defaults anytime (merges; a default-fav un-bans, a default-ban un-favs).
     function _bcRestoreDefaults() {
         BC_DEFAULT_FAVORITES.forEach((n) => { _bcBanned.delete(n); _bcFavorites.add(n); });
         BC_DEFAULT_BANS.forEach((n) => { _bcFavorites.delete(n); _bcBanned.add(n); });
-        try { localStorage.setItem('fse_viz3d_seeded', '1'); } catch (e) {}
+        try { localStorage.setItem('chart_retuner_viz3d_seeded', '1'); } catch (e) {}
         _bcSaveLists(); _bcUpdatePanelPreset(); _bcRenderList();
     }
     let _bcPrimary = null;
@@ -755,7 +755,7 @@ import { FSE } from './src/fse-retune.js';
         return parseInt(full, 16);
     }
     // PATCH POINT (five-string retune): the added B string's color comes
-    // from FSE.lowBColor() (src/fse-retune.js), not the raw string-index
+    // from CR.lowBColor() (src/chart-retune.js), not the raw string-index
     // palette — see that module for the rationale.
     // Numeric (0xRRGGBB) darken/lighten — used to derive the gem-gradient
     // top-highlight / bottom-shade stops from a custom per-string base color
@@ -830,7 +830,7 @@ import { FSE } from './src/fse-retune.js';
     function resolveStringCount(targetStringCount) {
         return (Number.isFinite(targetStringCount) && targetStringCount >= 1)
             ? targetStringCount
-            : FSE.DEFAULT_TARGET_MIDI_TUNING.length;
+            : CR.DEFAULT_TARGET_MIDI_TUNING.length;
     }
 
     /**
@@ -1096,7 +1096,7 @@ import { FSE } from './src/fse-retune.js';
     // effective vertical fov equals BASE_VFOV (exact no-op); past it the
     // vertical fov drops to keep the horizontal cone ~constant so the neck
     // fills a wide pane. HORPLUS_MIN_VFOV floors the result on pathological
-    // aspects. Engaged only via the window.__fse3dAspectTune bridge (default off).
+    // aspects. Engaged only via the window.__cr3dAspectTune bridge (default off).
     const HORPLUS_START_ASPECT = 16 / 9;
     const HORPLUS_MIN_VFOV = 28;
 
@@ -1418,18 +1418,18 @@ import { FSE } from './src/fse-retune.js';
     const _fretXUni = f => f <= 0 ? 0 : f * _fretXUniStep;
 
     let _h3dFretUniform = true;
-    try { _h3dFretUniform = localStorage.getItem('five_string_everything.fretSpacing') !== 'logarithmic'; } catch (_) {}
+    try { _h3dFretUniform = localStorage.getItem('chart_retuner.fretSpacing') !== 'logarithmic'; } catch (_) {}
     const fretX = f => _h3dFretUniform ? _fretXUni(f) : _fretXLog(f);
 
-    window.fse3dSetFretSpacing = mode => {
+    window.cr3dSetFretSpacing = mode => {
         // Validate against the two supported modes before persisting so an
         // unexpected input can't leave an invalid value in localStorage
-        // (mirrors fse3dBgSetFretNumberGhostScope's allowlist guard). No-op
+        // (mirrors cr3dBgSetFretNumberGhostScope's allowlist guard). No-op
         // when the stored mode is already what was requested.
         const m = mode === 'logarithmic' ? 'logarithmic' : 'uniform';
         try {
-            if (localStorage.getItem('five_string_everything.fretSpacing') === m) return;
-            localStorage.setItem('five_string_everything.fretSpacing', m);
+            if (localStorage.getItem('chart_retuner.fretSpacing') === m) return;
+            localStorage.setItem('chart_retuner.fretSpacing', m);
         } catch (_) {}
         // Apply live rather than reloading the page — a full page reload
         // reboots the SPA to the home screen (index.html's `.screen.active`),
@@ -1517,7 +1517,7 @@ import { FSE } from './src/fse-retune.js';
     let FRET_WIDTH_MID = fretX(7) - fretX(6);
 
     // Recompute the fretX-derived scalars baked at module init. Called from
-    // fse3dSetFretSpacing after _h3dFretUniform flips so label scaling and the
+    // cr3dSetFretSpacing after _h3dFretUniform flips so label scaling and the
     // camera hysteresis threshold track the newly chosen spacing — the live
     // alternative to the old location.reload(), which ejected the user from
     // Settings back to the home screen.
@@ -1643,7 +1643,7 @@ import { FSE } from './src/fse-retune.js';
     }
 
     // ── Wide-pane framing: live tuner bridge + panel ──────────────────────────
-    // window.__fse3dAspectTune is the single source of truth the renderer reads
+    // window.__cr3dAspectTune is the single source of truth the renderer reads
     // each frame (see effectiveVfov + camUpdate). The defaults reproduce the
     // current framing exactly (enabled:false). Values persist to localStorage so
     // a tuning session survives reloads; the floating panel (Shift+A) writes the
@@ -1652,7 +1652,7 @@ import { FSE } from './src/fse-retune.js';
     // Versioned key: the first iteration shipped a broken default (enabled:true,
     // baseVfov:30) and may have persisted it. Bumping the key ignores that stale
     // state so the corrected default-off config actually takes effect.
-    const _ASPECT_LS = 'fse3d_aspect_tune2';
+    const _ASPECT_LS = 'cr3d_aspect_tune2';
     // Working defaults. Default OFF, so out of the box this is an exact no-op —
     // every pane renders byte-for-byte as before (effectiveVfov returns
     // BASE_VFOV and the pose nudges gate off). The config is also coherent when
@@ -1723,14 +1723,14 @@ import { FSE } from './src/fse-retune.js';
     // Get-or-create the shared bridge object, seeded from defaults + localStorage.
     // May carry a sparse `__panels` map of per-pane overrides.
     function _aspectTune() {
-        let t = window.__fse3dAspectTune;
+        let t = window.__cr3dAspectTune;
         if (!t || typeof t !== 'object') {
             t = Object.assign({}, _ASPECT_DEFAULTS);
             try {
                 const raw = localStorage.getItem(_ASPECT_LS);
                 if (raw) Object.assign(t, JSON.parse(raw));
             } catch (e) {}
-            window.__fse3dAspectTune = t;
+            window.__cr3dAspectTune = t;
         }
         return t;
     }
@@ -1779,7 +1779,7 @@ import { FSE } from './src/fse-retune.js';
     // pruning; the dropdown is only marked dirty when a pane is newly added — not
     // on every re-report, which would flicker the <select>.
     function _aspectRegisterPane(paneKey) {
-        const reg = window.__fse3dAspectPanes || (window.__fse3dAspectPanes = {});
+        const reg = window.__cr3dAspectPanes || (window.__cr3dAspectPanes = {});
         const label = _aspectPaneLabel(paneKey);
         let e = reg[paneKey];
         if (!e) { e = reg[paneKey] = { label, seen: 0 }; _aspectPanesDirty = true; }
@@ -1788,10 +1788,10 @@ import { FSE } from './src/fse-retune.js';
     }
     // Drop panes not reported recently (song change, split teardown, pane close).
     function _aspectPrunePanes() {
-        const reg = window.__fse3dAspectPanes;
+        const reg = window.__cr3dAspectPanes;
         if (!reg) return;
         const now = _aspectNowMs();
-        const ro = window.__fse3dAspectReadout;
+        const ro = window.__cr3dAspectReadout;
         Object.keys(reg).forEach((k) => {
             if (now - (reg[k].seen || 0) > 1500) {
                 delete reg[k];
@@ -1844,7 +1844,7 @@ import { FSE } from './src/fse-retune.js';
         // Don't yank a dropdown the user is actively interacting with — leave it
         // dirty and rebuild on a later tick once it's no longer focused.
         if (document.activeElement === _aspectTargetSel) return;
-        const reg = window.__fse3dAspectPanes || {};
+        const reg = window.__cr3dAspectPanes || {};
         const keys = Object.keys(reg).sort();
         _aspectTargetSel.innerHTML = '';
         const all = document.createElement('option');
@@ -2054,16 +2054,16 @@ import { FSE } from './src/fse-retune.js';
         _ensureAspectPanel();
         if (!_aspectPanelEl) return;
         _aspectPanelEl.style.display = on ? 'block' : 'none';
-        window.__fse3dAspectPanelOpen = !!on;        // gates the per-frame readout publish
+        window.__cr3dAspectPanelOpen = !!on;        // gates the per-frame readout publish
         // Prune before the first build so panes from a prior song/split don't
         // flash in the dropdown until the first RAF tick.
         if (on) { _aspectPrunePanes(); _aspectBuildTargets(); }
         if (on && !_aspectPanelRAF) {
             const tick = () => {
-                if (!window.__fse3dAspectPanelOpen) { _aspectPanelRAF = 0; return; }
+                if (!window.__cr3dAspectPanelOpen) { _aspectPanelRAF = 0; return; }
                 _aspectPrunePanes();
                 if (_aspectPanesDirty) _aspectBuildTargets();
-                const ro = window.__fse3dAspectReadout;
+                const ro = window.__cr3dAspectReadout;
                 if (_aspectPanelRO && ro) {
                     const key = _aspectEditTarget || ro.__last;
                     const e = key && ro[key];
@@ -2093,7 +2093,7 @@ import { FSE } from './src/fse-retune.js';
      *  the feedBack core <audio id="audio"> element across all panel
      *  instances; per-panel settings live in localStorage with a global
      *  fallback so settings.html drives a single default while per-panel
-     *  overrides (fse_bg_panel<idx>_*) can be set for splitscreen layouts.
+     *  overrides (chart_retuner_bg_panel<idx>_*) can be set for splitscreen layouts.
      *
      *  Caveat: createMediaElementSource() can only be called once per
      *  element. 3dhighway owns that source for now; future plugins
@@ -2137,7 +2137,7 @@ import { FSE } from './src/fse-retune.js';
                 domain: 'audio-mix',
                 bridgeId,
                 legacySurface,
-                participantId: 'five_string_everything',
+                participantId: 'chart_retuner',
                 outcome,
                 status,
                 reason,
@@ -2291,11 +2291,11 @@ import { FSE } from './src/fse-retune.js';
         return _bgBandsCache;
     }
 
-    const BG_DEFAULTS = { style: 'particles', intensity: 0.5, reactive: true, palette: 'default', bgTheme: 'default', hwTheme: 'default', showFretOnNote: true, fretNumberGhostScope: 'chords', cameraSmoothing: 0.5, zoomSmoothing: 0.5, tiltSmoothing: 0.5, cameraLockLow: false, cameraLockZoom: 0.5, cameraMode: 'lookahead', nutHeadstockVisible: true, tuningLabelsVisible: true, nutColor: '#f5f3f0', headstockColor: '#d4b48a', textSize: 0.5, vibrancy: 0.85, glow: 0.25, customImageDataUrl: '', customImageName: '', customVideoName: '', chordDiagramVisible: true, chordDiagramSize: 0.5, chordDiagramPosition: 'tl', fretColumnMarkerCadence: 1, projectionVisible: true, inlayLabelsVisible: false, sectionLabelsOnHighway: false, sectionHudVisible: false, sectionHudPosition: 'tr', sectionHudSize: 0.5, toneHudVisible: false, toneHudPosition: 'tl', toneHudSize: 0.5, fpsVisible: false, fretDividersVisible: true, slideArrowApproachVisible: true, slideArrowNeckVisible: true, slideArrowChainPreviewVisible: true, hitFx: 0.7, sparks: true, cinematic: true, verdictMarks: true, timingFx: true, streakFx: true, bloom: true, targetTuningId: FSE.BUILTIN_TUNING_ID, customTunings: '[]' };
+    const BG_DEFAULTS = { style: 'particles', intensity: 0.5, reactive: true, palette: 'default', bgTheme: 'default', hwTheme: 'default', showFretOnNote: true, fretNumberGhostScope: 'chords', cameraSmoothing: 0.5, zoomSmoothing: 0.5, tiltSmoothing: 0.5, cameraLockLow: false, cameraLockZoom: 0.5, cameraMode: 'lookahead', nutHeadstockVisible: true, tuningLabelsVisible: true, nutColor: '#f5f3f0', headstockColor: '#d4b48a', textSize: 0.5, vibrancy: 0.85, glow: 0.25, customImageDataUrl: '', customImageName: '', customVideoName: '', chordDiagramVisible: true, chordDiagramSize: 0.5, chordDiagramPosition: 'tl', fretColumnMarkerCadence: 1, projectionVisible: true, inlayLabelsVisible: false, sectionLabelsOnHighway: false, sectionHudVisible: false, sectionHudPosition: 'tr', sectionHudSize: 0.5, toneHudVisible: false, toneHudPosition: 'tl', toneHudSize: 0.5, fpsVisible: false, fretDividersVisible: true, slideArrowApproachVisible: true, slideArrowNeckVisible: true, slideArrowChainPreviewVisible: true, hitFx: 0.7, sparks: true, cinematic: true, verdictMarks: true, timingFx: true, streakFx: true, bloom: true, targetTuningId: CR.BUILTIN_TUNING_ID, customTunings: '[]' };
     // User-selectable, persistable bg styles — must mirror settings.html's
     // VALID_STYLES. 'venue' is deliberately NOT here: it is an internal effective
     // style reached only via _venueSceneOverride (the viz-picker Venue flow), so
-    // _bgCoerce must reject a stored fse_bg_style='venue' — otherwise venue could
+    // _bgCoerce must reject a stored chart_retuner_bg_style='venue' — otherwise venue could
     // mount outside that flow and settings.html (which can't represent 'venue')
     // would be unable to switch back. BG_STYLES still has a 'venue' renderer entry.
     const BG_STYLE_IDS = ['off', 'particles', 'silhouettes', 'lights', 'geometric', 'butterchurn', 'image', 'video'];
@@ -2658,7 +2658,7 @@ import { FSE } from './src/fse-retune.js';
             // 'palette' + 'customColors' are GLOBAL-only: the per-panel palette
             // control was removed in favour of the global "Highway String Colors"
             // UI, so a panel must never be shadowed by a stale per-panel override
-            // (fse_bg_panel<idx>_palette / _customColors). Neither is a
+            // (chart_retuner_bg_panel<idx>_palette / _customColors). Neither is a
             // BG_DEFAULTS key, so per-panel scoping never applied to them.
             // 'targetTuningId' + 'customTunings' are GLOBAL-only for the same
             // reason as customColors above, plus a semantic one: the active
@@ -2666,9 +2666,9 @@ import { FSE } from './src/fse-retune.js';
             // per-panel aesthetic choice — every splitscreen panel should
             // remap onto the same bass.
             if (key !== 'palette' && key !== 'customColors' && key !== 'targetTuningId' && key !== 'customTunings') {
-                panelVal = localStorage.getItem('fse_bg_' + panelKey + '_' + key);
+                panelVal = localStorage.getItem('chart_retuner_bg_' + panelKey + '_' + key);
             }
-            globalVal = localStorage.getItem('fse_bg_' + key);
+            globalVal = localStorage.getItem('chart_retuner_bg_' + key);
         } catch (_) { /* storage blocked — both stay null */ }
         if (panelVal !== null && panelVal !== undefined) return _bgCoerce(key, panelVal);
         // Prefer the in-memory staged value over the persisted global slot.
@@ -2740,11 +2740,11 @@ import { FSE } from './src/fse-retune.js';
     // the camera don't lose calmness on the new axes by default.
     function _bgHasStored(panelKey, key) {
         try {
-            if (localStorage.getItem('fse_bg_' + panelKey + '_' + key) != null) return true;
+            if (localStorage.getItem('chart_retuner_bg_' + panelKey + '_' + key) != null) return true;
         } catch (_) {}
         if (key in _bgMemFallback) return true;
         try {
-            if (localStorage.getItem('fse_bg_' + key) != null) return true;
+            if (localStorage.getItem('chart_retuner_bg_' + key) != null) return true;
         } catch (_) {}
         return false;
     }
@@ -2757,7 +2757,7 @@ import { FSE } from './src/fse-retune.js';
         // was already mutated would leave a stale value in localStorage
         // that's newer than _bgMemFallback.
         _bgMemFallback[key] = s;
-        try { localStorage.setItem('fse_bg_' + key, s); } catch (_) { /* storage blocked */ }
+        try { localStorage.setItem('chart_retuner_bg_' + key, s); } catch (_) { /* storage blocked */ }
         _bgEmitChange(key);
     }
 
@@ -2773,21 +2773,21 @@ import { FSE } from './src/fse-retune.js';
 
     // Settings.html setters — global keys; per-panel overrides via direct
     // localStorage edits today, runtime UI in a follow-up.
-    window.fse3dBgSetStyle = (v) => _bgWriteGlobal('style', v);
-    window.fse3dBgSetIntensity = (v) => _bgWriteGlobal('intensity', v);
-    window.fse3dBgSetReactive = (v) => _bgWriteGlobal('reactive', !!v);
-    window.fse3dBgSetPalette = (v) => _bgWriteGlobal('palette', v);
+    window.cr3dBgSetStyle = (v) => _bgWriteGlobal('style', v);
+    window.cr3dBgSetIntensity = (v) => _bgWriteGlobal('intensity', v);
+    window.cr3dBgSetReactive = (v) => _bgWriteGlobal('reactive', !!v);
+    window.cr3dBgSetPalette = (v) => _bgWriteGlobal('palette', v);
     // BACKGROUND scene-color axis (clear + fog only). Validated against
     // BG_THEME_IDS in _bgCoerce; the listener re-applies clear/fog live and
     // independently of the highway axis.
-    window.fse3dBgSetBgTheme = (v) => {
+    window.cr3dBgSetBgTheme = (v) => {
         const s = String(v);
         _bgWriteGlobal('bgTheme', BG_THEME_IDS.includes(s) ? s : BG_DEFAULTS.bgTheme);
     };
     // HIGHWAY scene-color axis (board + lane + laneDim). Same id-set as the
     // background axis, so any highway can mix with any background. The listener
     // re-applies the board plane + lane live and independently.
-    window.fse3dBgSetHwTheme = (v) => {
+    window.cr3dBgSetHwTheme = (v) => {
         const s = String(v);
         _bgWriteGlobal('hwTheme', BG_THEME_IDS.includes(s) ? s : BG_DEFAULTS.hwTheme);
     };
@@ -2795,8 +2795,8 @@ import { FSE } from './src/fse-retune.js';
     // is up to 8 hex strings; invalid/missing entries fall back to the default
     // palette per index. Writes the colors, then flips the palette to 'custom'
     // — the palette listener retints all materials + rebuilds the board live.
-    // Pass null/[] then fse3dBgSetPalette('default') to revert.
-    window.fse3dBgSetStringColors = (hexArray) => {
+    // Pass null/[] then cr3dBgSetPalette('default') to revert.
+    window.cr3dBgSetStringColors = (hexArray) => {
         const arr = Array.isArray(hexArray) ? hexArray : [];
         const norm = [];
         for (let i = 0; i < MAX_RENDER_STRINGS; i++) {
@@ -2806,65 +2806,65 @@ import { FSE } from './src/fse-retune.js';
         _bgWriteGlobal('customColors', JSON.stringify(norm));
         _bgWriteGlobal('palette', 'custom');
     };
-    window.fse3dBgSetShowFretOnNote = (v) => _bgWriteGlobal('showFretOnNote', !!v);
-    window.fse3dBgSetFretNumberGhostScope = (v) => {
+    window.cr3dBgSetShowFretOnNote = (v) => _bgWriteGlobal('showFretOnNote', !!v);
+    window.cr3dBgSetFretNumberGhostScope = (v) => {
         const s = String(v);
         _bgWriteGlobal('fretNumberGhostScope', FRET_NUMBER_GHOST_SCOPE_IDS.includes(s) ? s : BG_DEFAULTS.fretNumberGhostScope);
     };
-    window.fse3dBgSetCameraSmoothing = (v) => _bgWriteGlobal('cameraSmoothing', v);
-    window.fse3dBgSetZoomSmoothing = (v) => _bgWriteGlobal('zoomSmoothing', v);
-    window.fse3dBgSetTiltSmoothing = (v) => _bgWriteGlobal('tiltSmoothing', v);
-    window.fse3dBgSetCameraLockLow = (v) => _bgWriteGlobal('cameraLockLow', !!v);
-    window.fse3dBgSetCameraLockZoom = (v) => _bgWriteGlobal('cameraLockZoom', v);
-    window.fse3dBgSetCameraMode = (v) => {
+    window.cr3dBgSetCameraSmoothing = (v) => _bgWriteGlobal('cameraSmoothing', v);
+    window.cr3dBgSetZoomSmoothing = (v) => _bgWriteGlobal('zoomSmoothing', v);
+    window.cr3dBgSetTiltSmoothing = (v) => _bgWriteGlobal('tiltSmoothing', v);
+    window.cr3dBgSetCameraLockLow = (v) => _bgWriteGlobal('cameraLockLow', !!v);
+    window.cr3dBgSetCameraLockZoom = (v) => _bgWriteGlobal('cameraLockZoom', v);
+    window.cr3dBgSetCameraMode = (v) => {
         let s = String(v);
         if (s === 'classic') s = 'steady';
         _bgWriteGlobal('cameraMode', s);
     };
-    window.fse3dBgSetNutHeadstockVisible = (v) => _bgWriteGlobal('nutHeadstockVisible', !!v);
-    window.fse3dBgSetTuningLabelsVisible = (v) => _bgWriteGlobal('tuningLabelsVisible', !!v);
-    window.fse3dBgSetNutColor = (v) => _bgWriteGlobal('nutColor', v);
-    window.fse3dBgSetHeadstockColor = (v) => _bgWriteGlobal('headstockColor', v);
-    window.fse3dBgSetTextSize = (v) => _bgWriteGlobal('textSize', v);
-    window.fse3dBgSetVibrancy = (v) => _bgWriteGlobal('vibrancy', v);
-    window.fse3dBgSetGlow     = (v) => _bgWriteGlobal('glow', v);
-    window.fse3dBgSetHitFx        = (v) => _bgWriteGlobal('hitFx', v);
-    window.fse3dBgSetSparks       = (v) => _bgWriteGlobal('sparks', !!v);
-    window.fse3dBgSetCinematic    = (v) => _bgWriteGlobal('cinematic', !!v);
-    window.fse3dBgSetVerdictMarks = (v) => _bgWriteGlobal('verdictMarks', !!v);
-    window.fse3dBgSetTimingFx     = (v) => _bgWriteGlobal('timingFx', !!v);
-    window.fse3dBgSetStreakFx     = (v) => _bgWriteGlobal('streakFx', !!v);
-    window.fse3dBgSetBloom        = (v) => _bgWriteGlobal('bloom', !!v);
-    window.fse3dBgSetToneHudVisible   = (v) => _bgWriteGlobal('toneHudVisible', !!v);
-    window.fse3dBgSetToneHudPosition  = (v) => _bgWriteGlobal('toneHudPosition', v);
-    window.fse3dBgSetToneHudSize      = (v) => _bgWriteGlobal('toneHudSize', v);
-    window.fse3dBgSetFpsVisible           = (v) => _bgWriteGlobal('fpsVisible', !!v);
-    window.fse3dBgSetFretDividersVisible  = (v) => _bgWriteGlobal('fretDividersVisible', !!v);
-    window.fse3dBgSetChordDiagramVisible  = (v) => _bgWriteGlobal('chordDiagramVisible', !!v);
-    window.fse3dBgSetChordDiagramSize     = (v) => _bgWriteGlobal('chordDiagramSize', v);
-    window.fse3dBgSetChordDiagramPosition = (v) => _bgWriteGlobal('chordDiagramPosition', v);
-    window.fse3dBgSetFretColumnMarkerCadence = (v) => _bgWriteGlobal('fretColumnMarkerCadence', v);
-    window.fse3dBgSetInlayLabelsVisible = (v) => _bgWriteGlobal('inlayLabelsVisible', !!v);
-    window.fse3dBgSetSectionLabelsOnHighway = (v) => _bgWriteGlobal('sectionLabelsOnHighway', !!v);
-    window.fse3dBgSetSectionHudVisible      = (v) => _bgWriteGlobal('sectionHudVisible', !!v);
-    window.fse3dBgSetSectionHudPosition     = (v) => _bgWriteGlobal('sectionHudPosition', v);
-    window.fse3dBgSetSectionHudSize         = (v) => _bgWriteGlobal('sectionHudSize', v);
-    window.fse3dBgSetProjectionVisible      = (v) => _bgWriteGlobal('projectionVisible', !!v);
-    window.fse3dBgSetSlideArrowApproachVisible = (v) => _bgWriteGlobal('slideArrowApproachVisible', !!v);
-    window.fse3dBgSetSlideArrowNeckVisible     = (v) => _bgWriteGlobal('slideArrowNeckVisible', !!v);
-    window.fse3dBgSetSlideArrowChainPreviewVisible = (v) => _bgWriteGlobal('slideArrowChainPreviewVisible', !!v);
+    window.cr3dBgSetNutHeadstockVisible = (v) => _bgWriteGlobal('nutHeadstockVisible', !!v);
+    window.cr3dBgSetTuningLabelsVisible = (v) => _bgWriteGlobal('tuningLabelsVisible', !!v);
+    window.cr3dBgSetNutColor = (v) => _bgWriteGlobal('nutColor', v);
+    window.cr3dBgSetHeadstockColor = (v) => _bgWriteGlobal('headstockColor', v);
+    window.cr3dBgSetTextSize = (v) => _bgWriteGlobal('textSize', v);
+    window.cr3dBgSetVibrancy = (v) => _bgWriteGlobal('vibrancy', v);
+    window.cr3dBgSetGlow     = (v) => _bgWriteGlobal('glow', v);
+    window.cr3dBgSetHitFx        = (v) => _bgWriteGlobal('hitFx', v);
+    window.cr3dBgSetSparks       = (v) => _bgWriteGlobal('sparks', !!v);
+    window.cr3dBgSetCinematic    = (v) => _bgWriteGlobal('cinematic', !!v);
+    window.cr3dBgSetVerdictMarks = (v) => _bgWriteGlobal('verdictMarks', !!v);
+    window.cr3dBgSetTimingFx     = (v) => _bgWriteGlobal('timingFx', !!v);
+    window.cr3dBgSetStreakFx     = (v) => _bgWriteGlobal('streakFx', !!v);
+    window.cr3dBgSetBloom        = (v) => _bgWriteGlobal('bloom', !!v);
+    window.cr3dBgSetToneHudVisible   = (v) => _bgWriteGlobal('toneHudVisible', !!v);
+    window.cr3dBgSetToneHudPosition  = (v) => _bgWriteGlobal('toneHudPosition', v);
+    window.cr3dBgSetToneHudSize      = (v) => _bgWriteGlobal('toneHudSize', v);
+    window.cr3dBgSetFpsVisible           = (v) => _bgWriteGlobal('fpsVisible', !!v);
+    window.cr3dBgSetFretDividersVisible  = (v) => _bgWriteGlobal('fretDividersVisible', !!v);
+    window.cr3dBgSetChordDiagramVisible  = (v) => _bgWriteGlobal('chordDiagramVisible', !!v);
+    window.cr3dBgSetChordDiagramSize     = (v) => _bgWriteGlobal('chordDiagramSize', v);
+    window.cr3dBgSetChordDiagramPosition = (v) => _bgWriteGlobal('chordDiagramPosition', v);
+    window.cr3dBgSetFretColumnMarkerCadence = (v) => _bgWriteGlobal('fretColumnMarkerCadence', v);
+    window.cr3dBgSetInlayLabelsVisible = (v) => _bgWriteGlobal('inlayLabelsVisible', !!v);
+    window.cr3dBgSetSectionLabelsOnHighway = (v) => _bgWriteGlobal('sectionLabelsOnHighway', !!v);
+    window.cr3dBgSetSectionHudVisible      = (v) => _bgWriteGlobal('sectionHudVisible', !!v);
+    window.cr3dBgSetSectionHudPosition     = (v) => _bgWriteGlobal('sectionHudPosition', v);
+    window.cr3dBgSetSectionHudSize         = (v) => _bgWriteGlobal('sectionHudSize', v);
+    window.cr3dBgSetProjectionVisible      = (v) => _bgWriteGlobal('projectionVisible', !!v);
+    window.cr3dBgSetSlideArrowApproachVisible = (v) => _bgWriteGlobal('slideArrowApproachVisible', !!v);
+    window.cr3dBgSetSlideArrowNeckVisible     = (v) => _bgWriteGlobal('slideArrowNeckVisible', !!v);
+    window.cr3dBgSetSlideArrowChainPreviewVisible = (v) => _bgWriteGlobal('slideArrowChainPreviewVisible', !!v);
 
-    // Maps FSE.colorRoleForNote/FSE.BEADG_COLOR_ROLES's symbolic role
+    // Maps CR.colorRoleForNote/CR.BEADG_COLOR_ROLES's symbolic role
     // strings to this panel's actual current color — the one piece of the
     // default-color system that has to live here rather than in
-    // src/fse-retune.js, since it's the only part that touches
-    // PALETTES.default/FSE.lowBColor() (screen.js/Three.js-owned data the
+    // src/chart-retune.js, since it's the only part that touches
+    // PALETTES.default/CR.lowBColor() (screen.js/Three.js-owned data the
     // module deliberately stays free of). Everything else — which role a
     // given note or BEADG-core position gets — is pure logic living in
     // the module.
-    function _fseColorForRole(role) {
+    function _crColorForRole(role) {
         switch (role) {
-            case 'lowB': return FSE.lowBColor();     // B0 — the built-in low string
+            case 'lowB': return CR.lowBColor();     // B0 — the built-in low string
             case 'e': return PALETTES.default[0];    // E1
             case 'a': return PALETTES.default[1];    // A1
             case 'd': return PALETTES.default[2];    // D2
@@ -2873,31 +2873,31 @@ import { FSE } from './src/fse-retune.js';
             case 'highE': return PALETTES.default[5]; // E3 — guitar's own high-E slot
             case 'lowExt1': return PALETTES.default[6]; // F#0 — supplementary low-ext slot
             case 'lowExt2': return PALETTES.default[7]; // C#0 — supplementary low-ext slot
-            default: return FSE.LIGHT_GRAY_COLOR;
+            default: return CR.LIGHT_GRAY_COLOR;
         }
     }
     // The 5 BEADG-core default colors, as hex strings, in position order —
     // used both to backfill a pre-existing 5-string custom profile's
     // missing `colors` and to seed a brand-new tuning editor session.
-    function _fseBeadgDefaultColors() {
-        return FSE.BEADG_COLOR_ROLES.map(role => FSE.intToHex(_fseColorForRole(role)));
+    function _crBeadgDefaultColors() {
+        return CR.BEADG_COLOR_ROLES.map(role => CR.intToHex(_crColorForRole(role)));
     }
 
     // Target-tuning profiles (feedback: some bassists tune AEADG or
     // BbEbAbDbGb rather than BEADG, and/or run more/fewer than 5 strings).
-    // The built-in presets (FSE.BUILTIN_PRESET_TUNINGS — BEADG plus any
+    // The built-in presets (CR.BUILTIN_PRESET_TUNINGS — BEADG plus any
     // others, e.g. Cello) resolve first; BEADG's own colors are always
-    // resolved live off FSE.lowBColor()/PALETTES.default (unchanged from
+    // resolved live off CR.lowBColor()/PALETTES.default (unchanged from
     // before this string-count feature), every other preset carries
     // concrete colors like a custom profile does. Then any number of
     // user-saved profiles in the 'customTunings' global JSON blob: [{ id,
     // name, strings: string[4..8],
     // colors: string[4..8] }] — colors is always fully populated with
     // concrete hex, never a "track the live palette" sentinel (see
-    // window.fse3dDefaultStringFor: a newly added string's color is a
+    // window.cr3dDefaultStringFor: a newly added string's color is a
     // one-time snapshot, not a live reference). Global-only (see
     // _bgReadSetting) — every panel remaps onto the same real instrument.
-    function _fseReadCustomTunings() {
+    function _crReadCustomTunings() {
         const raw = _bgReadSetting(null, 'customTunings');
         let list;
         try { list = JSON.parse(raw || '[]'); } catch (_) { list = []; }
@@ -2905,20 +2905,20 @@ import { FSE } from './src/fse-retune.js';
         let migrated = false;
         const out = [];
         for (const p of list) {
-            if (!p || typeof p.id !== 'string' || typeof p.name !== 'string' || !FSE.isValidTuningStringsArray(p.strings)) continue;
+            if (!p || typeof p.id !== 'string' || typeof p.name !== 'string' || !CR.isValidTuningStringsArray(p.strings)) continue;
             // Backfill target for a profile saved before per-string colors
             // existed (always exactly 5-string, no `colors` field at all):
             // reproduces TODAY's exact rendering (BEADG_COLOR_ROLES —
             // index-based, not a note-based lookup — see its doc comment
-            // in src/fse-retune.js) so an existing custom tuning whose
+            // in src/chart-retune.js) so an existing custom tuning whose
             // index 0 ISN'T literally B (e.g. AEADG) keeps rendering
             // pixel-identical after the upgrade. A malformed/impossible
             // longer profile with no colors (shouldn't happen — only
             // 5-length profiles predate colors) degrades to light gray.
             const defaults = p.strings.length === 5
-                ? _fseBeadgDefaultColors()
-                : p.strings.map(() => FSE.intToHex(FSE.LIGHT_GRAY_COLOR));
-            const colors = FSE.resolveColorsArray(p.colors, p.strings.length, defaults);
+                ? _crBeadgDefaultColors()
+                : p.strings.map(() => CR.intToHex(CR.LIGHT_GRAY_COLOR));
+            const colors = CR.resolveColorsArray(p.colors, p.strings.length, defaults);
             if (!Array.isArray(p.colors) || p.colors.length !== colors.length || p.colors.some((c, i) => c !== colors[i])) {
                 migrated = true;
             }
@@ -2930,80 +2930,80 @@ import { FSE } from './src/fse-retune.js';
             // the hwTheme backward-compat backfill in _bgLoadSettings).
             const json = JSON.stringify(out);
             _bgMemFallback.customTunings = json;
-            try { localStorage.setItem('fse_bg_customTunings', json); } catch (_) { /* storage blocked */ }
+            try { localStorage.setItem('chart_retuner_bg_customTunings', json); } catch (_) { /* storage blocked */ }
         }
         return out;
     }
-    function _fseWriteCustomTunings(list) {
+    function _crWriteCustomTunings(list) {
         _bgWriteGlobal('customTunings', JSON.stringify(list));
     }
     // Resolves the currently-active tuning to { strings, colors } — the
     // branching (built-in presets, then custom tunings, then a BEADG-shaped
     // fallback for anything unset/unknown/deleted) is pure logic living in
-    // FSE.resolveActiveTuning (src/target-tuning.js); this just supplies
+    // CR.resolveActiveTuning (src/target-tuning.js); this just supplies
     // the two screen.js-owned reads it needs.
-    function _fseResolveActiveTuning() {
-        return FSE.resolveActiveTuning(_bgReadSetting(null, 'targetTuningId'), _fseReadCustomTunings());
+    function _crResolveActiveTuning() {
+        return CR.resolveActiveTuning(_bgReadSetting(null, 'targetTuningId'), _crReadCustomTunings());
     }
-    window.fse3dSetActiveTuning = (id) => _bgWriteGlobal('targetTuningId', String(id || FSE.BUILTIN_TUNING_ID));
-    window.fse3dListCustomTunings = () => _fseReadCustomTunings();
+    window.cr3dSetActiveTuning = (id) => _bgWriteGlobal('targetTuningId', String(id || CR.BUILTIN_TUNING_ID));
+    window.cr3dListCustomTunings = () => _crReadCustomTunings();
     // Upserts a custom tuning profile by id (generates one for a new
-    // profile). Validates strings via FSE.isValidTuningStringsArray and
-    // resolves colors via FSE.resolveColorsArray (light gray substituted
+    // profile). Validates strings via CR.isValidTuningStringsArray and
+    // resolves colors via CR.resolveColorsArray (light gray substituted
     // for anything missing/invalid — the editor is responsible for
-    // meaningful defaults via fse3dDefaultStringFor, this is just a safety
+    // meaningful defaults via cr3dDefaultStringFor, this is just a safety
     // net) so a malformed entry never reaches localStorage/the renderer.
     // Returns the saved profile's id, or null if the input didn't validate.
-    window.fse3dSaveCustomTuning = (profile) => {
+    window.cr3dSaveCustomTuning = (profile) => {
         if (!profile || typeof profile.name !== 'string' || !profile.name.trim()) return null;
-        if (!FSE.isValidTuningStringsArray(profile.strings)) return null;
+        if (!CR.isValidTuningStringsArray(profile.strings)) return null;
         const n = profile.strings.length;
-        const grayDefaults = profile.strings.map(() => FSE.intToHex(FSE.LIGHT_GRAY_COLOR));
-        const colors = FSE.resolveColorsArray(profile.colors, n, grayDefaults);
-        const list = _fseReadCustomTunings();
+        const grayDefaults = profile.strings.map(() => CR.intToHex(CR.LIGHT_GRAY_COLOR));
+        const colors = CR.resolveColorsArray(profile.colors, n, grayDefaults);
+        const list = _crReadCustomTunings();
         const id = (typeof profile.id === 'string' && profile.id)
             ? profile.id
             : 'custom_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
         const entry = { id, name: profile.name.trim(), strings: profile.strings.slice(0, n), colors };
         const idx = list.findIndex(p => p.id === id);
         if (idx >= 0) list[idx] = entry; else list.push(entry);
-        _fseWriteCustomTunings(list);
+        _crWriteCustomTunings(list);
         return id;
     };
-    window.fse3dDeleteCustomTuning = (id) => {
-        _fseWriteCustomTunings(_fseReadCustomTunings().filter(p => p.id !== id));
+    window.cr3dDeleteCustomTuning = (id) => {
+        _crWriteCustomTunings(_crReadCustomTunings().filter(p => p.id !== id));
         // Fall back to the built-in default if the deleted profile was active
         // — otherwise the renderer would keep the old tuning alive purely
         // via the (now-orphaned) targetTuningId pointer.
-        if (_bgReadSetting(null, 'targetTuningId') === id) window.fse3dSetActiveTuning(FSE.BUILTIN_TUNING_ID);
+        if (_bgReadSetting(null, 'targetTuningId') === id) window.cr3dSetActiveTuning(CR.BUILTIN_TUNING_ID);
     };
     // Bridge for settings.html's Bass Tuning editor "+ Add string above/
-    // below" buttons — pure, stateless (see FSE.defaultExtensionNote's own
+    // below" buttons — pure, stateless (see CR.defaultExtensionNote's own
     // doc comment): given the direction and the CURRENT edge row's note
     // spec, returns the new row's default { note, color }.
-    window.fse3dDefaultStringFor = (direction, edgeNoteSpec) => {
+    window.cr3dDefaultStringFor = (direction, edgeNoteSpec) => {
         const dir = direction === 'low' ? 'low' : 'high';
-        const parsed = FSE.parseTargetNote(edgeNoteSpec);
+        const parsed = CR.parseTargetNote(edgeNoteSpec);
         const edgeMidi = parsed ? parsed.midi
-            : FSE.DEFAULT_TARGET_MIDI_TUNING[dir === 'low' ? 0 : FSE.DEFAULT_TARGET_MIDI_TUNING.length - 1];
-        const next = FSE.defaultExtensionNote(dir, edgeMidi);
-        const role = FSE.colorRoleForNote(next.midi);
-        return { note: next.label, color: FSE.intToHex(_fseColorForRole(role)) };
+            : CR.DEFAULT_TARGET_MIDI_TUNING[dir === 'low' ? 0 : CR.DEFAULT_TARGET_MIDI_TUNING.length - 1];
+        const next = CR.defaultExtensionNote(dir, edgeMidi);
+        const role = CR.colorRoleForNote(next.midi);
+        return { note: next.label, color: CR.intToHex(_crColorForRole(role)) };
     };
     // Resolves ONE string's display color for settings.html's editor —
     // `colors` may be null (built-in tuning, always-live) or a profile's
     // own array; `strings`/`colors` share an index. Used to prefill color
     // swatches (including the built-in BEADG seed for a brand-new custom
     // tuning) without duplicating the palette-slot mapping client-side.
-    window.fse3dResolveDisplayColor = (strings, colors, index) => {
+    window.cr3dResolveDisplayColor = (strings, colors, index) => {
         if (Array.isArray(colors) && colors[index] != null && _h3dHexToInt(colors[index]) != null) return colors[index];
-        if (index < FSE.BEADG_COLOR_ROLES.length) return FSE.intToHex(_fseColorForRole(FSE.BEADG_COLOR_ROLES[index]));
+        if (index < CR.BEADG_COLOR_ROLES.length) return CR.intToHex(_crColorForRole(CR.BEADG_COLOR_ROLES[index]));
         // Beyond the fixed 5-role table — shouldn't normally happen (a
         // well-formed profile always carries its own colors past index 4)
         // — falls back through the same note-based lookup a fresh "+ Add"
         // would use, keyed off whatever note actually sits at this index.
-        const parsed = Array.isArray(strings) && FSE.parseTargetNote(strings[index]);
-        return FSE.intToHex(_fseColorForRole(parsed ? FSE.colorRoleForNote(parsed.midi) : 'gray'));
+        const parsed = Array.isArray(strings) && CR.parseTargetNote(strings[index]);
+        return CR.intToHex(_crColorForRole(parsed ? CR.colorRoleForNote(parsed.midi) : 'gray'));
     };
 
     // Custom image asset for the 'image' bg style (#19). Composite setter:
@@ -3011,26 +3011,26 @@ import { FSE } from './src/fse-retune.js';
     // display filename, each emitting a change event. The listener
     // rebuilds on customImageDataUrl change when the image style is
     // active; customImageName is display-only and skips rebuild.
-    window.fse3dBgSetCustomImage = (asset) => {
+    window.cr3dBgSetCustomImage = (asset) => {
         const a = asset || {};
         _bgWriteGlobal('customImageDataUrl', a.dataUrl || '');
         _bgWriteGlobal('customImageName', a.name || '');
     };
-    window.fse3dBgClearCustomImage = () => {
+    window.cr3dBgClearCustomImage = () => {
         _bgWriteGlobal('customImageDataUrl', '');
         _bgWriteGlobal('customImageName', '');
     };
     // Custom video asset for the 'video' bg style (#19 follow-up).
-    // Bytes live on disk under {config_dir}/plugin_uploads/five_string_everything/
+    // Bytes live on disk under {config_dir}/plugin_uploads/chart_retuner/
     // and are served by routes.py — localStorage only stores the
     // filename, which the renderer maps to the served URL. Single
     // global slot; the file picker in settings.html POSTs to the
     // upload route and then calls this setter with the response name.
-    window.fse3dBgSetCustomVideo = (asset) => {
+    window.cr3dBgSetCustomVideo = (asset) => {
         _bgWriteGlobal('customVideoName', (asset && asset.name) || '');
     };
-    window.fse3dBgClearCustomVideo = () => _bgWriteGlobal('customVideoName', '');
-    window.fse3dVenueSceneSetActive = (on) => {
+    window.cr3dBgClearCustomVideo = () => _bgWriteGlobal('customVideoName', '');
+    window.cr3dVenueSceneSetActive = (on) => {
         const next = !!on;
         if (_venueSceneOverride === next) return;
         _venueSceneOverride = next;
@@ -3040,21 +3040,21 @@ import { FSE } from './src/fse-retune.js';
         }
         _bgEmitChange('venueScene');
     };
-    window.fse3dVenueSceneSetMood = (state) => {
+    window.cr3dVenueSceneSetMood = (state) => {
         _venueMoodState = String(state || 'idle').toLowerCase();
     };
-    window.fse3dVenueSceneSetInstrumentPov = (input) => {
+    window.cr3dVenueSceneSetInstrumentPov = (input) => {
         const next = _venueResolvePovFromInput(input);
         if (_venueInstrumentPov === next) return;
         _venueInstrumentPov = next;
         _bgEmitChange('venueInstrumentPov');
     };
-    window.fse3dVenueSceneSetMotionMode = (mode) => {
+    window.cr3dVenueSceneSetMotionMode = (mode) => {
         const next = String(mode || 'subtle').toLowerCase();
         const allowed = { off: 1, subtle: 1, full: 1 };
         _venueMotionMode = allowed[next] ? next : 'subtle';
     };
-    window.fse3dVenueSceneGetState = () => {
+    window.cr3dVenueSceneGetState = () => {
         const motionMode = _venueEffectiveMotionMode();
         const motionProfile = _venueMotionProfile(motionMode);
         return {
@@ -3073,7 +3073,7 @@ import { FSE } from './src/fse-retune.js';
     };
     // Back-compat alias for any caller that picked up the original
     // (inconsistent) name during this PR's review window.
-    window.fse3dSetPalette = window.fse3dBgSetPalette;
+    window.cr3dSetPalette = window.cr3dBgSetPalette;
 
     // Procedural silhouette bitmap, drawn once and shared across panels.
     // The Canvas2D bitmap is module-level (cheap, CPU-only); each layer
@@ -3427,7 +3427,7 @@ import { FSE } from './src/fse-retune.js';
             },
         },
         // Venue visualization — generated small-club raster bg plate
-        // behind the highway. Activated via fse3dVenueSceneSetActive(true)
+        // behind the highway. Activated via cr3dVenueSceneSetActive(true)
         // when Visualization = Venue; does not persist as a user bg style.
         venue: {
             build(scene, settings) {
@@ -3561,7 +3561,7 @@ import { FSE } from './src/fse-retune.js';
         },
         // Custom image backdrop (#19). User uploads a JPG/PNG/WebP
         // through settings.html; the bytes are persisted as a base64
-        // data URL in localStorage under fse_bg_customImageDataUrl and
+        // data URL in localStorage under chart_retuner_bg_customImageDataUrl and
         // passed in via settings.customImageDataUrl. Renders as a
         // PlaneGeometry in the silhouette parallax band, "cover" cropped
         // (via texture.repeat / offset) so non-matching aspects fill
@@ -3742,7 +3742,7 @@ import { FSE } from './src/fse-retune.js';
         // .mp4/.webm via settings.html; routes.py stores it on disk and
         // serves a same-origin URL (avoids CORS taint on VideoTexture).
         // localStorage holds only the filename — bytes live in
-        // {config_dir}/plugin_uploads/five_string_everything/. Per-panel video
+        // {config_dir}/plugin_uploads/chart_retuner/. Per-panel video
         // element so each panel can mount/teardown independently;
         // browsers cache the video bytes after first fetch so multi-
         // panel splitscreen pays only the decoder cost, not the
@@ -3763,7 +3763,7 @@ import { FSE } from './src/fse-retune.js';
                 // inert, no <video> created, no orphan request to a
                 // 404 endpoint.
                 if (!/^current\.(mp4|webm)$/.test(filename)) return null;
-                const url = '/api/plugins/five_string_everything/files/' + filename;
+                const url = '/api/plugins/chart_retuner/files/' + filename;
 
                 // Track partial allocations so a throw between any of
                 // them can clean up. _bgMountStyle's failure path
@@ -3788,7 +3788,7 @@ import { FSE } from './src/fse-retune.js';
                     // event into half-initialized state.
                     videoEl = document.createElement('video');
                     // No crossOrigin attribute: the URL is same-origin
-                    // (/api/plugins/five_string_everything/files/…), so VideoTexture
+                    // (/api/plugins/chart_retuner/files/…), so VideoTexture
                     // never sees a tainted canvas. Setting
                     // `crossOrigin = "anonymous"` would also strip
                     // cookies from the fetch, which would 401 against
@@ -4050,7 +4050,7 @@ import { FSE } from './src/fse-retune.js';
         let lyricsCanvas = null, lyricsCtx = null;
         // FPS counter overlay. EMA-smoothed over ~30 frames so the readout doesn't
         // jitter every rAF tick. Controlled by the 'fpsVisible' setting (BG_DEFAULTS).
-        // Legacy 'h3d_showFps' localStorage key and window.fse3dShowFps are no longer
+        // Legacy 'h3d_showFps' localStorage key and window.cr3dShowFps are no longer
         // consulted — use the Settings → 3D Highway — Camera → Show FPS counter checkbox.
         let _fpsLastT = 0;
         let _fpsEma = 0;
@@ -4225,7 +4225,7 @@ import { FSE } from './src/fse-retune.js';
         let _appliedW = 0, _appliedH = 0;
         // Last pane aspect (w/h) handed to the camera, cached so camUpdate can
         // recompute the horizontal-FOV-hold each frame (and react to live
-        // __fse3dAspectTune edits) without waiting for a resize. 0 until first
+        // __cr3dAspectTune edits) without waiting for a resize. 0 until first
         // applySize().
         let _paneAspect = 0;
         // Per-instance fallback id for the wide-pane tuner's pane key, used only
@@ -4277,7 +4277,7 @@ import { FSE } from './src/fse-retune.js';
         let _boardPlaneMat = null;
         // Per-render opt-out for plugins borrowing the highway as a viz: when the
         // mount bundle sets bgReactive === false, suppress the audio-reactive
-        // background for THIS instance only (no shared fse_bg_* write). Captured
+        // background for THIS instance only (no shared chart_retuner_bg_* write). Captured
         // from the bundle in init(); applied in _bgLoadSettings() so it survives
         // later setting reloads. See init() for the rationale.
         let _bgReactiveOptOut = false;
@@ -4287,7 +4287,7 @@ import { FSE } from './src/fse-retune.js';
         // panel live without touching module-level state.
         // PATCH POINT: index 0 (the lowest string) is NOT part of
         // highway_3d's raw per-index palette at all — it gets the
-        // dedicated "Low B" color (FSE.lowBColor(), src/fse-retune.js)
+        // dedicated "Low B" color (CR.lowBColor(), src/chart-retune.js)
         // instead of whatever coincidentally sits at some reused palette
         // slot. Indices 1-4 (E/A/D/G) pass through PALETTES.default[0..3]
         // directly/unchanged — that's already the correct lowE/A/D/G
@@ -4300,7 +4300,7 @@ import { FSE } from './src/fse-retune.js';
         // per-string colors) replaces this with an N-length array the
         // first time _bgLoadSettings resolves it — see isBuiltinTuning
         // there.
-        let activePalette = [FSE.lowBColor(), PALETTES.default[0], PALETTES.default[1], PALETTES.default[2], PALETTES.default[3]];
+        let activePalette = [CR.lowBColor(), PALETTES.default[0], PALETTES.default[1], PALETTES.default[2], PALETTES.default[3]];
         // Source palette (pre-remap, E/A/D/G only) activePalette was last
         // derived from — lets _bgLoadSettings skip re-deriving/re-tinting
         // when the user's palette selection hasn't actually changed
@@ -4309,7 +4309,7 @@ import { FSE } from './src/fse-retune.js';
         // tuning; a custom tuning's colors don't track this at all (see
         // isBuiltinTuning in _bgLoadSettings), and get this reset to null
         // so a later switch back to the built-in tuning always re-derives.
-        let _fsePaletteSrcRef = PALETTES.default;
+        let _crPaletteSrcRef = PALETTES.default;
         // Whether the CURRENTLY active tuning is a custom (non-built-in)
         // one — used by _recolorGemGradients so a custom tuning's colors
         // (which can land anywhere: extension slots, a picker override, a
@@ -4317,28 +4317,28 @@ import { FSE } from './src/fse-retune.js';
         // against the stock gradient table by CONTENT rather than assumed
         // to line up positionally the way the fixed built-in BEADG shape
         // did. Updated alongside activePalette in _bgLoadSettings.
-        let _fseCustomTuningActive = false;
+        let _crCustomTuningActive = false;
         // Content signature of the colors last applied to materials; lets
         // _bgLoadSettings force a retint when the in-place custom palette
         // changes values without changing array identity.
         let _bgPaletteSig = '';
         // Active target tuning for this panel (custom tunings, 4-8
         // strings). { midiTuning: number[], labels: string[] } — midiTuning
-        // feeds _fseRetuner's apply() (chart remap), labels feed the nut
+        // feeds _crRetuner's apply() (chart remap), labels feed the nut
         // open-string-name sprites. Set to the BEADG default before any
         // settings load so the very first frame renders correctly;
-        // _bgLoadSettings refreshes it (keyed on _fseTuningSig) whenever the
+        // _bgLoadSettings refreshes it (keyed on _crTuningSig) whenever the
         // user's tuning selection changes.
         //
         // Live mid-song switch (feedback: changing the tuning while a song
         // is already playing must take effect immediately, on the CURRENT
         // playthrough, not just the next song). This falls out of how
-        // _fseRetuner.apply() is called every frame with whatever
+        // _crRetuner.apply() is called every frame with whatever
         // _activeTargetTuning.midiTuning currently is: the moment this
         // variable is reassigned (see the 'targetTuningId'/'customTunings'
         // _bgListener case below, which fires the instant the setting
-        // changes), createRetuner's own targetSig cache check (src/fse-
-        // retune.js) detects the mismatch on the very next draw() call and
+        // changes), createRetuner's own targetSig cache check
+        // (src/chart-retune.js) detects the mismatch on the very next draw() call and
         // fully re-derives bundle.notes/.chords/.anchors/.chordTemplates
         // from the chart's RAW, unfiltered data (not from whatever was
         // previously kept/dropped) — so a note that was dropped as
@@ -4346,11 +4346,11 @@ import { FSE } from './src/fse-retune.js';
         // and reappears if it's now in range under the new one. No
         // separate "undo the drop" logic is needed; every tuning switch is
         // a from-scratch remap, not an incremental patch.
-        let _activeTargetTuning = FSE.resolveTargetTuning(FSE.DEFAULT_TARGET_TUNING);
+        let _activeTargetTuning = CR.resolveTargetTuning(CR.DEFAULT_TARGET_TUNING);
         // Signature format matches _bgLoadSettings's tuningSig: strings
         // joined, '#', then colors joined (empty for the built-in tuning,
         // whose colors always resolve live — see isBuiltinTuning there).
-        let _fseTuningSig = FSE.DEFAULT_TARGET_TUNING.join('|') + '#';
+        let _crTuningSig = CR.DEFAULT_TARGET_TUNING.join('|') + '#';
         // Fret digits on the board ghost (hollow preview at Z=0), not on
         // flying note bodies — see fretNumberGhostScope for chord-hand vs all.
         let showFretOnNote = false;
@@ -4973,8 +4973,8 @@ import { FSE } from './src/fse-retune.js';
         // with hit/miss colour) is kept — it's a thin, cheap layer and gives
         // tails their border, so it's worth the small fill cost. Opt back into
         // the full look (re-enable the rail bloom) per browser, no rebuild:
-        //   localStorage.fse3d_full_sus = '1'   // re-enable rail bloom halo
-        //   delete localStorage.fse3d_full_sus  // back to lean default
+        //   localStorage.cr3d_full_sus = '1'   // re-enable rail bloom halo
+        //   delete localStorage.cr3d_full_sus  // back to lean default
         // Polled at ~1 Hz at the top of update() (perf: localStorage reads
         // are synchronous) so the console flag still takes effect live.
         // The bloom pool/material/gaussian texture are kept intact
@@ -7916,7 +7916,7 @@ import { FSE } from './src/fse-retune.js';
 
             // Background animations (#13). Read settings keyed by this
             // panel and mount the active style's meshes. Subscribe to
-            // in-app settings changes (settings.html via window.fse3dBgSet*)
+            // in-app settings changes (settings.html via window.cr3dBgSet*)
             // so they propagate without a reload. Manual localStorage
             // edits don't fire the pub-sub and require a reload.
             // Push the freshly-loaded vibrancy/glow values into the
@@ -7941,7 +7941,7 @@ import { FSE } from './src/fse-retune.js';
             _bgListener = (changedKey) => {
                 if (changedKey === 'fretSpacing') {
                     // _h3dFretUniform + the fretX-derived scalars were already
-                    // updated globally in fse3dSetFretSpacing. Rebuild this
+                    // updated globally in cr3dSetFretSpacing. Rebuild this
                     // panel's static board geometry (fret wires, lanes, inlays)
                     // so it re-lays-out for the new spacing; per-frame note
                     // geometry reads fretX live and needs no rebuild.
@@ -8255,7 +8255,7 @@ import { FSE } from './src/fse-retune.js';
             // too to force a retint. _bgPaletteSig caches the applied colors.
             const newSig = newPalette.join(',');
             // PATCH POINT: B (index 0) is looked up independently of
-            // newPalette/newSig (see FSE.lowBColor(), src/fse-retune.js) —
+            // newPalette/newSig (see CR.lowBColor(), src/chart-retune.js) —
             // core's own palette change-detection here only tracks
             // E/A/D/G's source, so check B separately or a same-frame
             // "Low B" edit would go stale until something else also changed.
@@ -8264,7 +8264,7 @@ import { FSE } from './src/fse-retune.js';
             // tuning's colors are concrete per-profile data, resolved
             // straight from activeTuning.colors instead, with no live
             // palette-tracking at all.
-            const newLowB = FSE.lowBColor();
+            const newLowB = CR.lowBColor();
             // PATCH POINT (five-string retune, custom tunings): re-resolve
             // the active target tuning (strings + colors). Cheap so it's
             // safe to check every _bgLoadSettings call rather than only on
@@ -8273,13 +8273,13 @@ import { FSE } from './src/fse-retune.js';
             // Save/Edit without the active id changing, and
             // _bgLoadSettings is the only place that runs on every settings
             // reload regardless of which key triggered it.
-            const activeTuning = _fseResolveActiveTuning();
+            const activeTuning = _crResolveActiveTuning();
             const tuningStrings = activeTuning.strings;
             const isBuiltinTuning = activeTuning.colors === null;
             const tuningSig = tuningStrings.join('|') + '#' + (isBuiltinTuning ? '' : activeTuning.colors.join(','));
             const paletteInputsChanged = isBuiltinTuning
-                ? (newPalette !== _fsePaletteSrcRef || newSig !== _bgPaletteSig || newLowB !== activePalette[0] || tuningSig !== _fseTuningSig)
-                : (tuningSig !== _fseTuningSig);
+                ? (newPalette !== _crPaletteSrcRef || newSig !== _bgPaletteSig || newLowB !== activePalette[0] || tuningSig !== _crTuningSig)
+                : (tuningSig !== _crTuningSig);
             if (paletteInputsChanged) {
                 if (isBuiltinTuning) {
                     // PATCH POINT (feedback: colors looked shifted up a
@@ -8291,29 +8291,29 @@ import { FSE } from './src/fse-retune.js';
                     // unreordered; index 0 (B) uses the dedicated Low B
                     // lookup instead of any slot of newPalette.
                     activePalette = [newLowB, newPalette[0], newPalette[1], newPalette[2], newPalette[3]];
-                    _fsePaletteSrcRef = newPalette;
+                    _crPaletteSrcRef = newPalette;
                     _bgPaletteSig = newSig;
-                    _fseCustomTuningActive = false;
+                    _crCustomTuningActive = false;
                 } else {
                     // Custom tuning: activeTuning.colors is already a
                     // fully-populated, concrete N-length hex array (see
-                    // window.fse3dSaveCustomTuning) — just resolve to ints.
+                    // window.cr3dSaveCustomTuning) — just resolve to ints.
                     activePalette = activeTuning.colors.map(c => {
                         const n = _h3dHexToInt(c);
-                        return n != null ? n : FSE.LIGHT_GRAY_COLOR;
+                        return n != null ? n : CR.LIGHT_GRAY_COLOR;
                     });
                     // Never === any real newPalette reference, so switching
                     // back to the built-in tuning later always re-derives
                     // rather than short-circuiting on a stale match.
-                    _fsePaletteSrcRef = null;
+                    _crPaletteSrcRef = null;
                     _bgPaletteSig = '';
-                    _fseCustomTuningActive = true;
+                    _crCustomTuningActive = true;
                 }
                 _applyPaletteToMaterials();
             }
-            if (tuningSig !== _fseTuningSig) {
-                _activeTargetTuning = FSE.resolveTargetTuning(tuningStrings);
-                _fseTuningSig = tuningSig;
+            if (tuningSig !== _crTuningSig) {
+                _activeTargetTuning = CR.resolveTargetTuning(tuningStrings);
+                _crTuningSig = tuningSig;
                 // Force the nut open-string-name sprites to rebuild next
                 // frame — the cheap-key fast path in _syncOpenStringPitchLabels
                 // doesn't itself notice a tuning change, only a disposed
@@ -8339,7 +8339,7 @@ import { FSE } from './src/fse-retune.js';
             } else {
                 hwThemeId = bgThemeId;
                 _bgMemFallback.hwTheme = String(bgThemeId);
-                try { localStorage.setItem('fse_bg_hwTheme', String(bgThemeId)); } catch (_) { /* storage blocked — mem fallback still seeds the read */ }
+                try { localStorage.setItem('chart_retuner_bg_hwTheme', String(bgThemeId)); } catch (_) { /* storage blocked — mem fallback still seeds the read */ }
             }
             showFretOnNote = _bgReadSetting(panelKey, 'showFretOnNote');
             fretNumberGhostScope = _bgReadSetting(panelKey, 'fretNumberGhostScope');
@@ -8395,10 +8395,10 @@ import { FSE } from './src/fse-retune.js';
             // Custom image asset is a single GLOBAL slot — bytes are
             // shared across panels (per-panel choice is which style
             // each panel renders, not which asset). Reading via
-            // _bgReadSetting would let a stray fse_bg_panel<idx>_*
+            // _bgReadSetting would let a stray chart_retuner_bg_panel<idx>_*
             // override silently re-introduce the per-panel asset
             // duplication this design deliberately avoids (and
-            // fse3dBgClearCustomImage wouldn't reach those overrides).
+            // cr3dBgClearCustomImage wouldn't reach those overrides).
             // Read globals directly instead.
             //
             // Precedence: in-memory fallback BEFORE localStorage. The
@@ -8412,8 +8412,8 @@ import { FSE } from './src/fse-retune.js';
             const memDataUrl = _bgMemFallback.customImageDataUrl;
             const memName    = _bgMemFallback.customImageName;
             try {
-                const gDataUrl = (memDataUrl !== undefined) ? memDataUrl : localStorage.getItem('fse_bg_customImageDataUrl');
-                const gName    = (memName    !== undefined) ? memName    : localStorage.getItem('fse_bg_customImageName');
+                const gDataUrl = (memDataUrl !== undefined) ? memDataUrl : localStorage.getItem('chart_retuner_bg_customImageDataUrl');
+                const gName    = (memName    !== undefined) ? memName    : localStorage.getItem('chart_retuner_bg_customImageName');
                 bgCustomImageDataUrl = (gDataUrl != null) ? gDataUrl : BG_DEFAULTS.customImageDataUrl;
                 bgCustomImageName    = (gName    != null) ? gName    : BG_DEFAULTS.customImageName;
             } catch (_) {
@@ -8425,7 +8425,7 @@ import { FSE } from './src/fse-retune.js';
             // setItem leaves _bgMemFallback ahead of localStorage).
             const memVideoName = _bgMemFallback.customVideoName;
             try {
-                const gVideoName = (memVideoName !== undefined) ? memVideoName : localStorage.getItem('fse_bg_customVideoName');
+                const gVideoName = (memVideoName !== undefined) ? memVideoName : localStorage.getItem('chart_retuner_bg_customVideoName');
                 bgCustomVideoName = (gVideoName != null) ? gVideoName : BG_DEFAULTS.customVideoName;
             } catch (_) {
                 bgCustomVideoName = (memVideoName !== undefined) ? memVideoName : BG_DEFAULTS.customVideoName;
@@ -8513,7 +8513,7 @@ import { FSE } from './src/fse-retune.js';
             // that actually differ from the stock color, so a custom
             // tuning that happens to reuse a stock color at some slot still
             // gets the stock gradient there.
-            const isCustom = (_fsePaletteSrcRef === _customPalette) || _fseCustomTuningActive;
+            const isCustom = (_crPaletteSrcRef === _customPalette) || _crCustomTuningActive;
             const topCol = new T.Color(), botCol = new T.Color(), tmp = new T.Color();
             const halfH = NH / 2;
             for (let s = 0; s < gNoteGrad.length; s++) {
@@ -8524,7 +8524,7 @@ import { FSE } from './src/fse-retune.js';
                 // PATCH POINT: index 0 (B) never has a "stock" gradient —
                 // there's no dedicated Low B entry in DEFAULT_GEM_GRADIENTS
                 // (that array only covers the original 6-string palette) —
-                // so it always derives its gradient from FSE.lowBColor()'s
+                // so it always derives its gradient from CR.lowBColor()'s
                 // base, same as a genuinely custom color would. Indices 1-4
                 // (E/A/D/G) read PALETTES.default[s-1]/DEFAULT_GEM_GRADIENTS[s-1]
                 // directly (activePalette's own index 0 is B-only, so E/A/D/G
@@ -10458,7 +10458,7 @@ import { FSE } from './src/fse-retune.js';
             // effect live (within a second).
             if ((_leanSusPollCounter++ % 60) === 0) {
                 try {
-                    _leanSus = localStorage.getItem('fse3d_full_sus') !== '1';
+                    _leanSus = localStorage.getItem('cr3d_full_sus') !== '1';
                 } catch (_) { _leanSus = true; }
             }
             // Materialize the text-size multiplier from the user's slider.
@@ -14987,7 +14987,7 @@ import { FSE } from './src/fse-retune.js';
             const lerp = CAM_LERP_BASE * Math.max(bpm, 60) / 120;
 
             // ── Horizontal-FOV-hold + optional wide-pane pose nudges ──
-            // Driven by window.__fse3dAspectTune (default off → exact no-op).
+            // Driven by window.__cr3dAspectTune (default off → exact no-op).
             // _resolveTuneFor(paneKey) returns the shared base with THIS pane's
             // overrides (if any) laid on top, so a single split pane can be framed
             // independently. The base is seeded from defaults + localStorage on
@@ -15003,7 +15003,7 @@ import { FSE } from './src/fse-retune.js';
             // gate as the readout). Closed → nothing is registered, so the registry
             // can't grow for users who never open the panel; the key is still
             // resolved below so any saved overrides keep applying.
-            if (window.__fse3dAspectPanelOpen) _aspectRegisterPane(_paneKey);
+            if (window.__cr3dAspectPanelOpen) _aspectRegisterPane(_paneKey);
             const _aspTune = _resolveTuneFor(_paneKey);
             const _aspActive = !!(_aspTune && _aspTune.enabled
                 && !(_aspTune.splitOnly && !_ssActive()));
@@ -15016,8 +15016,8 @@ import { FSE } from './src/fse-retune.js';
             // Publish a per-pane live readout for the tuner panel (only while it's
             // open, so the steady path stays allocation-free). Keyed by pane so
             // the panel can show the reading for whichever target is selected.
-            if (window.__fse3dAspectPanelOpen) {
-                const _ro = window.__fse3dAspectReadout || (window.__fse3dAspectReadout = {});
+            if (window.__cr3dAspectPanelOpen) {
+                const _ro = window.__cr3dAspectReadout || (window.__cr3dAspectReadout = {});
                 const _slot = _ro[_paneKey] || (_ro[_paneKey] = {});
                 _slot.aspect = _paneAspect; _slot.vfov = _vfov;
                 _ro.__last = _paneKey;
@@ -15216,7 +15216,7 @@ import { FSE } from './src/fse-retune.js';
             aspectScale = Math.max(1, REF_ASPECT / Math.max(cam.aspect, 0.5));
             // Cache the pane aspect for the horizontal-FOV-hold in camUpdate.
             // cam.fov itself is owned by camUpdate (not set here) so live
-            // __fse3dAspectTune edits apply every frame without a resize.
+            // __cr3dAspectTune edits apply every frame without a resize.
             _paneAspect = cam.aspect;
             _appliedW = w; _appliedH = h;
         }
@@ -15463,8 +15463,8 @@ import { FSE } from './src/fse-retune.js';
         // createHighway() instance's own object. One retuner per
         // createFactory() instance (not module scope) so splitscreen panels
         // don't cross-contaminate each other's cached remap — see
-        // FSE.createRetuner() (src/fse-retune.js).
-        const _fseRetuner = FSE.createRetuner();
+        // CR.createRetuner() (src/chart-retune.js).
+        const _crRetuner = CR.createRetuner();
 
         /* ── setRenderer contract ────────────────────────────────────────── */
         return {
@@ -15491,7 +15491,7 @@ import { FSE } from './src/fse-retune.js';
                 // Per-render background opt-out. A plugin borrowing the highway as
                 // a visualization can set bundle.bgReactive === false to suppress
                 // the audio-reactive background for THIS instance only — without
-                // writing the shared fse_bg_* settings (which would also change the
+                // writing the shared chart_retuner_bg_* settings (which would also change the
                 // host's own highway). Motivation: the reactive bg taps the core
                 // <audio> element, and when another consumer already holds it the
                 // setup throws + the cleanup AudioContext.close() is an audible
@@ -15573,7 +15573,7 @@ import { FSE } from './src/fse-retune.js';
             draw(bundle) {
                 if (!_isReady) return;
                 if (_ctxLost) return;   // GPU context lost (alt-tab / reset) — skip until restored
-                _fseRetuner.apply(bundle, _activeTargetTuning.midiTuning); // PATCH POINT (five-string retune) — before anything else reads bundle.notes/chords
+                _crRetuner.apply(bundle, _activeTargetTuning.midiTuning); // PATCH POINT (five-string retune) — before anything else reads bundle.notes/chords
                 if (!_chartPrewarmed) {
                     _chartPrewarmed = true;
                     _prewarmChart(bundle);
@@ -15937,11 +15937,11 @@ import { FSE } from './src/fse-retune.js';
         };
     }
 
-    window.feedBackViz_five_string_everything = createFactory;
+    window.feedBackViz_chart_retuner = createFactory;
     // Per-panel control descriptors (splitscreen). The palette selector was
     // removed — per-string colors are set via the core "Highway String Colors"
     // UI, which drives both highways by named string.
-    window.feedBackViz_five_string_everything.panelControls = [
+    window.feedBackViz_chart_retuner.panelControls = [
         {
             key: 'cameraSmoothing',
             label: 'Camera smoothing (X-pan)',
@@ -15984,8 +15984,8 @@ import { FSE } from './src/fse-retune.js';
     //                        are matched by the piano plugin instead.
     //                        _canRun3D() in app.js still gates Auto from
     //                        picking us on machines without WebGL2.
-    window.feedBackViz_five_string_everything.contextType = 'webgl2';
-    window.feedBackViz_five_string_everything.__test = {
+    window.feedBackViz_chart_retuner.contextType = 'webgl2';
+    window.feedBackViz_chart_retuner.__test = {
         getAnalyserForBridgeTest: _bgGetAnalyser,
         readBandsForBridgeTest: _bgReadBands,
         resetAnalyserBridgeForTest() { _bgBridgeKeys.clear(); _bgAudio = null; _bgAudioCore = null; _bgAudioFailedAt = 0; },
@@ -15995,7 +15995,7 @@ import { FSE } from './src/fse-retune.js';
     // highway_3d's own \b(?:lead|rhythm|bass|combo|guitar)\b
     // match on purpose. Word boundary keeps us from matching arrangements
     // that merely contain "bass" as a substring (e.g. "BasslineKeys").
-    window.feedBackViz_five_string_everything.matchesArrangement = function (songInfo) {
+    window.feedBackViz_chart_retuner.matchesArrangement = function (songInfo) {
         const arr = (songInfo && songInfo.arrangement) || '';
         return /\bbass\b/i.test(arr);
     };

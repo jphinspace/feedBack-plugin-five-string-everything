@@ -1,8 +1,8 @@
 // Standalone Node verification for the string/fret offset transformation
-// engine. Imports the real engine from ../src/fse-retune.js — no
+// engine. Imports the real engine from ../src/chart-retune.js — no
 // hand-synced duplicate. Run with `node test/retune-engine.test.mjs`.
 import assert from 'node:assert';
-import { FSE } from '../src/fse-retune.js';
+import { CR } from '../src/chart-retune.js';
 
 const {
     TARGET_MAX_FRET,
@@ -33,7 +33,7 @@ const {
     intToHex,
     LIGHT_GRAY_COLOR,
     resolveColorsArray,
-} = FSE;
+} = CR;
 
 let passed = 0;
 function check(label, actual, expected) {
@@ -383,7 +383,7 @@ const SPOT_FRETS = [0, 10, 20];
 // createRetuner().apply() end-to-end, including cache invalidation when
 // the active target tuning changes.
 {
-    const { createRetuner } = FSE;
+    const { createRetuner } = CR;
     const retuner = createRetuner();
     const rawNotes = [{ t: 0, s: 0, f: 0 }];
     const rawChords = [], rawAnchors = [], rawTemplates = [];
@@ -416,7 +416,7 @@ const SPOT_FRETS = [0, 10, 20];
 // Switching tuning mid-playthrough must re-add a note previously dropped
 // as unplayable, if now in range under the new target.
 {
-    const { createRetuner } = FSE;
+    const { createRetuner } = CR;
     const retuner = createRetuner();
     const rawNotes = [{ t: 0, s: 0, f: 0 }];
     const bundle = {
@@ -617,7 +617,7 @@ const SPOT_FRETS = [0, 10, 20];
         remapNote(28, 0, 0, eadg.midiTuning), { s: 0, f: 0 });
 
     // End-to-end via createRetuner, same path screen.js's draw() uses.
-    const { createRetuner } = FSE;
+    const { createRetuner } = CR;
     const retuner = createRetuner();
     const rawNotes = [{ t: 0, s: 0, f: 0 }, { t: 1, s: 1, f: 0 }];
     const bundle = {

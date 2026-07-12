@@ -1,6 +1,6 @@
-// Five-String Everything — chart remap math: source notes/chords/anchors/
+// Chart Retuner — chart remap math: source notes/chords/anchors/
 // chord-templates -> positions on the active target tuning.
-// One of four modules fse-retune.js aggregates into `FSE`.
+// One of four modules chart-retune.js aggregates into `CR`.
 //
 // One fret = one half-step. Every function looks up each target string's
 // own open pitch from `target[j]`, so irregular (non-fourths) target

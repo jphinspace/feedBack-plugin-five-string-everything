@@ -1,4 +1,4 @@
-# Five-String Everything
+# Chart Retuner
 
 A [feedBack](https://github.com/got-feedBack/feedBack) plugin that lets a
 5-string bass play **any** bass chart, in any source tuning (Drop D,
@@ -28,20 +28,20 @@ every patch point against `highway_3d`, and why each one exists.
 ## Install
 
 **Option A — feedback-desktop plugin manager:** add this repo's URL
-(`https://github.com/<you>/feedBack-plugin-five-string-everything.git`) in the
+(`https://github.com/<you>/feedBack-plugin-chart-retuner.git`) in the
 plugin manager. It installs under the repo name verbatim.
 
 **Option B — manual copy:** clone or copy this repo's contents into your
 feedBack install's `plugins/` directory, e.g.:
 
 ```sh
-git clone <this-repo-url> /path/to/feedBack/plugins/feedBack-plugin-five-string-everything
+git clone <this-repo-url> /path/to/feedBack/plugins/feedBack-plugin-chart-retuner
 ```
 
 Restart feedBack (or reload plugins) after installing.
 
 After installing, `highway_3d` may continue to be selected by default for bass
-arrangements. You may need to select `five string everything` manually.
+arrangements. You may need to select `Chart Retuner` manually.
 
 ## Build
 

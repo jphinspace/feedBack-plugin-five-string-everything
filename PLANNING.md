@@ -1,4 +1,9 @@
-# Five-String Everything — bass tuning-remap plugin for feedBack
+# Chart Retuner — bass tuning-remap plugin for feedBack
+
+*Note: this plugin and repo were originally named "Five-String Everything"
+(internal abbreviation `FSE` / `fse-retune.js`); renamed to Chart Retuner in
+v0.2.0. The phase log below is preserved as written and still refers to the
+old name and file paths where it describes historical state.*
 
 ## Context
 

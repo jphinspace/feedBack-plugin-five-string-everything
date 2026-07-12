@@ -1,5 +1,5 @@
-// Five-String Everything — barrel module. Aggregates four pure-logic
-// modules into the `FSE` namespace screen.js and the test suite import.
+// Chart Retuner — barrel module. Aggregates four pure-logic
+// modules into the `CR` namespace screen.js and the test suite import.
 //
 //   - pitch.js: note-name <-> MIDI
 //   - target-tuning.js: target tuning resolution/defaulting
@@ -15,7 +15,7 @@ import * as TargetTuning from './target-tuning.js';
 import * as RetuneEngine from './retune-engine.js';
 import * as StringColors from './string-colors.js';
 
-export const FSE = {
+export const CR = {
     ...Pitch,
     ...TargetTuning,
     ...RetuneEngine,
