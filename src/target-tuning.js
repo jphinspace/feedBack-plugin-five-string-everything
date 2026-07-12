@@ -64,9 +64,15 @@ export const BUILTIN_TUNING_ID = BUILTIN_PRESET_TUNINGS[0].id;
 export function resolveActiveTuning(id, customTunings) {
     const targetId = id || BUILTIN_TUNING_ID;
     const preset = BUILTIN_PRESET_TUNINGS.find(p => p.id === targetId);
-    if (preset) return { strings: preset.strings, colors: preset.colors };
+    // .slice() on the built-in/fallback strings: preset.strings (BEADG's is
+    // literally DEFAULT_TARGET_TUNING) and DEFAULT_TARGET_TUNING itself are
+    // shared module constants — a caller mutating the returned array must
+    // never corrupt them for every future resolution. found.strings (the
+    // custom-tuning branch) is already a fresh per-read copy from the
+    // caller (see screen.js's _fseReadCustomTunings), so it's returned as-is.
+    if (preset) return { strings: preset.strings.slice(), colors: preset.colors };
     const found = Array.isArray(customTunings) ? customTunings.find(p => p.id === targetId) : null;
-    return found ? { strings: found.strings, colors: found.colors } : { strings: DEFAULT_TARGET_TUNING, colors: null };
+    return found ? { strings: found.strings, colors: found.colors } : { strings: DEFAULT_TARGET_TUNING.slice(), colors: null };
 }
 
 // Length in [MIN,MAX] and every entry parses. Shared by

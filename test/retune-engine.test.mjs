@@ -572,6 +572,10 @@ const SPOT_FRETS = [0, 10, 20];
         { strings: ['A0', 'E1', 'A1', 'D2', 'G2'], colors: ['#111111', '#222222', '#333333', '#444444', '#555555'] });
     check('resolveActiveTuning: an unknown/deleted id falls back to BEADG shape',
         resolveActiveTuning('stale_deleted_id', []), { strings: DEFAULT_TARGET_TUNING, colors: null });
+    check('resolveActiveTuning: an unknown id with null customTunings falls back to BEADG shape (non-array guard)',
+        resolveActiveTuning('stale_deleted_id', null), { strings: DEFAULT_TARGET_TUNING, colors: null });
+    check('resolveActiveTuning: an unknown id with undefined customTunings falls back to BEADG shape (non-array guard)',
+        resolveActiveTuning('stale_deleted_id', undefined), { strings: DEFAULT_TARGET_TUNING, colors: null });
     check('resolveActiveTuning: a preset id wins even if a custom tuning happens to share it',
         resolveActiveTuning('cello_cgda', [{ id: 'cello_cgda', name: 'user override attempt', strings: ['E1', 'A1', 'D2', 'G2'], colors: ['#000', '#000', '#000', '#000'] }]),
         { strings: ['C2', 'G2', 'D3', 'A3'], colors: ['#cc00aa', '#f18313', '#3fc413', '#ecd234'] });
