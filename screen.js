@@ -8,14 +8,14 @@
 //
 // Chart Retuner: this file is a fork of highway_3d/screen.js,
 // patched at a small set of PATCH POINTs to draw every note remapped onto a
-// 5-string bass target instead of the chart's own tuning. The target string
-// COUNT is always 5 (that's the whole point of the plugin), but which
-// pitches those 5 strings are tuned to is user-configurable via the
-// settings picker (default BEADG; AEADG, BbEbAbDbGb, or any other 5-string
-// tuning also work) — see CR.resolveTargetTuning. All of that new logic
-// lives in ./src/chart-retune.js (imported as the `CR` namespace below)
-// rather than inline here, so this file stays as close as possible to
-// upstream highway_3d/screen.js and periodic syncs stay a mechanical diff.
+// bass target instead of the chart's own tuning. The target string COUNT
+// (4-8) and pitches are both user-configurable via the settings picker —
+// EADG is the built-in default; other built-in presets, or any 4-8-string
+// tuning of your own (AEADG, BbEbAbDbGb, ...), also work — see
+// CR.resolveTargetTuning. All of that new logic lives in
+// ./src/chart-retune.js (imported as the `CR` namespace below) rather than
+// inline here, so this file stays as close as possible to upstream
+// highway_3d/screen.js and periodic syncs stay a mechanical diff.
 import { CR } from './src/chart-retune.js';
 
 (function () {
@@ -785,6 +785,13 @@ import { CR } from './src/chart-retune.js';
         [0x37c40b, 0x139305], // 4 green
         [0xaf10db, 0x8907af], // 5 violet
     ];
+    // Maps a CR.colorRoleForNote role to its DEFAULT_GEM_GRADIENTS slot —
+    // used by _recolorGemGradients to pick the right stock gradient for a
+    // live-tracked built-in tuning's string by NOTE identity rather than
+    // position (see there). 'lowB' and anything else (extension slots,
+    // 'gray') have no stock entry — those strings derive their gradient
+    // from the base color instead, same as a custom color would.
+    const GEM_GRADIENT_ROLE_INDEX = { e: 0, a: 1, d: 2, g: 3, highB: 4, highE: 5 };
     // Default palette at module scope so out-of-IIFE consumers (e.g. the
     // out-of-range warning's reference to "palette size") still have a
     // canonical length to compare against.
@@ -825,8 +832,9 @@ import { CR } from './src/chart-retune.js';
     // count. `targetStringCount` is the caller's
     // `_activeTargetTuning.midiTuning.length` (per-panel state; this
     // module-level function can't close over it, so callers thread it
-    // through) — falls back to the built-in 5-string BEADG default's
-    // length if not a usable positive number.
+    // through) — falls back to CR.DEFAULT_TARGET_MIDI_TUNING's length (the
+    // engine's BEADG-shaped fallback, 5 — not the user-facing default
+    // preset, which is EADG/4) if not a usable positive number.
     function resolveStringCount(targetStringCount) {
         return (Number.isFinite(targetStringCount) && targetStringCount >= 1)
             ? targetStringCount
@@ -2291,7 +2299,7 @@ import { CR } from './src/chart-retune.js';
         return _bgBandsCache;
     }
 
-    const BG_DEFAULTS = { style: 'particles', intensity: 0.5, reactive: true, palette: 'default', bgTheme: 'default', hwTheme: 'default', showFretOnNote: true, fretNumberGhostScope: 'chords', cameraSmoothing: 0.5, zoomSmoothing: 0.5, tiltSmoothing: 0.5, cameraLockLow: false, cameraLockZoom: 0.5, cameraMode: 'lookahead', nutHeadstockVisible: true, tuningLabelsVisible: true, nutColor: '#f5f3f0', headstockColor: '#d4b48a', textSize: 0.5, vibrancy: 0.85, glow: 0.25, customImageDataUrl: '', customImageName: '', customVideoName: '', chordDiagramVisible: true, chordDiagramSize: 0.5, chordDiagramPosition: 'tl', fretColumnMarkerCadence: 1, projectionVisible: true, inlayLabelsVisible: false, sectionLabelsOnHighway: false, sectionHudVisible: false, sectionHudPosition: 'tr', sectionHudSize: 0.5, toneHudVisible: false, toneHudPosition: 'tl', toneHudSize: 0.5, fpsVisible: false, fretDividersVisible: true, slideArrowApproachVisible: true, slideArrowNeckVisible: true, slideArrowChainPreviewVisible: true, hitFx: 0.7, sparks: true, cinematic: true, verdictMarks: true, timingFx: true, streakFx: true, bloom: true, targetTuningId: CR.BUILTIN_TUNING_ID, customTunings: '[]' };
+    const BG_DEFAULTS = { style: 'particles', intensity: 0.5, reactive: true, palette: 'default', bgTheme: 'default', hwTheme: 'default', showFretOnNote: true, fretNumberGhostScope: 'chords', cameraSmoothing: 0.5, zoomSmoothing: 0.5, tiltSmoothing: 0.5, cameraLockLow: false, cameraLockZoom: 0.5, cameraMode: 'lookahead', nutHeadstockVisible: true, tuningLabelsVisible: true, nutColor: '#f5f3f0', headstockColor: '#d4b48a', textSize: 0.5, vibrancy: 0.85, glow: 0.25, customImageDataUrl: '', customImageName: '', customVideoName: '', chordDiagramVisible: true, chordDiagramSize: 0.5, chordDiagramPosition: 'tl', fretColumnMarkerCadence: 1, projectionVisible: true, inlayLabelsVisible: false, sectionLabelsOnHighway: false, sectionHudVisible: false, sectionHudPosition: 'tr', sectionHudSize: 0.5, toneHudVisible: false, toneHudPosition: 'tl', toneHudSize: 0.5, fpsVisible: false, fretDividersVisible: true, slideArrowApproachVisible: true, slideArrowNeckVisible: true, slideArrowChainPreviewVisible: true, hitFx: 0.7, sparks: true, cinematic: true, verdictMarks: true, timingFx: true, streakFx: true, bloom: true, targetTuningId: CR.DEFAULT_TUNING_ID, customTunings: '[]' };
     // User-selectable, persistable bg styles — must mirror settings.html's
     // VALID_STYLES. 'venue' is deliberately NOT here: it is an internal effective
     // style reached only via _venueSceneOverride (the viz-picker Venue flow), so
@@ -2861,18 +2869,27 @@ import { CR } from './src/chart-retune.js';
     // PALETTES.default/CR.lowBColor() (screen.js/Three.js-owned data the
     // module deliberately stays free of). Everything else — which role a
     // given note or BEADG-core position gets — is pure logic living in
-    // the module.
-    function _crColorForRole(role) {
+    // the module. `palette` defaults to the stock PALETTES.default — right
+    // for every "suggest a sensible starting color" caller (seeding a
+    // brand-new custom tuning row, the settings editor's swatch prefill),
+    // none of which need to track the user's live palette pick.
+    // _bgLoadSettings's activePalette derivation for a LIVE-TRACKED tuning
+    // (EADG/BEADG) is the one caller that must track it — it passes the
+    // user's actually-selected palette (newPalette: a named palette, or
+    // their own 'custom' picks) instead, so switching palettes still
+    // re-tints EADG/BEADG the same way it always has.
+    function _crColorForRole(role, palette) {
+        const p = palette || PALETTES.default;
         switch (role) {
             case 'lowB': return CR.lowBColor();     // B0 — the built-in low string
-            case 'e': return PALETTES.default[0];    // E1
-            case 'a': return PALETTES.default[1];    // A1
-            case 'd': return PALETTES.default[2];    // D2
-            case 'g': return PALETTES.default[3];    // G2
-            case 'highB': return PALETTES.default[4]; // B2 — guitar's own B slot
-            case 'highE': return PALETTES.default[5]; // E3 — guitar's own high-E slot
-            case 'lowExt1': return PALETTES.default[6]; // F#0 — supplementary low-ext slot
-            case 'lowExt2': return PALETTES.default[7]; // C#0 — supplementary low-ext slot
+            case 'e': return p[0];    // E1
+            case 'a': return p[1];    // A1
+            case 'd': return p[2];    // D2
+            case 'g': return p[3];    // G2
+            case 'highB': return p[4]; // B2 — guitar's own B slot
+            case 'highE': return p[5]; // E3 — guitar's own high-E slot
+            case 'lowExt1': return p[6]; // F#0 — supplementary low-ext slot
+            case 'lowExt2': return p[7]; // C#0 — supplementary low-ext slot
             default: return CR.LIGHT_GRAY_COLOR;
         }
     }
@@ -2884,12 +2901,12 @@ import { CR } from './src/chart-retune.js';
     }
 
     // Target-tuning profiles (feedback: some bassists tune AEADG or
-    // BbEbAbDbGb rather than BEADG, and/or run more/fewer than 5 strings).
-    // The built-in presets (CR.BUILTIN_PRESET_TUNINGS — BEADG plus any
-    // others, e.g. Cello) resolve first; BEADG's own colors are always
-    // resolved live off CR.lowBColor()/PALETTES.default (unchanged from
-    // before this string-count feature), every other preset carries
-    // concrete colors like a custom profile does. Then any number of
+    // BbEbAbDbGb, and/or run more/fewer strings than a live-tracked
+    // built-in offers). The built-in presets (CR.BUILTIN_PRESET_TUNINGS)
+    // resolve first; a live-tracked one's colors always resolve live off
+    // CR.lowBColor()/PALETTES.default (unchanged from before this
+    // string-count feature), every other preset carries concrete colors
+    // like a custom profile does. Then any number of
     // user-saved profiles in the 'customTunings' global JSON blob: [{ id,
     // name, strings: string[4..8],
     // colors: string[4..8] }] — colors is always fully populated with
@@ -2945,7 +2962,7 @@ import { CR } from './src/chart-retune.js';
     function _crResolveActiveTuning() {
         return CR.resolveActiveTuning(_bgReadSetting(null, 'targetTuningId'), _crReadCustomTunings());
     }
-    window.cr3dSetActiveTuning = (id) => _bgWriteGlobal('targetTuningId', String(id || CR.BUILTIN_TUNING_ID));
+    window.cr3dSetActiveTuning = (id) => _bgWriteGlobal('targetTuningId', String(id || CR.DEFAULT_TUNING_ID));
     window.cr3dListCustomTunings = () => _crReadCustomTunings();
     // Upserts a custom tuning profile by id (generates one for a new
     // profile). Validates strings via CR.isValidTuningStringsArray and
@@ -2975,7 +2992,7 @@ import { CR } from './src/chart-retune.js';
         // Fall back to the built-in default if the deleted profile was active
         // — otherwise the renderer would keep the old tuning alive purely
         // via the (now-orphaned) targetTuningId pointer.
-        if (_bgReadSetting(null, 'targetTuningId') === id) window.cr3dSetActiveTuning(CR.BUILTIN_TUNING_ID);
+        if (_bgReadSetting(null, 'targetTuningId') === id) window.cr3dSetActiveTuning(CR.DEFAULT_TUNING_ID);
     };
     // Bridge for settings.html's Bass Tuning editor "+ Add string above/
     // below" buttons — pure, stateless (see CR.defaultExtensionNote's own
@@ -2991,17 +3008,18 @@ import { CR } from './src/chart-retune.js';
         return { note: next.label, color: CR.intToHex(_crColorForRole(role)) };
     };
     // Resolves ONE string's display color for settings.html's editor —
-    // `colors` may be null (built-in tuning, always-live) or a profile's
-    // own array; `strings`/`colors` share an index. Used to prefill color
-    // swatches (including the built-in BEADG seed for a brand-new custom
-    // tuning) without duplicating the palette-slot mapping client-side.
+    // `colors` may be null (a live-tracked built-in tuning — EADG or
+    // BEADG) or a profile's own array; `strings`/`colors` share an index.
+    // Used to prefill color swatches (including seeding a brand-new custom
+    // tuning from the default preset) without duplicating the palette-slot
+    // mapping client-side. Note-based (CR.colorRoleForNote), not a
+    // position-based role table: a fixed BEADG_COLOR_ROLES[index] lookup
+    // only lines up for the 5-string BEADG shape — EADG's 4 strings sit one
+    // position earlier (no low B), so position alone can't tell "index 0"
+    // from "e" vs "lowB". Keying off the actual note at that index handles
+    // every live-tracked shape uniformly.
     window.cr3dResolveDisplayColor = (strings, colors, index) => {
         if (Array.isArray(colors) && colors[index] != null && _h3dHexToInt(colors[index]) != null) return colors[index];
-        if (index < CR.BEADG_COLOR_ROLES.length) return CR.intToHex(_crColorForRole(CR.BEADG_COLOR_ROLES[index]));
-        // Beyond the fixed 5-role table — shouldn't normally happen (a
-        // well-formed profile always carries its own colors past index 4)
-        // — falls back through the same note-based lookup a fresh "+ Add"
-        // would use, keyed off whatever note actually sits at this index.
         const parsed = Array.isArray(strings) && CR.parseTargetNote(strings[index]);
         return CR.intToHex(_crColorForRole(parsed ? CR.colorRoleForNote(parsed.midi) : 'gray'));
     };
@@ -4293,31 +4311,59 @@ import { CR } from './src/chart-retune.js';
         // directly/unchanged — that's already the correct lowE/A/D/G
         // order (matches core's own 4-string-bass HWC slot order), so no
         // reordering is needed for them, only the low string is
-        // special-cased. This is the BUILT-IN tuning's fixed 5-wide shape;
-        // set before any settings load so the very first frame is already
-        // correct (the built-in tuning is what's active before settings
-        // load anyway). A CUSTOM tuning (variable 4-8 length, concrete
-        // per-string colors) replaces this with an N-length array the
-        // first time _bgLoadSettings resolves it — see isBuiltinTuning
-        // there.
+        // special-cased. This is BEADG's fixed 5-wide shape (matching
+        // CR.DEFAULT_TARGET_TUNING, the engine's own fallback) — a
+        // placeholder only, NOT necessarily the actual default preset
+        // (EADG, 4-wide, no low string) a fresh install will end up
+        // rendering. It's inert either way: init() primes
+        // _activeTargetTuning from the persisted/resolved active tuning
+        // before nStr is computed, and _bgLoadSettings() re-derives
+        // activePalette from that same active tuning before buildBoard()/
+        // the first frame. A tuning that isn't live-tracked (variable 4-8
+        // length, concrete per-string colors) replaces this with an
+        // N-length array the first time _bgLoadSettings resolves it — see
+        // isLiveTracked there.
         let activePalette = [CR.lowBColor(), PALETTES.default[0], PALETTES.default[1], PALETTES.default[2], PALETTES.default[3]];
         // Source palette (pre-remap, E/A/D/G only) activePalette was last
         // derived from — lets _bgLoadSettings skip re-deriving/re-tinting
         // when the user's palette selection hasn't actually changed
         // (activePalette itself is always a fresh derived array, never
-        // === the source palette). Only meaningful for the built-in
-        // tuning; a custom tuning's colors don't track this at all (see
-        // isBuiltinTuning in _bgLoadSettings), and get this reset to null
-        // so a later switch back to the built-in tuning always re-derives.
+        // === the source palette). Only meaningful for a LIVE-TRACKED
+        // tuning; anything else (a custom tuning, or the built-in Cello
+        // preset) doesn't track this at all (see isLiveTracked in
+        // _bgLoadSettings), and gets this reset to null so a later switch
+        // back to a live-tracked tuning always re-derives.
         let _crPaletteSrcRef = PALETTES.default;
-        // Whether the CURRENTLY active tuning is a custom (non-built-in)
-        // one — used by _recolorGemGradients so a custom tuning's colors
-        // (which can land anywhere: extension slots, a picker override, a
+        // Low B color activePalette was last derived from — tracked
+        // separately from _crPaletteSrcRef because Low B is read from a
+        // different localStorage key (CR.lowBColor(), the "Highway String
+        // Colors" panel) than the E/A/D/G source palette, so a Low-B-only
+        // edit wouldn't otherwise be noticed by _bgLoadSettings's dirty
+        // check. Compared even when the active live-tracked tuning has no
+        // low string (EADG) — harmless: EADG's own derivation never reads
+        // it, so a stale mismatch there just costs one redundant (still
+        // correct) re-derive, never a wrong render.
+        let _crLastLowB = CR.lowBColor();
+        // Per-string color role ('lowB'/'e'/'a'/'d'/'g'/...), by index, for
+        // the CURRENTLY active tuning — only meaningful when it's
+        // live-tracked (isLiveTracked in _bgLoadSettings); null
+        // otherwise. Built alongside activePalette so the two never
+        // disagree; _recolorGemGradients reads it to pick the correct
+        // DEFAULT_GEM_GRADIENTS slot per string (note-identity-based, not
+        // position-based — EADG and BEADG put e/a/d/g at different indices).
+        let _crActiveRoles = null;
+        // Whether the CURRENTLY active tuning has its own CONCRETE (not
+        // live-tracked) colors — true for a saved custom tuning AND for
+        // the built-in Cello preset alike (neither live-tracks the global
+        // palette), false only for a live-tracked one (EADG/BEADG). Used
+        // by _recolorGemGradients so those colors (which can land
+        // anywhere: extension slots, a picker override, a
         // shorter/reordered tuning like 4-string EADG) are always compared
         // against the stock gradient table by CONTENT rather than assumed
-        // to line up positionally the way the fixed built-in BEADG shape
-        // did. Updated alongside activePalette in _bgLoadSettings.
-        let _crCustomTuningActive = false;
+        // to line up positionally/by-role the way a live-tracked tuning's
+        // NOTE-keyed roles do. Updated alongside activePalette in
+        // _bgLoadSettings.
+        let _crConcreteColorsActive = false;
         // Content signature of the colors last applied to materials; lets
         // _bgLoadSettings force a retint when the in-place custom palette
         // changes values without changing array identity.
@@ -4348,9 +4394,14 @@ import { CR } from './src/chart-retune.js';
         // a from-scratch remap, not an incremental patch.
         let _activeTargetTuning = CR.resolveTargetTuning(CR.DEFAULT_TARGET_TUNING);
         // Signature format matches _bgLoadSettings's tuningSig: strings
-        // joined, '#', then colors joined (empty for the built-in tuning,
-        // whose colors always resolve live — see isBuiltinTuning there).
+        // joined, '#', then colors joined (empty for a live-tracked tuning,
+        // whose colors always resolve live — see isLiveTracked there).
         let _crTuningSig = CR.DEFAULT_TARGET_TUNING.join('|') + '#';
+        function _primeActiveTargetTuningForInit() {
+            // Leave _crTuningSig stale so _bgLoadSettings still performs its
+            // first palette/tuning sync before buildBoard().
+            _activeTargetTuning = CR.resolveTargetTuning(_crResolveActiveTuning().strings);
+        }
         // Fret digits on the board ghost (hollow preview at Z=0), not on
         // flying note bodies — see fretNumberGhostScope for chord-hand vs all.
         let showFretOnNote = false;
@@ -8254,16 +8305,17 @@ import { CR } from './src/chart-retune.js';
             // color the reference stays === activePalette, so compare contents
             // too to force a retint. _bgPaletteSig caches the applied colors.
             const newSig = newPalette.join(',');
-            // PATCH POINT: B (index 0) is looked up independently of
-            // newPalette/newSig (see CR.lowBColor(), src/chart-retune.js) —
-            // core's own palette change-detection here only tracks
-            // E/A/D/G's source, so check B separately or a same-frame
-            // "Low B" edit would go stale until something else also changed.
-            // This whole newPalette/newLowB derivation only applies to the
-            // BUILT-IN tuning (see isBuiltinTuning below) — a CUSTOM
-            // tuning's colors are concrete per-profile data, resolved
-            // straight from activeTuning.colors instead, with no live
-            // palette-tracking at all.
+            // PATCH POINT: B is looked up independently of newPalette/
+            // newSig (see CR.lowBColor(), src/chart-retune.js) — core's own
+            // palette change-detection here only tracks E/A/D/G's source,
+            // so check B separately (_crLastLowB) or a same-frame "Low B"
+            // edit would go stale until something else also changed. This
+            // whole newPalette/newLowB derivation only applies to a
+            // LIVE-TRACKED tuning (see isLiveTracked below) — anything else
+            // (a saved custom tuning, or the built-in Cello preset) has
+            // concrete per-profile colors, resolved straight from
+            // activeTuning.colors instead, with no live palette-tracking
+            // at all.
             const newLowB = CR.lowBColor();
             // PATCH POINT (five-string retune, custom tunings): re-resolve
             // the active target tuning (strings + colors). Cheap so it's
@@ -8275,39 +8327,65 @@ import { CR } from './src/chart-retune.js';
             // reload regardless of which key triggered it.
             const activeTuning = _crResolveActiveTuning();
             const tuningStrings = activeTuning.strings;
-            const isBuiltinTuning = activeTuning.colors === null;
-            const tuningSig = tuningStrings.join('|') + '#' + (isBuiltinTuning ? '' : activeTuning.colors.join(','));
-            const paletteInputsChanged = isBuiltinTuning
-                ? (newPalette !== _crPaletteSrcRef || newSig !== _bgPaletteSig || newLowB !== activePalette[0] || tuningSig !== _crTuningSig)
+            // Named for what the colors:null sentinel actually MEANS (live-
+            // track the global palette), not for "is this preset built-in"
+            // — Cello is built-in too but carries concrete colors, so it
+            // takes the same branch a user-saved custom tuning does.
+            const isLiveTracked = activeTuning.colors === null;
+            const tuningSig = tuningStrings.join('|') + '#' + (isLiveTracked ? '' : activeTuning.colors.join(','));
+            const paletteInputsChanged = isLiveTracked
+                ? (newPalette !== _crPaletteSrcRef || newSig !== _bgPaletteSig || newLowB !== _crLastLowB || tuningSig !== _crTuningSig)
                 : (tuningSig !== _crTuningSig);
             if (paletteInputsChanged) {
-                if (isBuiltinTuning) {
+                if (isLiveTracked) {
                     // PATCH POINT (feedback: colors looked shifted up a
                     // string — "adding a fifth high string on top rather
                     // than low string" — and B was using the guitar's own
                     // "B" slot color instead of the dedicated "Low B" one).
-                    // Indices 1-4 (E/A/D/G) pass through whichever palette
-                    // the user picked (named or custom) unchanged/
-                    // unreordered; index 0 (B) uses the dedicated Low B
-                    // lookup instead of any slot of newPalette.
-                    activePalette = [newLowB, newPalette[0], newPalette[1], newPalette[2], newPalette[3]];
+                    // Live-tracked built-ins are EADG and BEADG today — EADG
+                    // is literally BEADG's own E/A/D/G strings minus the low
+                    // B, so rather than a hardcoded 5-wide [lowB, E, A, D,
+                    // G] array (which indexed wrong the moment a 4-string
+                    // live-tracked tuning existed), resolve each STRING's
+                    // color by its own note identity (CR.colorRoleForNote)
+                    // rather than by position — this generalizes to both
+                    // shapes (and any future live-tracked built-in whose
+                    // strings sit within the standard chain) automatically.
+                    // _crActiveRoles caches the same per-string roles for
+                    // _recolorGemGradients (which needs them too, to pick
+                    // the right DEFAULT_GEM_GRADIENTS slot) — built here,
+                    // in lockstep with activePalette, rather than read back
+                    // off _activeTargetTuning, since that's only refreshed
+                    // a few lines below and would still be stale (the OLD
+                    // tuning's shape) the first time a tuning switch reaches
+                    // this call.
+                    const roles = tuningStrings.map((spec) => {
+                        const parsed = CR.parseTargetNote(spec);
+                        return parsed ? CR.colorRoleForNote(parsed.midi) : 'gray';
+                    });
+                    activePalette = roles.map((role) => _crColorForRole(role, newPalette));
+                    _crActiveRoles = roles;
                     _crPaletteSrcRef = newPalette;
                     _bgPaletteSig = newSig;
-                    _crCustomTuningActive = false;
+                    _crLastLowB = newLowB;
+                    _crConcreteColorsActive = false;
                 } else {
-                    // Custom tuning: activeTuning.colors is already a
-                    // fully-populated, concrete N-length hex array (see
-                    // window.cr3dSaveCustomTuning) — just resolve to ints.
+                    // Not live-tracked (a saved custom tuning, or the
+                    // built-in Cello preset): activeTuning.colors is
+                    // already a fully-populated, concrete N-length hex
+                    // array (see window.cr3dSaveCustomTuning) — just
+                    // resolve to ints.
                     activePalette = activeTuning.colors.map(c => {
                         const n = _h3dHexToInt(c);
                         return n != null ? n : CR.LIGHT_GRAY_COLOR;
                     });
+                    _crActiveRoles = null; // unused/stale here — _recolorGemGradients only reads it when hasNonStockColors is false
                     // Never === any real newPalette reference, so switching
-                    // back to the built-in tuning later always re-derives
+                    // back to a live-tracked tuning later always re-derives
                     // rather than short-circuiting on a stale match.
                     _crPaletteSrcRef = null;
                     _bgPaletteSig = '';
-                    _crCustomTuningActive = true;
+                    _crConcreteColorsActive = true;
                 }
                 _applyPaletteToMaterials();
             }
@@ -8493,9 +8571,9 @@ import { CR } from './src/chart-retune.js';
         }
 
         // Recompute the per-vertex gem-gradient colors from the active palette.
-        // Built-in palettes (and unchanged slots of a custom palette) keep the
+        // Stock roles (and unchanged slots of a non-stock palette) keep the
         // hand-tuned DEFAULT_GEM_GRADIENTS stops so the stock look is preserved;
-        // a custom slot derives a top-highlight / bottom-shade from its base
+        // anything else derives a top-highlight / bottom-shade from its base
         // color. Mutates the existing 'color' attribute in place (no geometry
         // churn, pooled note meshes pick it up next frame).
         function _recolorGemGradients() {
@@ -8503,17 +8581,20 @@ import { CR } from './src/chart-retune.js';
             // PATCH POINT: activePalette is always a freshly-derived (remapped)
             // array now, never === _customPalette even when the user picked
             // "custom" — check the pre-remap source ref instead. Also true
-            // whenever a custom TUNING (not just a custom global palette)
-            // is active — its colors can land anywhere (extension slots, a
-            // picker override, a shorter/reordered tuning like 4-string
-            // EADG) and shouldn't be assumed to line up positionally with
-            // DEFAULT_GEM_GRADIENTS the way the fixed built-in BEADG shape
-            // does; the `base !== PALETTES.default[s - 1]` content check
-            // just below still only derives a custom gradient for slots
-            // that actually differ from the stock color, so a custom
-            // tuning that happens to reuse a stock color at some slot still
-            // gets the stock gradient there.
-            const isCustom = (_crPaletteSrcRef === _customPalette) || _crCustomTuningActive;
+            // whenever the active TUNING carries its own concrete colors
+            // (_crConcreteColorsActive — a saved custom tuning, or the
+            // built-in Cello preset; not just a custom GLOBAL palette) —
+            // its colors can land anywhere (extension slots, a picker
+            // override, a shorter/reordered tuning like 4-string EADG) and
+            // shouldn't be assumed to line up positionally with
+            // DEFAULT_GEM_GRADIENTS the way a live-tracked tuning's
+            // NOTE-keyed roles do (see the hasNonStockColors branch below);
+            // the `base !== PALETTES.default[s - 1]` content check there
+            // still only derives a non-stock gradient for slots that
+            // actually differ from the stock color, so a tuning that
+            // happens to reuse a stock color at some slot still gets the
+            // stock gradient there.
+            const hasNonStockColors = (_crPaletteSrcRef === _customPalette) || _crConcreteColorsActive;
             const topCol = new T.Color(), botCol = new T.Color(), tmp = new T.Color();
             const halfH = NH / 2;
             for (let s = 0; s < gNoteGrad.length; s++) {
@@ -8521,23 +8602,39 @@ import { CR } from './src/chart-retune.js';
                 if (!g || !g.attributes || !g.attributes.color) continue;
                 const base = activePalette[s];
                 let topHex, botHex;
-                // PATCH POINT: index 0 (B) never has a "stock" gradient —
-                // there's no dedicated Low B entry in DEFAULT_GEM_GRADIENTS
-                // (that array only covers the original 6-string palette) —
-                // so it always derives its gradient from CR.lowBColor()'s
-                // base, same as a genuinely custom color would. Indices 1-4
-                // (E/A/D/G) read PALETTES.default[s-1]/DEFAULT_GEM_GRADIENTS[s-1]
-                // directly (activePalette's own index 0 is B-only, so E/A/D/G
-                // sit one slot up from the raw palette's own lowE/A/D/G order).
-                if (s === 0 || (isCustom && base !== PALETTES.default[s - 1])) {
+                let stops;
+                if (hasNonStockColors) {
+                    // PATCH POINT: index 0 never has a "stock" gradient
+                    // here (its own low string is arbitrary, not
+                    // necessarily B, when the active tuning carries
+                    // concrete colors) — always derive it, same as any
+                    // slot whose color doesn't match the stock E/A/D/G/../
+                    // position it would sit at in a BEADG-rooted layout.
+                    stops = (s === 0 || base !== PALETTES.default[s - 1]) ? null : DEFAULT_GEM_GRADIENTS[s - 1];
+                } else {
+                    // Live-tracked built-in (EADG or BEADG) — which
+                    // DEFAULT_GEM_GRADIENTS slot (if any) a string gets is
+                    // keyed by its own note identity via _crActiveRoles
+                    // (built alongside activePalette in _bgLoadSettings),
+                    // not by position: EADG and BEADG share the live
+                    // palette but put e/a/d/g at different indices (EADG
+                    // has no low B ahead of them), so a fixed `s - 1`
+                    // offset — correct for BEADG — pointed at the wrong
+                    // string's gradient for EADG. 'lowB' (and anything
+                    // outside the fixed e/a/d/g/highB/highE stock roles)
+                    // has no hand-tuned stock gradient at all, same as
+                    // before.
+                    const role = _crActiveRoles && _crActiveRoles[s];
+                    const gradIdx = role ? GEM_GRADIENT_ROLE_INDEX[role] : undefined;
+                    stops = gradIdx !== undefined ? DEFAULT_GEM_GRADIENTS[gradIdx] : null;
+                }
+                if (!stops) {
                     // Match the SUBTLE stock gem shading (bottom ≈ 0.78 of a
                     // near-base top), so a custom gem reads as a flat-ish gem
                     // in the chosen color rather than a strong gradient.
                     topHex = _lightenInt(base, 0.05);
                     botHex = _darkenInt(base, 0.78);
                 } else {
-                    const stops = DEFAULT_GEM_GRADIENTS[s - 1];
-                    if (!stops) continue; // strings 6/7 have no gradient geometry
                     topHex = stops[0];
                     botHex = stops[1];
                 }
@@ -15456,7 +15553,7 @@ import { CR } from './src/chart-retune.js';
         }
 
         // PATCH POINT (five-string retune): remaps bundle.notes/.chords/
-        // .anchors/.chordTemplates to the active target tuning (BEADG by
+        // .anchors/.chordTemplates to the active target tuning (EADG by
         // default, user-configurable) IN PLACE, so every downstream reader
         // in this file sees the remapped chart with
         // no per-usage-site changes needed. Safe to mutate: `bundle` is this
@@ -15524,6 +15621,7 @@ import { CR } from './src/chart-retune.js';
                         return;
                     }
                     try {
+                        _primeActiveTargetTuningForInit();
                         nStr = resolveStringCount(_activeTargetTuning.midiTuning.length);
                         _invertedForBoard = _invertedCached;
                         _leftyForBoard = _leftyCached;
