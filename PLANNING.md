@@ -1037,3 +1037,244 @@ the new settings.html markup's Tailwind classes.
 settings.html markup's Tailwind classes) and then to **`0.1.4`** (the
 BEADG-reference-hint markup added in a follow-up pass) — the version now
 declared in `plugin.json`.
+
+---
+
+## Phase 11 — Configurable target string count (2026-07-12)
+
+Lifts the remaining MVP guardrail from Phase 1/10: the target string
+**count** was still hardcoded at 5 everywhere (`FSE.TARGET_STRING_COUNT`);
+users can now add/remove strings from a saved tuning profile, top or
+bottom only, min 4 / max 8. Bass-only scope, and the built-in default
+profile (5-string BEADG), are both unchanged.
+
+**Bounds: `[4, 8]`.** 4 matches `highway_3d`'s own minimum (explicit product
+decision — fewer than 4 is rare enough to punt on unless requested later).
+8 is `MAX_RENDER_STRINGS` (`screen.js`, sized from `PALETTES.default`'s 8
+entries) — a real structural limit of the copied rendering arrays
+(materials/gradients are only allocated up to that count), not an arbitrary
+choice.
+
+**`src/fse-retune.js`:** every function that bounded/sized itself against
+the fixed `TARGET_STRING_COUNT` constant (`computeArrangementShift`,
+`resolveTargetForFret`, `remapChordTemplate`, `createRetuner().apply()`)
+now reads the actual resolved target array's `.length` instead — each
+already threaded `targetMidiTuning` through from Phase 10, so the length
+was always available at the call site. `resolveTargetTuning(spec)` now
+resolves to `spec.length` entries (honoring the spec's own length exactly,
+rather than always padding/truncating to 5), falling back per malformed
+index to `DEFAULT_TARGET_TUNING[i]` for `i<5` or the new
+`EXTENDED_DEFAULT_TARGET_TUNING`/`EXTENDED_CORE_INDEX` chain
+(`['C#0','F#0','B0','E1','A1','D2','G2','B2','E3']`, index 2 = `'B0'`) for
+longer specs. `TARGET_STRING_COUNT` itself is removed from the `FSE`
+export; `MAX_TARGET_STRING_COUNT`/`MIN_TARGET_STRING_COUNT` (8/4) take its
+place. Two new pure helpers — `midiToNoteLabel` (inverse of
+`parseTargetNote`'s pitch math) and `defaultExtensionNote(direction,
+edgeMidi)` — implement the stateless default-note rule a settings.html
+"+ Add string" click uses: low extensions always drop a perfect fourth (5
+half-steps) from the current edge string; high extensions rise a major
+third (4 half-steps) *only* when extending from exactly the BEADG default
+G2 (43) — matching the standard convention of a high B string above G, the
+same interval guitar's own G→B uses — otherwise a perfect fourth, same as
+low. Both are pure functions of "whatever note currently sits at the edge
+being extended" — no session state, no persisted history, per explicit
+product direction (a removed string's value is never remembered for a
+later re-add).
+
+**Color defaulting (`screen.js`, not `src/fse-retune.js` — this module
+stays free of `PALETTES`/Three.js per its own header comment):** a fixed
+note→color lookup table (`_fseDefaultColorForNote`), keyed by the *note
+value* `defaultExtensionNote` produces, not array position or history: B0→
+`FSE.lowBColor()` (the existing dedicated "Low B" slot), E1/A1/D2/G2→
+`PALETTES.default[0..3]` (today's existing slots), B2/E3→
+`PALETTES.default[4]`/`[5]` (guitar's own B/high-E slots — unused by this
+plugin before this phase), F#0/C#0→`PALETTES.default[6]`/`[7]` (already
+commented as "supplementary slots used for 7/8-string arrangements" —
+already earmarked for exactly this). Any note outside this table (3rd+
+extension in either direction, or extending a non-default/custom tuning)
+defaults to light gray (`0xd3d3d3`) — an accepted edge case (two added
+strings can look identical) per explicit product direction, not a bug; the
+user can always repaint via the new per-string color picker.
+
+**Tuning profile shape:** `{ id, name, strings: string[4..8], colors:
+string[4..8] }` — `colors` is always fully populated with concrete resolved
+hex, never a "track the live global palette" sentinel, for **custom**
+profiles. The **built-in BEADG profile is untouched**: not a
+`customTunings` entry, still resolves colors live off `FSE.lowBColor()` +
+`PALETTES.default[0..3]` every frame, exactly as before this phase.
+Growing it to 6+ strings happens by clicking "Add a tuning" (which now
+pre-seeds the editor with BEADG's 5 defaults, snapshotted to concrete hex
+the moment the editor opens) and saving as a new named profile — no change
+to "the built-in is immutable." Pre-existing saved custom profiles (always
+exactly 5 strings, no `colors` field) are lazily migrated the first time
+they're read: backfilled with `[lowBColor(), default[0..3]]` (index-based,
+reproducing their exact prior rendering — *not* a note-based lookup, so a
+profile like AEADG whose index 0 isn't literally B keeps rendering
+pixel-identical) and persisted without emitting a change event (mirrors the
+existing `hwTheme` backward-compat backfill pattern).
+
+**`screen.js` runtime:** `resolveStringCount(targetStringCount)` (the
+PATCH POINT from Phase 4) now returns the active tuning's own string count
+instead of a hardcoded 5 — the ONLY change needed on the rendering side,
+because the copied `highway_3d` pipeline (materials, string meshes, fret
+lanes, `nStr` reassignment + `_resetStringDependentCaches()` on a string-
+count change) is **already** variable-string-count-capable up to
+`MAX_RENDER_STRINGS`: that machinery exists to handle real 4-8 string
+guitar/bass arrangements, and this plugin had simply never fed it anything
+but a fixed 5 before now. `_bgLoadSettings` resolves `{ strings, colors }`
+via the renamed `_fseResolveActiveTuning()` and branches exactly once on
+"is this the built-in tuning" to build `activePalette` (built-in: today's
+exact 5-wide `[lowB, default[0..3]]`; custom: `colors.map(_h3dHexToInt)`,
+N-wide). `_recolorGemGradients`'s `isCustom` gate — previously "is the
+*global palette selector* set to custom" — now also fires whenever a
+custom *tuning* is active (new `_fseCustomTuningActive` panel flag), since
+a custom tuning's colors can land anywhere (extension slots, a picker
+override, a shorter/reordered tuning like 4-string EADG) and can't be
+assumed to line up positionally with `DEFAULT_GEM_GRADIENTS` the way the
+fixed built-in BEADG shape did; the existing `base !== PALETTES.default[s
+- 1]` content check (unchanged) still only derives a custom gradient for
+slots that actually differ from the stock color.
+
+**New bridge functions:** `window.fse3dDefaultStringFor(direction,
+edgeNoteSpec)` (wraps `FSE.defaultExtensionNote` + the color table) and
+`window.fse3dResolveDisplayColor(strings, colors, index)` (resolves one
+string's display color, `null`/missing colors falling back to the same
+index-based built-in mapping) — both pure, stateless, called by
+settings.html's editor.
+
+**`settings.html`:** the fixed `grid-cols-5` 5-field block is replaced by a
+dynamic vertical list of string rows (position label, note input, `<input
+type="color">` swatch), built/re-rendered from local JS state (`rows`) on
+every add/remove rather than static markup. "+ Add string below (low)" /
+"+ Add string above (high)" buttons prepend/append a row (disabled at the
+8-string ceiling); a "Remove" button appears only on the current top/bottom
+row (disabled at the 4-string floor). A brand-new "Add a tuning" session
+seeds from BEADG's 5 defaults (via `window.fse3dResolveDisplayColor`, so
+swatches show real resolved colors, not placeholders); editing an existing
+profile seeds straight from its own stored `strings`/`colors`. Local
+`MIN_STRINGS`/`MAX_STRINGS` (4/8) and a full local reimplementation of
+`defaultExtensionNote`'s note math + the color table mirror the
+authoritative `src/fse-retune.js`/`screen.js` logic for the narrow pre-load
+window before `window.fse3d*` registers (same established pattern as the
+existing `NOTE_RE` mirror) — only used for the very first suggested
+default in that race window, never for anything persisted.
+
+**Verify:** `node test/retune-engine.test.mjs` (1053 assertions — the
+existing suite plus new cases for `defaultExtensionNote`/
+`midiToNoteLabel`, an explicit unplayable-low-note-drop regression test
+against a reduced 4-string EADG target — both a direct
+`resolveTargetForFret`/`remapNote` call and end-to-end through
+`createRetuner`, mirroring the exact scenario described in the request —
+variable-length target round-trips (4-string and 6-string), and
+`remapChordTemplate` sizing at non-5 target lengths), `node --check
+screen.js`, `node --check src/fse-retune.js`, and `bash build-tailwind.sh`
+to pick up the new settings.html markup's Tailwind classes (the row list,
+color swatches, and disabled-button states).
+
+**Bumped this plugin's own `version`** from `0.1.4` to **`0.1.5`**
+(`plugin.json`).
+
+**Follow-up extraction (same day):** the first pass above put a fair amount
+of genuinely new logic directly in `screen.js` (a fixed note→color lookup
+table, tuning-profile validation, the legacy-colors migration/backfill) —
+exactly the kind of thing Phase 9 established should live in
+`src/fse-retune.js` instead, to keep `screen.js`'s own diff against
+upstream `highway_3d/screen.js` as small/mechanical as possible. Moved out
+everything that doesn't need `PALETTES`/Three.js:
+- `colorRoleForNote(midi)` — the note→color lookup, but returning a
+  *symbolic role string* (`'lowB'`/`'e'`/`'a'`/`'d'`/`'g'`/`'highB'`/
+  `'highE'`/`'lowExt1'`/`'lowExt2'`/`'gray'`) rather than an actual color,
+  since the real palette (`PALETTES.default`, `FSE.lowBColor()`'s live
+  lookup) is `screen.js`/Three.js-owned data the module has no business
+  embedding. `screen.js` keeps a small `_fseColorForRole(role)` switch
+  (the only piece that still has to live there) mapping each role to its
+  current actual color.
+- `BEADG_COLOR_ROLES` — the same idea, but INDEX-based (not note-based),
+  for the 5 BEADG core positions specifically: colors there are pinned to
+  string POSITION, not note identity, by longstanding design (an AEADG
+  tuning's position 0 isn't literally B, but still gets the "low string"
+  role) — this is why it's a separate table from `colorRoleForNote` rather
+  than the same lookup applied per-position.
+- `isValidTuningStringsArray(strings)` — the bounds (4-8) + per-note
+  `parseTargetNote` check, previously duplicated (with a latent
+  opportunity to drift) between the storage-read filter and
+  `fse3dSaveCustomTuning`'s validation; both now call the one function.
+- `resolveColorsArray(colorsIn, length, defaults)` — collapses what were
+  three near-identical hand-rolled loops (missing colors entirely, wrong
+  length, individually-invalid entries) into one: any input shape that
+  isn't a valid hex at a given index falls back to `defaults[i]`, so
+  "migrate a legacy profile with no colors at all" and "patch one bad
+  entry in an otherwise-fine array" are the same code path.
+- `intToHex`/`LIGHT_GRAY_COLOR` — trivial, but genuinely pure (no
+  `screen.js` dependency), so they moved alongside the above rather than
+  staying as one-off duplicates.
+
+Net effect in `screen.js`: `_fseDefaultColorForNote`'s 10-case switch
+collapsed into a single `_fseColorForRole` switch (still ~10 cases, but now
+just role→color, reused by every caller instead of baking note→color
+directly into each one); the three colors-validation loops in
+`_fseReadCustomTunings`/`fse3dSaveCustomTuning` collapsed to one
+`FSE.resolveColorsArray` call each. Nothing touching `activePalette`
+itself, `_bgLoadSettings`'s `isBuiltinTuning` branch, or
+`_recolorGemGradients`'s `_fseCustomTuningActive` gate moved — those
+mutate Three.js materials / per-panel closure state directly, the same
+category Phase 9 already established stays in `screen.js`.
+
+**Verify:** `node test/retune-engine.test.mjs` (1081 assertions — adds
+direct coverage for `colorRoleForNote`/`BEADG_COLOR_ROLES`/
+`isValidTuningStringsArray`/`resolveColorsArray`/`intToHex`, previously
+only reachable indirectly through a browser-only `window.fse3d*` call),
+`node --check screen.js`, `node --check src/fse-retune.js`. No
+`settings.html` changes in this pass, so no `build-tailwind.sh` re-run
+needed.
+
+**Second follow-up (same day): split `src/fse-retune.js` into four
+modules.** By the end of the two passes above, the single file had grown
+to ~650 lines mixing several genuinely distinct concerns (note-name
+parsing, tuning-spec resolution, chart-remap math, per-string color
+handling) — user feedback: "fse-retune.js is starting to grow large, and
+has a bunch of different types of logic in it." Split along those exact
+lines, one file per concern, each small and independently readable:
+
+- **`src/pitch.js`** — note-name ⇄ MIDI conversion (`parseTargetNote`,
+  `midiToNoteLabel`). Zero internal dependencies.
+- **`src/target-tuning.js`** — what a target tuning IS and how to
+  resolve/default one (`resolveTargetTuning`, `defaultExtensionNote`,
+  `isValidTuningStringsArray`, `computeArrangementShift`, the
+  `DEFAULT_TARGET_TUNING`/`EXTENDED_*`/`MIN`/`MAX_TARGET_STRING_COUNT`
+  constants). Depends on `pitch.js`.
+- **`src/retune-engine.js`** — the chart-remap MATH itself (`remapNote`,
+  `remapSlide`, `resolveChordCollisions`, `remapAnchors`,
+  `remapChordTemplate(s)`, `createRetuner`). Depends on
+  `target-tuning.js` for the BEADG default target and the fret ceiling.
+- **`src/string-colors.js`** — per-string color role + hex handling
+  (`colorRoleForNote`, `BEADG_COLOR_ROLES`, `lowBColor`, `intToHex`,
+  `resolveColorsArray`). Depends on `pitch.js` and `target-tuning.js`.
+
+Dependency direction is one-way (`pitch` ← `target-tuning`/`string-colors`
+← `retune-engine`); nothing depends back on the barrel or on
+Three.js/screen.js's closure state. One small correctness improvement fell
+out of the split for free: `colorRoleForNote`'s note→role table was
+previously a second hardcoded switch duplicating the exact MIDI numbers
+`target-tuning.js`'s `EXTENDED_DEFAULT_TARGET_TUNING` already encodes (a
+latent two-places-to-update-in-lockstep risk); it's now built once at
+module load by parsing `EXTENDED_DEFAULT_TARGET_TUNING` itself, so the two
+literally cannot drift apart.
+
+`src/fse-retune.js` itself is now a ~35-line barrel: `import * as X from
+'./x.js'` from all four, spread into the same `export const FSE = {...}`
+shape as before. **Zero external API change** — `screen.js`'s `import {
+FSE } from './src/fse-retune.js'` and every existing `FSE.xxx` call site,
+plus `test/retune-engine.test.mjs`'s `import { FSE } from
+'../src/fse-retune.js'`, are byte-for-byte unchanged; only the internal
+file layout moved. `src/package.json`'s `{"type":"module"}` already scopes
+the whole `src/` directory, so the new files need no additional Node/ESM
+wiring.
+
+**Verify:** `node --check` on all five files in `src/`
+(`pitch.js`/`target-tuning.js`/`retune-engine.js`/`string-colors.js`/
+`fse-retune.js`), `node test/retune-engine.test.mjs` (1081 assertions,
+unchanged pass/fail behavior — same test cases, now exercised through the
+barrel's re-exports), and a direct check that
+`Object.keys(FSE)` is still the same 33 keys as before the split (no
+name collisions across the four modules, nothing accidentally dropped).
