@@ -14,7 +14,7 @@ whose name contains "bass".
 
 The target tuning — both which pitches and how many strings (4 to 8) — is
 fully configurable in the plugin's settings (Bass Tuning section), and can
-be switched at any times:
+be switched at any time:
 
 - **EADG (4-string)** — the built-in default, standard bass tuning. Its
   string colors track feedBack's shared "Highway String Colors" setting,

@@ -4315,14 +4315,14 @@ import { CR } from './src/chart-retune.js';
         // CR.DEFAULT_TARGET_TUNING, the engine's own fallback) — a
         // placeholder only, NOT necessarily the actual default preset
         // (EADG, 4-wide, no low string) a fresh install will end up
-        // rendering. It's inert either way: init() always calls
-        // _bgLoadSettings() — which re-derives activePalette from whatever
-        // tuning is actually active — before buildBoard()/the first frame,
-        // so this value is only ever read by that first _bgLoadSettings()
-        // call, never rendered as-is. A tuning that isn't live-tracked
-        // (variable 4-8 length, concrete per-string colors) replaces this
-        // with an N-length array the first time _bgLoadSettings resolves
-        // it — see isLiveTracked there.
+        // rendering. It's inert either way: init() primes
+        // _activeTargetTuning from the persisted/resolved active tuning
+        // before nStr is computed, and _bgLoadSettings() re-derives
+        // activePalette from that same active tuning before buildBoard()/
+        // the first frame. A tuning that isn't live-tracked (variable 4-8
+        // length, concrete per-string colors) replaces this with an
+        // N-length array the first time _bgLoadSettings resolves it — see
+        // isLiveTracked there.
         let activePalette = [CR.lowBColor(), PALETTES.default[0], PALETTES.default[1], PALETTES.default[2], PALETTES.default[3]];
         // Source palette (pre-remap, E/A/D/G only) activePalette was last
         // derived from — lets _bgLoadSettings skip re-deriving/re-tinting
@@ -4397,6 +4397,11 @@ import { CR } from './src/chart-retune.js';
         // joined, '#', then colors joined (empty for a live-tracked tuning,
         // whose colors always resolve live — see isLiveTracked there).
         let _crTuningSig = CR.DEFAULT_TARGET_TUNING.join('|') + '#';
+        function _primeActiveTargetTuningForInit() {
+            // Leave _crTuningSig stale so _bgLoadSettings still performs its
+            // first palette/tuning sync before buildBoard().
+            _activeTargetTuning = CR.resolveTargetTuning(_crResolveActiveTuning().strings);
+        }
         // Fret digits on the board ghost (hollow preview at Z=0), not on
         // flying note bodies — see fretNumberGhostScope for chord-hand vs all.
         let showFretOnNote = false;
@@ -15616,6 +15621,7 @@ import { CR } from './src/chart-retune.js';
                         return;
                     }
                     try {
+                        _primeActiveTargetTuningForInit();
                         nStr = resolveStringCount(_activeTargetTuning.midiTuning.length);
                         _invertedForBoard = _invertedCached;
                         _leftyForBoard = _leftyCached;
