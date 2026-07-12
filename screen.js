@@ -10,8 +10,8 @@
 // patched at a small set of PATCH POINTs to draw every note remapped onto a
 // bass target instead of the chart's own tuning. The target string COUNT
 // (4-8) and pitches are both user-configurable via the settings picker —
-// EADG (4-string) is the built-in default; BEADG (5-string), Cello (CGDA),
-// AEADG, BbEbAbDbGb, or any other 4-8-string tuning also work — see
+// EADG is the built-in default; other built-in presets, or any 4-8-string
+// tuning of your own (AEADG, BbEbAbDbGb, ...), also work — see
 // CR.resolveTargetTuning. All of that new logic lives in
 // ./src/chart-retune.js (imported as the `CR` namespace below) rather than
 // inline here, so this file stays as close as possible to upstream
@@ -2901,12 +2901,12 @@ import { CR } from './src/chart-retune.js';
     }
 
     // Target-tuning profiles (feedback: some bassists tune AEADG or
-    // BbEbAbDbGb rather than EADG/BEADG, and/or run more/fewer than 4-5
-    // strings). The built-in presets (CR.BUILTIN_PRESET_TUNINGS — EADG,
-    // BEADG, Cello) resolve first; BEADG's own colors are always resolved
-    // live off CR.lowBColor()/PALETTES.default (unchanged from before this
-    // string-count feature), every other preset (including EADG) carries
-    // concrete colors like a custom profile does. Then any number of
+    // BbEbAbDbGb, and/or run more/fewer strings than a live-tracked
+    // built-in offers). The built-in presets (CR.BUILTIN_PRESET_TUNINGS)
+    // resolve first; a live-tracked one's colors always resolve live off
+    // CR.lowBColor()/PALETTES.default (unchanged from before this
+    // string-count feature), every other preset carries concrete colors
+    // like a custom profile does. Then any number of
     // user-saved profiles in the 'customTunings' global JSON blob: [{ id,
     // name, strings: string[4..8],
     // colors: string[4..8] }] — colors is always fully populated with
