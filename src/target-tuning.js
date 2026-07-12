@@ -28,18 +28,31 @@ export const EXTENDED_CORE_INDEX = 2;
 
 // Built-in tuning presets — selectable in the Active tuning dropdown,
 // never user-editable/deletable (no entry in the "Saved custom tunings"
-// list). BEADG (id 'beadg') is always first and is the default; `colors:
-// null` on that one entry is the sentinel resolveActiveTuning/screen.js's
-// _bgLoadSettings read to mean "live-track the global palette" (CR.
-// lowBColor() + PALETTES.default) rather than a fixed set — the only preset
-// this applies to, since that live 5-wide E/A/D/G+lowB mapping is specific
-// to BEADG's own shape. Every other preset carries concrete hand-picked
-// colors and flows through the same resolution path a user-saved custom
-// tuning does.
+// list). There can be any number of these; DEFAULT_TUNING_ID (below) names
+// which ONE is the default rather than that being implied by "built-in" or
+// by array position. EADG (id 'eadg', standard 4-string bass) is the
+// default today. `colors: null` on both EADG and BEADG is the sentinel
+// resolveActiveTuning/screen.js's _bgLoadSettings read to mean "live-track
+// the global palette" (CR.lowBColor() + PALETTES.default) rather than a
+// fixed set — both share it because EADG's strings are literally BEADG's
+// own E/A/D/G strings minus the low B, so the same live E/A/D/G mapping
+// (plus lowB when present) applies to both; screen.js derives each preset's
+// activePalette per-string by note identity (CR.colorRoleForNote), not by a
+// hardcoded position table, so this generalizes to either shape. Every
+// other preset carries concrete hand-picked colors and flows through the
+// same resolution path a user-saved custom tuning does.
 export const BUILTIN_PRESET_TUNINGS = [
     {
+        id: 'eadg',
+        label: 'EADG (default)',
+        // Standard 4-string bass — DEFAULT_TARGET_TUNING's own E/A/D/G
+        // strings, without the low B.
+        strings: DEFAULT_TARGET_TUNING.slice(1),
+        colors: null,
+    },
+    {
         id: 'beadg',
-        label: 'BEADG (default)',
+        label: 'BEADG',
         strings: DEFAULT_TARGET_TUNING,
         colors: null,
     },
@@ -52,24 +65,28 @@ export const BUILTIN_PRESET_TUNINGS = [
 ];
 // The default preset's id — the single source of truth screen.js and
 // settings.html both point at, rather than each hardcoding their own
-// 'beadg' literal.
-export const BUILTIN_TUNING_ID = BUILTIN_PRESET_TUNINGS[0].id;
+// 'eadg' literal. Named for what it selects (the default), not "built-in"
+// — BUILTIN_PRESET_TUNINGS can hold more than one built-in preset, only
+// one of which is ever the default.
+export const DEFAULT_TUNING_ID = BUILTIN_PRESET_TUNINGS[0].id;
 
 // Resolves an active-tuning id to { strings, colors } against the built-in
-// presets first, then a caller-supplied custom-tuning list, falling back to
-// BEADG's own shape (colors: null) for anything unset/unknown/deleted — so
-// a stale id can never leave a caller without a usable tuning. Pure: the
-// caller owns reading `id`/`customTunings` from wherever they're persisted
-// (screen.js: global settings storage; settings.html: localStorage).
+// presets first (an unset id resolves to DEFAULT_TUNING_ID, i.e. EADG),
+// then a caller-supplied custom-tuning list, falling back to BEADG's own
+// shape (colors: null) only for an id that matches neither — an unknown or
+// deleted one — so a stale id can never leave a caller without a usable
+// tuning. Pure: the caller owns reading `id`/`customTunings` from wherever
+// they're persisted (screen.js: global settings storage; settings.html:
+// localStorage).
 export function resolveActiveTuning(id, customTunings) {
-    const targetId = id || BUILTIN_TUNING_ID;
+    const targetId = id || DEFAULT_TUNING_ID;
     const preset = BUILTIN_PRESET_TUNINGS.find(p => p.id === targetId);
     // .slice() on the built-in/fallback strings: preset.strings (BEADG's is
     // literally DEFAULT_TARGET_TUNING) and DEFAULT_TARGET_TUNING itself are
     // shared module constants — a caller mutating the returned array must
     // never corrupt them for every future resolution. found.strings (the
     // custom-tuning branch) is already a fresh per-read copy from the
-    // caller (see screen.js's _fseReadCustomTunings), so it's returned as-is.
+    // caller (see screen.js's _crReadCustomTunings), so it's returned as-is.
     if (preset) return { strings: preset.strings.slice(), colors: preset.colors };
     const found = Array.isArray(customTunings) ? customTunings.find(p => p.id === targetId) : null;
     return found ? { strings: found.strings, colors: found.colors } : { strings: DEFAULT_TARGET_TUNING.slice(), colors: null };
@@ -102,7 +119,11 @@ export function resolveTargetTuning(spec) {
     return { midiTuning, labels };
 }
 
-// Built-in BEADG default, used when a caller omits targetMidiTuning.
+// BEADG-shaped engine fallback, used when a caller omits targetMidiTuning
+// entirely — independent of the user's chosen default preset
+// (DEFAULT_TUNING_ID, which is EADG, not BEADG). No caller in this codebase
+// actually omits it (screen.js always threads the resolved active tuning
+// through), so this is a deep safety net, not what a fresh install renders.
 const DEFAULT_TARGET = resolveTargetTuning(DEFAULT_TARGET_TUNING);
 export const DEFAULT_TARGET_MIDI_TUNING = DEFAULT_TARGET.midiTuning;
 export const TARGET_OPEN_STRING_LABELS = DEFAULT_TARGET.labels;

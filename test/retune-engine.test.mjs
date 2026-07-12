@@ -18,7 +18,7 @@ const {
     BEADG_COLOR_ROLES,
     isValidTuningStringsArray,
     BUILTIN_PRESET_TUNINGS,
-    BUILTIN_TUNING_ID,
+    DEFAULT_TUNING_ID,
     resolveActiveTuning,
     resolveTargetTuning,
     computeOpenStringMidiByString,
@@ -308,7 +308,7 @@ const SPOT_FRETS = [0, 10, 20];
     check('parseTargetNote: rejects non-string', parseTargetNote(undefined), null);
 
     const beadg = resolveTargetTuning(DEFAULT_TARGET_TUNING);
-    check('resolveTargetTuning(BEADG) midi matches the built-in default', beadg.midiTuning, DEFAULT_TARGET_MIDI_TUNING);
+    check('resolveTargetTuning(BEADG) midi matches DEFAULT_TARGET_MIDI_TUNING (the engine\'s BEADG-shaped fallback)', beadg.midiTuning, DEFAULT_TARGET_MIDI_TUNING);
     check('resolveTargetTuning(BEADG) labels', beadg.labels, ['B', 'E', 'A', 'D', 'G']);
 
     const partial = resolveTargetTuning(['B0', 'garbage', 'A1', 'D2', 'G2']);
@@ -547,24 +547,29 @@ const SPOT_FRETS = [0, 10, 20];
     check('isValidTuningStringsArray: non-array input (string) is invalid', isValidTuningStringsArray('B0,E1,A1,D2,G2'), false);
 }
 
-// BUILTIN_PRESET_TUNINGS / BUILTIN_TUNING_ID / resolveActiveTuning: the
-// built-in-preset resolution path screen.js's _fseResolveActiveTuning
+// BUILTIN_PRESET_TUNINGS / DEFAULT_TUNING_ID / resolveActiveTuning: the
+// built-in-preset resolution path screen.js's _crResolveActiveTuning
 // delegates to wholesale.
 {
-    check('BUILTIN_TUNING_ID is BEADG, and BEADG is the first preset',
-        BUILTIN_TUNING_ID, 'beadg');
-    check('BEADG preset entry shares DEFAULT_TARGET_TUNING and has no concrete colors (live-tracked)',
+    check('DEFAULT_TUNING_ID is EADG, and EADG is the first preset',
+        DEFAULT_TUNING_ID, 'eadg');
+    check('EADG preset entry is DEFAULT_TARGET_TUNING minus the low B, live-tracked (colors: null) like BEADG',
         { strings: BUILTIN_PRESET_TUNINGS[0].strings, colors: BUILTIN_PRESET_TUNINGS[0].colors },
+        { strings: DEFAULT_TARGET_TUNING.slice(1), colors: null });
+    check('BEADG preset entry shares DEFAULT_TARGET_TUNING and has no concrete colors (live-tracked)',
+        { strings: BUILTIN_PRESET_TUNINGS[1].strings, colors: BUILTIN_PRESET_TUNINGS[1].colors },
         { strings: DEFAULT_TARGET_TUNING, colors: null });
-    check('every non-BEADG preset carries concrete, valid colors',
-        BUILTIN_PRESET_TUNINGS.slice(1).every(p => Array.isArray(p.colors) && p.colors.length === p.strings.length && isValidTuningStringsArray(p.strings)),
+    check('every preset other than EADG/BEADG carries concrete, valid colors',
+        BUILTIN_PRESET_TUNINGS.filter(p => p.id !== 'eadg' && p.id !== 'beadg').every(p => Array.isArray(p.colors) && p.colors.length === p.strings.length && isValidTuningStringsArray(p.strings)),
         true);
 
-    check('resolveActiveTuning: no id (fresh install) resolves to BEADG, live colors',
-        resolveActiveTuning(undefined, []), { strings: DEFAULT_TARGET_TUNING, colors: null });
-    check('resolveActiveTuning: explicit BEADG id resolves the same as no id',
+    check('resolveActiveTuning: no id (fresh install) resolves to EADG, live colors',
+        resolveActiveTuning(undefined, []), { strings: DEFAULT_TARGET_TUNING.slice(1), colors: null });
+    check('resolveActiveTuning: explicit EADG id resolves the same as no id',
+        resolveActiveTuning('eadg', []), { strings: DEFAULT_TARGET_TUNING.slice(1), colors: null });
+    check('resolveActiveTuning: explicit BEADG id resolves BEADG, live colors',
         resolveActiveTuning('beadg', []), { strings: DEFAULT_TARGET_TUNING, colors: null });
-    check('resolveActiveTuning: a non-BEADG preset id resolves its own strings + concrete colors',
+    check('resolveActiveTuning: a non-default preset id (Cello) resolves its own strings + concrete colors',
         resolveActiveTuning('cello_cgda', []),
         { strings: ['C2', 'G2', 'D3', 'A3'], colors: ['#cc00aa', '#f18313', '#3fc413', '#ecd234'] });
     check('resolveActiveTuning: a custom-tuning id resolves from the supplied list',

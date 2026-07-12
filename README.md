@@ -16,15 +16,21 @@ The target tuning — both which pitches and how many strings (4 to 8) — is
 fully configurable in the plugin's settings (Bass Tuning section), and can
 be switched live, no reload required:
 
-- **BEADG (5-string)** — the built-in default. Its string colors track
-  feedBack's shared "Highway String Colors" setting (plus a dedicated Low B
-  color), the same as `highway_3d`.
-- **Cello (CGDA, 4-string)** — a second built-in preset, selectable from
+- **EADG (4-string)** — the built-in default, standard bass tuning. Its
+  string colors track feedBack's shared "Highway String Colors" setting,
+  the same as `highway_3d`.
+- **BEADG (5-string)** — a second built-in preset, selectable from the
+  Active tuning dropdown but not the default. Same live-tracked colors as
+  EADG (plus a dedicated Low B color for the extra low string) — EADG's
+  strings are literally BEADG's own E/A/D/G minus the low B, so they share
+  the same live mapping.
+- **Cello (CGDA, 4-string)** — a third built-in preset, selectable from
   the Active tuning dropdown but not the default and not editable/deletable.
+  Fixed per-string colors, unlike EADG/BEADG.
 - **Your own saved profiles** — any note/octave per string (AEADG, a
-  half-step-flat BbEbAbDbGb, a 4-string EADG, a 6- or 7-string with extra
-  strings on top or bottom, anything else). Strings can only be added or
-  removed from the top or bottom, never the middle.
+  half-step-flat BbEbAbDbGb, a 6- or 7-string with extra strings on top or
+  bottom, anything else). Strings can only be added or removed from the top
+  or bottom, never the middle.
 
 Every saved tuning (built-in Cello preset or your own) carries its own
 fixed per-string colors, set via a per-string color picker when you create

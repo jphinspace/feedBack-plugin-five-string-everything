@@ -3,8 +3,8 @@
     <div class="fb-textDim text-sm">v0.2.0</div>
     <p class="fb-textDim text-xs mt-1">
         Controls below mirror 3D Highway's own settings — this plugin
-        renders its own independent bass highway (default tuning BEADG,
-        5 strings; string count and tuning both customizable below), so
+        renders its own independent bass highway (default tuning EADG,
+        4 strings; string count and tuning both customizable below), so
         these are separate from (not synced with) 3D Highway's copies of
         the same controls.
     </p>
@@ -15,11 +15,11 @@
     <p class="text-xs text-gray-500 mb-3">
         Every chart, in any source tuning, is remapped onto this target
         tuning — which pitches, and how many strings (4-8), are up to you.
-        BEADG (5-string) is the built-in default; Cello (CGDA) is a second
-        built-in preset (not the default, not editable/deletable — pick it
-        from Active tuning below). Add your own for AEADG, a half-step-flat
-        BbEbAbDbGb, a 4-string EADG, a 6-string with a high string on top,
-        or anything else. Strings can only be added or
+        EADG (4-string) is the built-in default; BEADG (5-string) and Cello
+        (CGDA) are additional built-in presets (not the default, not
+        editable/deletable — pick either from Active tuning below). Add your
+        own for AEADG, a half-step-flat BbEbAbDbGb, a 6-string with a high
+        string on top, or anything else. Strings can only be added or
         removed from the top or bottom, never the middle. A newly added
         string always starts at a fresh default note + color for its
         position — colors of the strings that stay put never change, and
@@ -60,7 +60,7 @@
 
         <p class="text-[10px] text-gray-500 mt-2">
             Pick each string's open note from the dropdown, low string
-            first — the five <span style="color:#f2c14e;font-weight:700">★ BEADG default</span>
+            first — the five <span style="color:#f2c14e;font-weight:700">★ BEADG</span>
             notes (<code>B0</code>, <code>E1</code>, <code>A1</code>,
             <code>D2</code>, <code>G2</code>) are marked in every list.
             Strings can repeat the same note + octave too (e.g. an
@@ -81,19 +81,25 @@
     <script>
     (function () {
         const $ = (id) => document.getElementById(id);
-        const BUILTIN_ID = 'beadg';
+        const DEFAULT_ID = 'eadg';
         const BEADG_STRINGS = ['B0', 'E1', 'A1', 'D2', 'G2'];
         // Mirrors CR.BUILTIN_PRESET_TUNINGS (src/target-tuning.js) — this
         // script isn't a module and can't import it (same reason every other
-        // local mirror in this file exists). BEADG is always first and is
-        // the default (colors: null — resolved live off the global palette
-        // by screen.js, same as before this list existed); every other
-        // preset is selectable in the Active tuning dropdown alongside it
-        // but is never the default and never editable/deletable, so unlike
-        // custom tunings these never appear in readCustom()/the "Saved
-        // custom tunings" list.
+        // local mirror in this file exists). There can be any number of
+        // built-in presets; DEFAULT_ID names which ONE is the default
+        // (EADG today) rather than that being implied by array position or
+        // "built-in" itself (BEADG and Cello are built-in too, just not
+        // the default).
+        // colors: null on EADG and BEADG is resolved live off the global
+        // palette by screen.js (window.cr3dResolveDisplayColor, note-based
+        // per string — see there) — EADG shares it with BEADG because its
+        // strings are literally BEADG's own E/A/D/G minus the low B. Every
+        // preset is selectable in the Active tuning dropdown but none are
+        // editable/deletable, so unlike custom tunings these never appear
+        // in readCustom()/the "Saved custom tunings" list.
         const BUILTIN_PRESETS = [
-            { id: BUILTIN_ID, label: 'BEADG (default)', strings: BEADG_STRINGS, colors: null },
+            { id: DEFAULT_ID, label: 'EADG (default)', strings: BEADG_STRINGS.slice(1), colors: null },
+            { id: 'beadg', label: 'BEADG', strings: BEADG_STRINGS, colors: null },
             { id: 'cello_cgda', label: 'Cello (CGDA)', strings: ['C2', 'G2', 'D3', 'A3'], colors: ['#cc00aa', '#f18313', '#3fc413', '#ecd234'] },
         ];
         // Mirrors CR.MIN_TARGET_STRING_COUNT / MAX_TARGET_STRING_COUNT
@@ -111,7 +117,7 @@
         const NOTE_OPTION_MAX_MIDI = 76;
 
         function readActiveId() {
-            try { return localStorage.getItem('chart_retuner_bg_targetTuningId') || BUILTIN_ID; } catch (_) { return BUILTIN_ID; }
+            try { return localStorage.getItem('chart_retuner_bg_targetTuningId') || DEFAULT_ID; } catch (_) { return DEFAULT_ID; }
         }
         function readCustom() {
             let raw = null;
@@ -179,25 +185,25 @@
             return window.cr3dResolveDisplayColor ? window.cr3dResolveDisplayColor(strings, colors, index) : localResolveDisplayColor(strings, colors, index);
         }
 
-        // Every BEADG-default note (B0/E1/A1/D2/G2), by MIDI — highlighted
-        // in each per-string dropdown regardless of that row's own position,
-        // so a familiar reference point is visible no matter which string
-        // you're setting.
+        // Every BEADG note (B0/E1/A1/D2/G2, which fully covers EADG's own
+        // E1/A1/D2/G2 too), by MIDI — highlighted in each per-string
+        // dropdown regardless of that row's own position, so a familiar
+        // reference point is visible no matter which string you're setting.
         const BEADG_DEFAULT_MIDIS = BEADG_STRINGS.map(localMidiFromNote);
 
         // Fills a per-string <select> with the fixed note range, marking the
-        // BEADG-default notes. Matches `currentSpec` by MIDI (not exact
+        // BEADG reference notes. Matches `currentSpec` by MIDI (not exact
         // spelling) so a flat-spelled legacy value (e.g. "Bb1") still lands
         // on its equivalent option (A#1) instead of resetting silently.
         function populateNoteOptions(selectEl, currentSpec) {
             selectEl.innerHTML = '';
             for (let midi = NOTE_OPTION_MIN_MIDI; midi <= NOTE_OPTION_MAX_MIDI; midi++) {
                 const label = localNoteFromMidi(midi);
-                const isDefault = BEADG_DEFAULT_MIDIS.includes(midi);
+                const isBeadgNote = BEADG_DEFAULT_MIDIS.includes(midi);
                 const opt = document.createElement('option');
                 opt.value = label;
-                opt.textContent = isDefault ? ('★ ' + label + ' (BEADG default)') : label;
-                if (isDefault) {
+                opt.textContent = isBeadgNote ? ('★ ' + label + ' (BEADG)') : label;
+                if (isBeadgNote) {
                     opt.style.fontWeight = '700';
                     opt.style.color = '#f2c14e';
                 }
@@ -252,7 +258,7 @@
             }
             // A stale/deleted id falls back to the built-in default rather
             // than leaving the dropdown on a nonexistent selection.
-            sel.value = (BUILTIN_PRESETS.some((p) => p.id === activeId) || custom.some((p) => p.id === activeId)) ? activeId : BUILTIN_ID;
+            sel.value = (BUILTIN_PRESETS.some((p) => p.id === activeId) || custom.some((p) => p.id === activeId)) ? activeId : DEFAULT_ID;
         }
 
         function renderManageList() {
@@ -355,11 +361,14 @@
             }
         }
 
-        function seedRowsFromBeadg() {
-            rows = BEADG_STRINGS.map((note, i) => ({ note, color: resolveDisplayColor(BEADG_STRINGS, null, i) }));
-        }
         function seedRowsFromProfile(profile) {
             rows = profile.strings.map((note, i) => ({ note, color: resolveDisplayColor(profile.strings, profile.colors, i) }));
+        }
+        // Seeds a brand-new "Add a tuning" form from the built-in default
+        // preset (BUILTIN_PRESETS[0] — EADG) rather than a hardcoded shape,
+        // so this automatically tracks whichever preset is default.
+        function seedRowsFromDefault() {
+            seedRowsFromProfile(BUILTIN_PRESETS[0]);
         }
 
         function startEdit(profile) {
@@ -375,7 +384,7 @@
         function resetForm() {
             editingId = null;
             if (nameInput) nameInput.value = '';
-            seedRowsFromBeadg();
+            seedRowsFromDefault();
             renderRows();
             if (formHeading) formHeading.textContent = 'Add a tuning';
             if (saveBtn) saveBtn.textContent = 'Save';
@@ -389,7 +398,7 @@
                 window.cr3dDeleteCustomTuning(profile.id);
             } else {
                 writeCustomFallback(readCustom().filter((p) => p.id !== profile.id));
-                if (readActiveId() === profile.id) writeActiveFallback(BUILTIN_ID);
+                if (readActiveId() === profile.id) writeActiveFallback(DEFAULT_ID);
             }
             if (editingId === profile.id) resetForm();
             renderActiveDropdown();
@@ -746,7 +755,7 @@
         <p class="text-xs text-gray-500 mb-3">
             The 3D neck shows a nut, headstock, and a pitch label per string
             (your active target tuning from the Bass Tuning section above —
-            B/E/A/D/G by default, one label per string in that tuning —
+            E/A/D/G by default, one label per string in that tuning —
             not the original chart's tuning). Turn pieces off or pick
             colors to match your taste.
         </p>
