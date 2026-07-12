@@ -1,35 +1,22 @@
-// Five-String Everything — chart remap math: turning a source chart's
-// notes/chords/anchors/chord-templates into positions on the active
-// target tuning. Pure, no dependency on Three.js or screen.js's closure
-// state. One of four modules the fse-retune.js barrel aggregates into the
-// `FSE` namespace — see that file for the full picture.
+// Five-String Everything — chart remap math: source notes/chords/anchors/
+// chord-templates -> positions on the active target tuning.
+// One of four modules fse-retune.js aggregates into `FSE`.
 //
-// String/fret offset arithmetic: one fret = one half-step. Adjacent BEADG
-// target strings happen to be a perfect fourth apart (5 half-steps), but
-// that's a fact about BEADG specifically, not an assumption baked into the
-// algorithm — every function below looks up each target string's own open
-// pitch from the target array (`target[j]`), so a custom target tuning with
-// irregular string-to-string intervals (not uniformly fourths, fifths, or
-// anything else) works with zero special-casing.
-//
-// Target-tuning RESOLUTION (what the target array actually contains) lives
-// in target-tuning.js, imported here for the built-in-default fallback and
-// the fret ceiling.
+// One fret = one half-step. Every function looks up each target string's
+// own open pitch from `target[j]`, so irregular (non-fourths) target
+// tunings work with no special-casing.
 
 import { TARGET_MAX_FRET, DEFAULT_TARGET_MIDI_TUNING, computeOpenStringMidiByString, computeArrangementShift } from './target-tuning.js';
 
-// Resolves one (sourceOpenMidi, fret) pair against the target: starts from
-// the arrangement's natural target string and steps toward whichever
-// direction the out-of-range fret demands (fret < 0 -> lower string, fret
-// > 20 -> higher string). Returns { s, f, adjustment } or null if
+// Resolves one (sourceOpenMidi, fret) against the target: starts from the
+// natural target string and steps toward whichever direction the
+// out-of-range fret demands. Returns { s, f, adjustment } or null if
 // unplayable on every reachable string.
 //
-// Anchoring on the natural string first keeps a big single-string drop
-// (e.g. Drop C#, -3 half-steps) on its own string for every fret it can
-// reach, falling back to the extra B string only where it must. An
-// earlier version compared |adjustment| across all 5 strings globally and
-// flipped to preferring B too early — correct for Drop D's -2 half-step
-// drop, wrong for Drop C#'s -3.
+// Anchors on the natural string first rather than a global smallest-
+// adjustment search across all strings — a global search misfires on a
+// large single-string drop (e.g. Drop C#, -3 half-steps), flipping to a
+// different string too early.
 export function resolveTargetForFret(sourceOpenMidi, naturalTargetString, fret, targetMidiTuning) {
     if (sourceOpenMidi === null || sourceOpenMidi === undefined) return null;
     const target = targetMidiTuning || DEFAULT_TARGET_MIDI_TUNING;
@@ -44,20 +31,15 @@ export function resolveTargetForFret(sourceOpenMidi, naturalTargetString, fret, 
     return null;
 }
 
-// Ordinary (non-sliding) note: { s, f } on the target, or null if dropped.
-// `targetMidiTuning` (optional) is the active target tuning's open-string
-// MIDI array; omit for the built-in BEADG default.
 export function remapNote(sourceOpenMidi, naturalTargetString, fret, targetMidiTuning) {
     const best = resolveTargetForFret(sourceOpenMidi, naturalTargetString, fret, targetMidiTuning);
     return best ? { s: best.s, f: best.f } : null;
 }
 
-// Sliding note (slide_to/slide_unpitch_to, same string). Both endpoints
-// must land on the SAME target string — independent per-fret remapping
-// can split them, so anchor on whichever endpoint is lower (most likely
-// in range), retrying on the higher endpoint if that fails. An
-// overflowing slide clamps to fret 20 instead of dropping (unlike an
-// ordinary out-of-range note).
+// Slide (slide_to/slide_unpitch_to): both endpoints must land on the same
+// target string, so anchor on whichever fret is lower, retry on the
+// higher one if that fails. Clamps to fret 20 on overflow instead of
+// dropping (unlike an ordinary note).
 export function remapSlide(sourceOpenMidi, naturalTargetString, fret, slideToFret, targetMidiTuning) {
     if (sourceOpenMidi === null || sourceOpenMidi === undefined) return null;
     const lowFret = Math.min(fret, slideToFret);
@@ -73,17 +55,11 @@ export function remapSlide(sourceOpenMidi, naturalTargetString, fret, slideToFre
     };
 }
 
-// Half-step rank for comparing two notes' pitch order (chord collision
-// resolution) — same MIDI arithmetic as above, summed once so "lower"/
-// "higher" comparisons are a plain integer compare.
 export function noteHalfstepRank(sourceOpenMidi, fret) {
     return sourceOpenMidi + fret;
 }
 
-// Single entry point for both a standalone note and a chord note:
-// dispatches to remapSlide when the note carries a slide (sl/slu default
-// to -1 = "no slide"), otherwise remapNote. Returns { s, f } plus, only
-// when present on the input, a remapped `sl` or `slu`.
+// Dispatches to remapSlide when the note carries sl/slu, else remapNote.
 export function remapNoteEntry(sourceOpenMidi, naturalTargetString, note, targetMidiTuning) {
     const hasSl = Number.isInteger(note.sl) && note.sl >= 0;
     const hasSlu = !hasSl && Number.isInteger(note.slu) && note.slu >= 0;
@@ -98,13 +74,8 @@ export function remapNoteEntry(sourceOpenMidi, naturalTargetString, note, target
     return remapNote(sourceOpenMidi, naturalTargetString, note.f, targetMidiTuning);
 }
 
-// Remaps every note independently, groups survivors by target string, and
-// for any target string with more than one note keeps only the
-// lower-pitched original — per colliding string, not the whole chord.
-// `notes` is an array of note-shaped objects (`s`/`f`, optionally `sl`/
-// `slu`). Returns { entry, note } per survivor, where `entry` is
-// remapNoteEntry's result and `note` is the original input (for field
-// passthrough and keying bundle.getNoteState).
+// Remaps every note, then keeps only the lower-pitched note per colliding
+// target string. Returns { entry, note } per survivor.
 export function resolveChordCollisions(sourceOpenMidiByString, naturalTargetByString, notes, targetMidiTuning) {
     const candidates = [];
     for (const note of notes) {
@@ -122,23 +93,10 @@ export function resolveChordCollisions(sourceOpenMidiByString, naturalTargetBySt
     return Array.from(bySlot.values()).map(c => ({ entry: c.entry, note: c.note }));
 }
 
-// Remaps the chart's `anchors` array (RS2014 hand-position markers —
-// { time, fret, width }) so the hand-position highlight band tracks the
-// remapped fretboard.
-//
-// An anchor has no string of its own, and different strings can carry
-// different adjustments (Drop C# gives every string a different one).
-// `getChartAnchorAt` (screen.js) treats an anchor as describing the hand
-// position for notes from its own time onward, so this borrows the
-// adjustment of the nearest already-remapped note at or after the
-// anchor's time (falling back to the note before it, or leaving the
-// anchor unchanged when there are no notes at all). Open-string notes are
-// excluded as donors — their adjustment can come from a different
-// fallback string and wouldn't represent nearby fretted notes.
-//
-// `remappedNotes` and `anchors` must both be time-sorted (chart
-// invariant); one shared forward-scanning pointer keeps this
-// O(anchors + notes).
+// Remaps hand-position anchors ({ time, fret, width }, no string of their
+// own) by borrowing the adjustment of the nearest already-remapped note
+// at/after the anchor's time. Open-string notes are skipped as donors.
+// Both arrays must be time-sorted.
 export function remapAnchors(anchors, remappedNotes) {
     if (!Array.isArray(anchors) || anchors.length === 0) return anchors || [];
     if (!Array.isArray(remappedNotes) || remappedNotes.length === 0) return anchors.slice();
@@ -156,18 +114,8 @@ export function remapAnchors(anchors, remappedNotes) {
     return out;
 }
 
-// Remaps one chord template's `frets`/`fingers` (indexed by ORIGINAL
-// string) into arrays indexed by TARGET string, so chord-ghost/finger-
-// diagram rendering and `chordNotesFromTemplate` (screen.js — synthesizes
-// chord-frame note gems from hand-shape spans) see the same positions as
-// the real note gems.
-//
-// A template's per-string entries are shaped like a chord's notes (one
-// fret per string, -1 = unused), so this reuses resolveChordCollisions
-// directly. Fingers relocate to their note's new index unchanged — the
-// remap can turn adjacent frets on adjacent strings into a wide stretch
-// across different strings, so this only keeps the original hint from
-// going stale-indexed rather than trying to recompute "correct" fingering.
+// Remaps a chord template's frets/fingers (indexed by original string)
+// into target-string indices, reusing resolveChordCollisions.
 export function remapChordTemplate(sourceOpenMidiByString, naturalTargetByString, template, targetMidiTuning) {
     if (!template || !Array.isArray(template.frets)) return template;
     const notes = [];
@@ -187,25 +135,15 @@ export function remapChordTemplate(sourceOpenMidiByString, naturalTargetByString
     return Object.assign({}, template, { frets, fingers });
 }
 
-// Remaps every template in `chordTemplates` (array indexed by chord_id,
-// untouched — only each entry's own frets/fingers change).
 export function remapChordTemplates(sourceOpenMidiByString, naturalTargetByString, templates, targetMidiTuning) {
     if (!Array.isArray(templates)) return templates || [];
     return templates.map(t => remapChordTemplate(sourceOpenMidiByString, naturalTargetByString, t, targetMidiTuning));
 }
 
-// PATCH POINT: remaps bundle.notes/.chords/.anchors/.chordTemplates to the
-// active target tuning IN PLACE, once per song/tuning-change (cached), so
-// every downstream reader in screen.js sees the remapped chart
-// automatically. Safe to mutate: `bundle` is this createHighway()
-// instance's own object.
-//
-// Returns a fresh { apply(bundle, targetMidiTuning) } per call so each
-// createFactory() instance (one per splitscreen panel) gets its own cache,
-// keeping different songs in different panels from cross-contaminating.
-// `targetMidiTuning` (optional, passed to apply()) is the active target
-// tuning's open-string MIDI array (any length >= 1) — omit for the
-// built-in 5-string BEADG default.
+// Remaps bundle.notes/.chords/.anchors/.chordTemplates to the active
+// target tuning in place, cached per song/tuning. Returns a fresh
+// { apply(bundle, targetMidiTuning) } per call so each splitscreen panel
+// gets its own cache.
 export function createRetuner() {
     let cacheNotesRef = null, cacheChordsRef = null, cacheAnchorsRef = null, cacheTemplatesRef = null;
     let cacheTuningRef = null, cacheCapo = null, cacheStringCount = null, cacheTargetSig = null;
@@ -234,16 +172,12 @@ export function createRetuner() {
             cacheTargetSig = targetSig;
 
             if (!Number.isFinite(sc) || sc < 1 || !Array.isArray(tuning)) {
-                // Fail safe (shouldn't happen once draw() is gated by
-                // core's ready flag) — pass the chart through unremapped.
+                // Fail-safe: pass the chart through unremapped.
                 remappedNotes = Array.isArray(rawNotes) ? rawNotes : [];
                 remappedChords = Array.isArray(rawChords) ? rawChords : [];
                 remappedAnchors = Array.isArray(rawAnchors) ? rawAnchors : [];
                 remappedTemplates = Array.isArray(rawTemplates) ? rawTemplates : [];
             } else {
-                // Arrangement-wide natural string shift, computed once per
-                // song — see computeArrangementShift for the Drop C# bug
-                // a per-note global search caused.
                 const sourceOpenMidiByString = computeOpenStringMidiByString(sc, tuning, capo);
                 const shiftK = computeArrangementShift(sc, tuning, capo, sourceOpenMidiByString, target);
                 const naturalTargetByString = [];
@@ -251,13 +185,10 @@ export function createRetuner() {
                     naturalTargetByString.push(s + shiftK);
                 }
 
-                // A bass "double stop" is often two independent Note
-                // entries sharing an onset time rather than a Chord object
-                // (arr.notes and arr.chords are separate lists in
-                // lib/song.py). Group by exact onset time and run every
-                // group, including ordinary singletons, through the same
-                // collision resolution as real chords, so two flat notes
-                // sharing a target string still collide correctly.
+                // Group by onset time first (a bass double-stop is often two
+                // flat Notes sharing a time rather than a Chord object), so
+                // simultaneous notes on different source strings still
+                // collide-resolve correctly.
                 const newNotes = [];
                 if (Array.isArray(rawNotes)) {
                     const byTime = new Map();
@@ -270,20 +201,17 @@ export function createRetuner() {
                         const survivors = resolveChordCollisions(sourceOpenMidiByString, naturalTargetByString, bucket, target);
                         for (const { entry, note } of survivors) {
                             const copy = Object.assign({}, note, entry);
-                            copy._origNote = note; // keyed against by the note-state provider
+                            copy._origNote = note; // keyed by the note-state provider
                             newNotes.push(copy);
                         }
                     }
-                    // byTime iteration order already matches rawNotes' time
-                    // order, but sort explicitly since downstream consumers
-                    // assume bundle.notes is time-sorted.
                     newNotes.sort((a, b) => a.t - b.t);
                 }
                 const newChords = [];
                 if (Array.isArray(rawChords)) {
                     for (const ch of rawChords) {
                         const survivors = resolveChordCollisions(sourceOpenMidiByString, naturalTargetByString, ch.notes || [], target);
-                        if (survivors.length === 0) continue; // every note collided/unplayable
+                        if (survivors.length === 0) continue;
                         const notesCopy = survivors.map(({ entry, note }) => {
                             const c = Object.assign({}, note, entry);
                             c._origNote = note;
