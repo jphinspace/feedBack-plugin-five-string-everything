@@ -819,12 +819,18 @@ import { FSE } from './src/fse-retune.js';
     // for older feedBack cores that don't emit the field. Clamp to the
     // palette size so a malformed bundle or a 12-string chart doesn't
     // index past the per-string material arrays.
-    // PATCH POINT (five-string retune): always 5 strings — the target
-    // string COUNT is fixed, never the chart's own string count. Which
-    // pitches those 5 strings are tuned to is separately configurable
-    // (see _activeTargetTuning) and has no bearing on the count.
-    function resolveStringCount(bundle) {
-        return FSE.TARGET_STRING_COUNT;
+    // PATCH POINT (five-string retune): the ACTIVE TARGET TUNING's own
+    // string count (4-8, user-configurable via the Bass Tuning settings
+    // editor — see _activeTargetTuning) — never the chart's own string
+    // count. `targetStringCount` is the caller's
+    // `_activeTargetTuning.midiTuning.length` (per-panel state; this
+    // module-level function can't close over it, so callers thread it
+    // through) — falls back to the built-in 5-string BEADG default's
+    // length if not a usable positive number.
+    function resolveStringCount(targetStringCount) {
+        return (Number.isFinite(targetStringCount) && targetStringCount >= 1)
+            ? targetStringCount
+            : FSE.DEFAULT_TARGET_MIDI_TUNING.length;
     }
 
     /**
@@ -836,9 +842,11 @@ import { FSE } from './src/fse-retune.js';
     // bassists) rather than the chart's own tuning or a hardcoded BEADG
     // array. `labels` is this panel's `_activeTargetTuning.labels`, passed
     // in by the caller (a module-level function can't close over per-panel
-    // state).
+    // state) — its own length already IS the active tuning's string count,
+    // so the fallback below reads it directly rather than needing a second
+    // threaded-through parameter.
     function _openStringPitchLabelsForTuning(bundle, songInfo, nEffective, labels) {
-        const n = Number.isFinite(nEffective) ? Math.min(Math.max(1, Math.trunc(nEffective)), MAX_RENDER_STRINGS) : resolveStringCount(bundle);
+        const n = Number.isFinite(nEffective) ? Math.min(Math.max(1, Math.trunc(nEffective)), MAX_RENDER_STRINGS) : Math.min(labels.length, MAX_RENDER_STRINGS);
         return labels.slice(0, n);
     }
 
@@ -2851,49 +2859,118 @@ import { FSE } from './src/fse-retune.js';
     window.fse3dBgSetSlideArrowNeckVisible     = (v) => _bgWriteGlobal('slideArrowNeckVisible', !!v);
     window.fse3dBgSetSlideArrowChainPreviewVisible = (v) => _bgWriteGlobal('slideArrowChainPreviewVisible', !!v);
 
-    // Target-tuning profiles (feedback: some 5-string bassists tune AEADG or
-    // BbEbAbDbGb rather than BEADG). One built-in profile (FSE_BUILTIN_TUNING_ID
-    // = 'beadg', notes from FSE.DEFAULT_TARGET_TUNING) plus any number of
-    // user-saved profiles in the 'customTunings' global JSON blob:
-    // [{ id, name, strings: string[5] }]. Global-only (see _bgReadSetting) —
-    // every panel remaps onto the same real instrument.
+    // Maps FSE.colorRoleForNote/FSE.BEADG_COLOR_ROLES's symbolic role
+    // strings to this panel's actual current color — the one piece of the
+    // default-color system that has to live here rather than in
+    // src/fse-retune.js, since it's the only part that touches
+    // PALETTES.default/FSE.lowBColor() (screen.js/Three.js-owned data the
+    // module deliberately stays free of). Everything else — which role a
+    // given note or BEADG-core position gets — is pure logic living in
+    // the module.
+    function _fseColorForRole(role) {
+        switch (role) {
+            case 'lowB': return FSE.lowBColor();     // B0 — the built-in low string
+            case 'e': return PALETTES.default[0];    // E1
+            case 'a': return PALETTES.default[1];    // A1
+            case 'd': return PALETTES.default[2];    // D2
+            case 'g': return PALETTES.default[3];    // G2
+            case 'highB': return PALETTES.default[4]; // B2 — guitar's own B slot
+            case 'highE': return PALETTES.default[5]; // E3 — guitar's own high-E slot
+            case 'lowExt1': return PALETTES.default[6]; // F#0 — supplementary low-ext slot
+            case 'lowExt2': return PALETTES.default[7]; // C#0 — supplementary low-ext slot
+            default: return FSE.LIGHT_GRAY_COLOR;
+        }
+    }
+    // The 5 BEADG-core default colors, as hex strings, in position order —
+    // used both to backfill a pre-existing 5-string custom profile's
+    // missing `colors` and to seed a brand-new tuning editor session.
+    function _fseBeadgDefaultColors() {
+        return FSE.BEADG_COLOR_ROLES.map(role => FSE.intToHex(_fseColorForRole(role)));
+    }
+
+    // Target-tuning profiles (feedback: some bassists tune AEADG or
+    // BbEbAbDbGb rather than BEADG, and/or run more/fewer than 5 strings).
+    // One built-in profile (FSE_BUILTIN_TUNING_ID = 'beadg', notes from
+    // FSE.DEFAULT_TARGET_TUNING, colors always resolved live off
+    // FSE.lowBColor()/PALETTES.default — unchanged from before this string-
+    // count feature) plus any number of user-saved profiles in the
+    // 'customTunings' global JSON blob: [{ id, name, strings: string[4..8],
+    // colors: string[4..8] }] — colors is always fully populated with
+    // concrete hex, never a "track the live palette" sentinel (see
+    // window.fse3dDefaultStringFor: a newly added string's color is a
+    // one-time snapshot, not a live reference). Global-only (see
+    // _bgReadSetting) — every panel remaps onto the same real instrument.
     function _fseReadCustomTunings() {
         const raw = _bgReadSetting(null, 'customTunings');
         let list;
         try { list = JSON.parse(raw || '[]'); } catch (_) { list = []; }
-        return Array.isArray(list)
-            ? list.filter(p => p && typeof p.id === 'string' && typeof p.name === 'string'
-                && Array.isArray(p.strings) && p.strings.length === FSE.TARGET_STRING_COUNT)
-            : [];
+        if (!Array.isArray(list)) return [];
+        let migrated = false;
+        const out = [];
+        for (const p of list) {
+            if (!p || typeof p.id !== 'string' || typeof p.name !== 'string' || !FSE.isValidTuningStringsArray(p.strings)) continue;
+            // Backfill target for a profile saved before per-string colors
+            // existed (always exactly 5-string, no `colors` field at all):
+            // reproduces TODAY's exact rendering (BEADG_COLOR_ROLES —
+            // index-based, not a note-based lookup — see its doc comment
+            // in src/fse-retune.js) so an existing custom tuning whose
+            // index 0 ISN'T literally B (e.g. AEADG) keeps rendering
+            // pixel-identical after the upgrade. A malformed/impossible
+            // longer profile with no colors (shouldn't happen — only
+            // 5-length profiles predate colors) degrades to light gray.
+            const defaults = p.strings.length === 5
+                ? _fseBeadgDefaultColors()
+                : p.strings.map(() => FSE.intToHex(FSE.LIGHT_GRAY_COLOR));
+            const colors = FSE.resolveColorsArray(p.colors, p.strings.length, defaults);
+            if (!Array.isArray(p.colors) || p.colors.length !== colors.length || p.colors.some((c, i) => c !== colors[i])) {
+                migrated = true;
+            }
+            out.push({ id: p.id, name: p.name, strings: p.strings.slice(), colors });
+        }
+        if (migrated) {
+            // Written without _bgWriteGlobal/_bgEmitChange so this lazy
+            // backfill can't re-enter the change listener mid-read (mirrors
+            // the hwTheme backward-compat backfill in _bgLoadSettings).
+            const json = JSON.stringify(out);
+            _bgMemFallback.customTunings = json;
+            try { localStorage.setItem('fse_bg_customTunings', json); } catch (_) { /* storage blocked */ }
+        }
+        return out;
     }
     function _fseWriteCustomTunings(list) {
         _bgWriteGlobal('customTunings', JSON.stringify(list));
     }
-    // Resolves the currently-active tuning to a 5-entry note-spec array
-    // (FSE.resolveTargetTuning's input shape) — the built-in default when
-    // unset/unknown/deleted, so a stale targetTuningId can never leave the
-    // renderer without a usable tuning.
-    function _fseResolveActiveTuningStrings() {
+    // Resolves the currently-active tuning to { strings, colors } — the
+    // built-in default (colors: null, meaning "always resolve live", see
+    // activePalette construction below) when unset/unknown/deleted, so a
+    // stale targetTuningId can never leave the renderer without a usable
+    // tuning.
+    function _fseResolveActiveTuning() {
         const id = _bgReadSetting(null, 'targetTuningId');
-        if (!id || id === FSE_BUILTIN_TUNING_ID) return FSE.DEFAULT_TARGET_TUNING;
+        if (!id || id === FSE_BUILTIN_TUNING_ID) return { strings: FSE.DEFAULT_TARGET_TUNING, colors: null };
         const found = _fseReadCustomTunings().find(p => p.id === id);
-        return found ? found.strings : FSE.DEFAULT_TARGET_TUNING;
+        return found ? { strings: found.strings, colors: found.colors } : { strings: FSE.DEFAULT_TARGET_TUNING, colors: null };
     }
     window.fse3dSetActiveTuning = (id) => _bgWriteGlobal('targetTuningId', String(id || FSE_BUILTIN_TUNING_ID));
     window.fse3dListCustomTunings = () => _fseReadCustomTunings();
     // Upserts a custom tuning profile by id (generates one for a new
-    // profile). Validates every string via FSE.parseTargetNote so a
-    // malformed entry never reaches localStorage/the renderer. Returns the
-    // saved profile's id, or null if the input didn't validate.
+    // profile). Validates strings via FSE.isValidTuningStringsArray and
+    // resolves colors via FSE.resolveColorsArray (light gray substituted
+    // for anything missing/invalid — the editor is responsible for
+    // meaningful defaults via fse3dDefaultStringFor, this is just a safety
+    // net) so a malformed entry never reaches localStorage/the renderer.
+    // Returns the saved profile's id, or null if the input didn't validate.
     window.fse3dSaveCustomTuning = (profile) => {
         if (!profile || typeof profile.name !== 'string' || !profile.name.trim()) return null;
-        if (!Array.isArray(profile.strings) || profile.strings.length !== FSE.TARGET_STRING_COUNT) return null;
-        for (const s of profile.strings) { if (!FSE.parseTargetNote(s)) return null; }
+        if (!FSE.isValidTuningStringsArray(profile.strings)) return null;
+        const n = profile.strings.length;
+        const grayDefaults = profile.strings.map(() => FSE.intToHex(FSE.LIGHT_GRAY_COLOR));
+        const colors = FSE.resolveColorsArray(profile.colors, n, grayDefaults);
         const list = _fseReadCustomTunings();
         const id = (typeof profile.id === 'string' && profile.id)
             ? profile.id
             : 'custom_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-        const entry = { id, name: profile.name.trim(), strings: profile.strings.slice(0, FSE.TARGET_STRING_COUNT) };
+        const entry = { id, name: profile.name.trim(), strings: profile.strings.slice(0, n), colors };
         const idx = list.findIndex(p => p.id === id);
         if (idx >= 0) list[idx] = entry; else list.push(entry);
         _fseWriteCustomTunings(list);
@@ -2905,6 +2982,34 @@ import { FSE } from './src/fse-retune.js';
         // — otherwise the renderer would keep the old tuning alive purely
         // via the (now-orphaned) targetTuningId pointer.
         if (_bgReadSetting(null, 'targetTuningId') === id) window.fse3dSetActiveTuning(FSE_BUILTIN_TUNING_ID);
+    };
+    // Bridge for settings.html's Bass Tuning editor "+ Add string above/
+    // below" buttons — pure, stateless (see FSE.defaultExtensionNote's own
+    // doc comment): given the direction and the CURRENT edge row's note
+    // spec, returns the new row's default { note, color }.
+    window.fse3dDefaultStringFor = (direction, edgeNoteSpec) => {
+        const dir = direction === 'low' ? 'low' : 'high';
+        const parsed = FSE.parseTargetNote(edgeNoteSpec);
+        const edgeMidi = parsed ? parsed.midi
+            : FSE.DEFAULT_TARGET_MIDI_TUNING[dir === 'low' ? 0 : FSE.DEFAULT_TARGET_MIDI_TUNING.length - 1];
+        const next = FSE.defaultExtensionNote(dir, edgeMidi);
+        const role = FSE.colorRoleForNote(next.midi);
+        return { note: next.label, color: FSE.intToHex(_fseColorForRole(role)) };
+    };
+    // Resolves ONE string's display color for settings.html's editor —
+    // `colors` may be null (built-in tuning, always-live) or a profile's
+    // own array; `strings`/`colors` share an index. Used to prefill color
+    // swatches (including the built-in BEADG seed for a brand-new custom
+    // tuning) without duplicating the palette-slot mapping client-side.
+    window.fse3dResolveDisplayColor = (strings, colors, index) => {
+        if (Array.isArray(colors) && colors[index] != null && _h3dHexToInt(colors[index]) != null) return colors[index];
+        if (index < FSE.BEADG_COLOR_ROLES.length) return FSE.intToHex(_fseColorForRole(FSE.BEADG_COLOR_ROLES[index]));
+        // Beyond the fixed 5-role table — shouldn't normally happen (a
+        // well-formed profile always carries its own colors past index 4)
+        // — falls back through the same note-based lookup a fresh "+ Add"
+        // would use, keyed off whatever note actually sits at this index.
+        const parsed = Array.isArray(strings) && FSE.parseTargetNote(strings[index]);
+        return FSE.intToHex(_fseColorForRole(parsed ? FSE.colorRoleForNote(parsed.midi) : 'gray'));
     };
 
     // Custom image asset for the 'image' bg style (#19). Composite setter:
@@ -4186,30 +4291,46 @@ import { FSE } from './src/fse-retune.js';
         // frame color reads inside createFactory all consult this rather
         // than the module-level S_COL, so a palette swap re-tints the
         // panel live without touching module-level state.
-        // PATCH POINT: index 0 (our added B string) is NOT part of
+        // PATCH POINT: index 0 (the lowest string) is NOT part of
         // highway_3d's raw per-index palette at all — it gets the
         // dedicated "Low B" color (FSE.lowBColor(), src/fse-retune.js)
         // instead of whatever coincidentally sits at some reused palette
         // slot. Indices 1-4 (E/A/D/G) pass through PALETTES.default[0..3]
         // directly/unchanged — that's already the correct lowE/A/D/G
         // order (matches core's own 4-string-bass HWC slot order), so no
-        // reordering is needed for them, only B is special-cased. Set
-        // before any settings load so the very first frame is already
-        // correct.
+        // reordering is needed for them, only the low string is
+        // special-cased. This is the BUILT-IN tuning's fixed 5-wide shape;
+        // set before any settings load so the very first frame is already
+        // correct (the built-in tuning is what's active before settings
+        // load anyway). A CUSTOM tuning (variable 4-8 length, concrete
+        // per-string colors) replaces this with an N-length array the
+        // first time _bgLoadSettings resolves it — see isBuiltinTuning
+        // there.
         let activePalette = [FSE.lowBColor(), PALETTES.default[0], PALETTES.default[1], PALETTES.default[2], PALETTES.default[3]];
         // Source palette (pre-remap, E/A/D/G only) activePalette was last
         // derived from — lets _bgLoadSettings skip re-deriving/re-tinting
         // when the user's palette selection hasn't actually changed
         // (activePalette itself is always a fresh derived array, never
-        // === the source palette).
+        // === the source palette). Only meaningful for the built-in
+        // tuning; a custom tuning's colors don't track this at all (see
+        // isBuiltinTuning in _bgLoadSettings), and get this reset to null
+        // so a later switch back to the built-in tuning always re-derives.
         let _fsePaletteSrcRef = PALETTES.default;
+        // Whether the CURRENTLY active tuning is a custom (non-built-in)
+        // one — used by _recolorGemGradients so a custom tuning's colors
+        // (which can land anywhere: extension slots, a picker override, a
+        // shorter/reordered tuning like 4-string EADG) are always compared
+        // against the stock gradient table by CONTENT rather than assumed
+        // to line up positionally the way the fixed built-in BEADG shape
+        // did. Updated alongside activePalette in _bgLoadSettings.
+        let _fseCustomTuningActive = false;
         // Content signature of the colors last applied to materials; lets
         // _bgLoadSettings force a retint when the in-place custom palette
         // changes values without changing array identity.
         let _bgPaletteSig = '';
-        // Active target tuning for this panel (custom 5-string tunings).
-        // { midiTuning: number[5], labels: string[5] } — midiTuning feeds
-        // _fseRetuner's apply() (chart remap), labels feed the nut
+        // Active target tuning for this panel (custom tunings, 4-8
+        // strings). { midiTuning: number[], labels: string[] } — midiTuning
+        // feeds _fseRetuner's apply() (chart remap), labels feed the nut
         // open-string-name sprites. Set to the BEADG default before any
         // settings load so the very first frame renders correctly;
         // _bgLoadSettings refreshes it (keyed on _fseTuningSig) whenever the
@@ -4232,7 +4353,10 @@ import { FSE } from './src/fse-retune.js';
         // separate "undo the drop" logic is needed; every tuning switch is
         // a from-scratch remap, not an incremental patch.
         let _activeTargetTuning = FSE.resolveTargetTuning(FSE.DEFAULT_TARGET_TUNING);
-        let _fseTuningSig = FSE.DEFAULT_TARGET_TUNING.join('|');
+        // Signature format matches _bgLoadSettings's tuningSig: strings
+        // joined, '#', then colors joined (empty for the built-in tuning,
+        // whose colors always resolve live — see isBuiltinTuning there).
+        let _fseTuningSig = FSE.DEFAULT_TARGET_TUNING.join('|') + '#';
         // Fret digits on the board ghost (hollow preview at Z=0), not on
         // flying note bodies — see fretNumberGhostScope for chord-hand vs all.
         let showFretOnNote = false;
@@ -8141,31 +8265,58 @@ import { FSE } from './src/fse-retune.js';
             // core's own palette change-detection here only tracks
             // E/A/D/G's source, so check B separately or a same-frame
             // "Low B" edit would go stale until something else also changed.
+            // This whole newPalette/newLowB derivation only applies to the
+            // BUILT-IN tuning (see isBuiltinTuning below) — a CUSTOM
+            // tuning's colors are concrete per-profile data, resolved
+            // straight from activeTuning.colors instead, with no live
+            // palette-tracking at all.
             const newLowB = FSE.lowBColor();
-            if (newPalette !== _fsePaletteSrcRef || newSig !== _bgPaletteSig || newLowB !== activePalette[0]) {
-                // PATCH POINT (feedback: colors looked shifted up a string —
-                // "adding a fifth high string on top rather than low
-                // string" — and B was using the guitar's own "B" slot color
-                // instead of the dedicated "Low B" one). Indices 1-4
-                // (E/A/D/G) pass through whichever palette the user picked
-                // (named or custom) unchanged/unreordered; index 0 (B) uses
-                // the dedicated Low B lookup instead of any slot of
-                // newPalette.
-                activePalette = [newLowB, newPalette[0], newPalette[1], newPalette[2], newPalette[3]];
-                _fsePaletteSrcRef = newPalette;
-                _bgPaletteSig = newSig;
-                _applyPaletteToMaterials();
-            }
             // PATCH POINT (five-string retune, custom tunings): re-resolve
-            // the active target tuning. Cheap (5-entry array join) so it's
+            // the active target tuning (strings + colors). Cheap so it's
             // safe to check every _bgLoadSettings call rather than only on
             // the 'targetTuningId'/'customTunings' listener cases — a
-            // custom tuning's OWN string specs can change via Save/Edit
-            // without the active id changing, and _bgLoadSettings is the
-            // only place that runs on every settings reload regardless of
-            // which key triggered it.
-            const tuningStrings = _fseResolveActiveTuningStrings();
-            const tuningSig = tuningStrings.join('|');
+            // custom tuning's OWN string/color specs can change via
+            // Save/Edit without the active id changing, and
+            // _bgLoadSettings is the only place that runs on every settings
+            // reload regardless of which key triggered it.
+            const activeTuning = _fseResolveActiveTuning();
+            const tuningStrings = activeTuning.strings;
+            const isBuiltinTuning = activeTuning.colors === null;
+            const tuningSig = tuningStrings.join('|') + '#' + (isBuiltinTuning ? '' : activeTuning.colors.join(','));
+            const paletteInputsChanged = isBuiltinTuning
+                ? (newPalette !== _fsePaletteSrcRef || newSig !== _bgPaletteSig || newLowB !== activePalette[0] || tuningSig !== _fseTuningSig)
+                : (tuningSig !== _fseTuningSig);
+            if (paletteInputsChanged) {
+                if (isBuiltinTuning) {
+                    // PATCH POINT (feedback: colors looked shifted up a
+                    // string — "adding a fifth high string on top rather
+                    // than low string" — and B was using the guitar's own
+                    // "B" slot color instead of the dedicated "Low B" one).
+                    // Indices 1-4 (E/A/D/G) pass through whichever palette
+                    // the user picked (named or custom) unchanged/
+                    // unreordered; index 0 (B) uses the dedicated Low B
+                    // lookup instead of any slot of newPalette.
+                    activePalette = [newLowB, newPalette[0], newPalette[1], newPalette[2], newPalette[3]];
+                    _fsePaletteSrcRef = newPalette;
+                    _bgPaletteSig = newSig;
+                    _fseCustomTuningActive = false;
+                } else {
+                    // Custom tuning: activeTuning.colors is already a
+                    // fully-populated, concrete N-length hex array (see
+                    // window.fse3dSaveCustomTuning) — just resolve to ints.
+                    activePalette = activeTuning.colors.map(c => {
+                        const n = _h3dHexToInt(c);
+                        return n != null ? n : FSE.LIGHT_GRAY_COLOR;
+                    });
+                    // Never === any real newPalette reference, so switching
+                    // back to the built-in tuning later always re-derives
+                    // rather than short-circuiting on a stale match.
+                    _fsePaletteSrcRef = null;
+                    _bgPaletteSig = '';
+                    _fseCustomTuningActive = true;
+                }
+                _applyPaletteToMaterials();
+            }
             if (tuningSig !== _fseTuningSig) {
                 _activeTargetTuning = FSE.resolveTargetTuning(tuningStrings);
                 _fseTuningSig = tuningSig;
@@ -8357,8 +8508,18 @@ import { FSE } from './src/fse-retune.js';
             if (!T || !gNoteGrad || !gNoteGrad.length) return;
             // PATCH POINT: activePalette is always a freshly-derived (remapped)
             // array now, never === _customPalette even when the user picked
-            // "custom" — check the pre-remap source ref instead.
-            const isCustom = (_fsePaletteSrcRef === _customPalette);
+            // "custom" — check the pre-remap source ref instead. Also true
+            // whenever a custom TUNING (not just a custom global palette)
+            // is active — its colors can land anywhere (extension slots, a
+            // picker override, a shorter/reordered tuning like 4-string
+            // EADG) and shouldn't be assumed to line up positionally with
+            // DEFAULT_GEM_GRADIENTS the way the fixed built-in BEADG shape
+            // does; the `base !== PALETTES.default[s - 1]` content check
+            // just below still only derives a custom gradient for slots
+            // that actually differ from the stock color, so a custom
+            // tuning that happens to reuse a stock color at some slot still
+            // gets the stock gradient there.
+            const isCustom = (_fsePaletteSrcRef === _customPalette) || _fseCustomTuningActive;
             const topCol = new T.Color(), botCol = new T.Color(), tmp = new T.Color();
             const halfH = NH / 2;
             for (let s = 0; s < gNoteGrad.length; s++) {
@@ -15369,7 +15530,7 @@ import { FSE } from './src/fse-retune.js';
                         return;
                     }
                     try {
-                        nStr = resolveStringCount(bundle);
+                        nStr = resolveStringCount(_activeTargetTuning.midiTuning.length);
                         _invertedForBoard = _invertedCached;
                         _leftyForBoard = _leftyCached;
                         if (!initScene()) { _unsubscribeFocus(); _rejectReady(new Error('initScene failed')); return; }
@@ -15425,7 +15586,7 @@ import { FSE } from './src/fse-retune.js';
                 }
                 _invertedCached = !!bundle.inverted;
                 _leftyCached = !!bundle.lefty;
-                const newNStr = resolveStringCount(bundle);
+                const newNStr = resolveStringCount(_activeTargetTuning.midiTuning.length);
                 const newScale = bundle.renderScale || 1;
                 const leftyChanged = _leftyCached !== _leftyForBoard;
                 if (_invertedCached !== _invertedForBoard || leftyChanged || newNStr !== nStr) {

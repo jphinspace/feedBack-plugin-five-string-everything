@@ -9,10 +9,17 @@ import { FSE } from '../src/fse-retune.js';
 
 const {
     TARGET_MAX_FRET,
-    TARGET_STRING_COUNT,
+    MAX_TARGET_STRING_COUNT,
+    MIN_TARGET_STRING_COUNT,
     DEFAULT_TARGET_MIDI_TUNING,
     DEFAULT_TARGET_TUNING,
+    EXTENDED_DEFAULT_TARGET_TUNING,
     parseTargetNote,
+    midiToNoteLabel,
+    defaultExtensionNote,
+    colorRoleForNote,
+    BEADG_COLOR_ROLES,
+    isValidTuningStringsArray,
     resolveTargetTuning,
     computeOpenStringMidiByString,
     computeArrangementShift,
@@ -23,6 +30,9 @@ const {
     remapAnchors,
     remapChordTemplate,
     remapChordTemplates,
+    intToHex,
+    LIGHT_GRAY_COLOR,
+    resolveColorsArray,
 } = FSE;
 
 let passed = 0;
@@ -376,19 +386,23 @@ function songContext(sourceStringCount, tuning, capo, targetMidiTuning) {
     check('resolveTargetTuning: non-array spec falls back to full BEADG default',
         resolveTargetTuning(null).midiTuning, DEFAULT_TARGET_MIDI_TUNING);
 
-    // Short array (still an array, just missing trailing entries): the
-    // PROVIDED slots are kept as given, only the missing ones fall back —
-    // same per-slot contract as the malformed-entry case above, not a
-    // "whole spec discarded" special case. Deliberately uses non-BEADG
-    // values for the provided slots so this is distinguishable from that
-    // per-slot fallback reconstructing BEADG by coincidence (as it would
-    // if this used 'B0'/'E1', which already equal the BEADG defaults for
-    // those two positions).
+    // Variable-length spec (Phase 11 — configurable string count):
+    // resolveTargetTuning now honors the SPEC's own length exactly, rather
+    // than always padding/truncating to a fixed 5. A shorter-than-5 array
+    // simply resolves to that many strings, no padding.
     const short = resolveTargetTuning(['A0', 'F1']);
-    check('resolveTargetTuning: short array keeps its provided slots',
-        short.midiTuning, [21, 29, 33, 38, 43]);
-    check('resolveTargetTuning: short array per-slot-falls-back the missing slots to BEADG',
-        short.labels, ['A', 'F', 'A', 'D', 'G']);
+    check('resolveTargetTuning: honors a shorter-than-5 spec length exactly',
+        short.midiTuning, [21, 29]);
+    check('resolveTargetTuning: short array labels', short.labels, ['A', 'F']);
+
+    // A longer-than-5 spec with a malformed entry past the 5-string BEADG
+    // core falls back to the EXTENDED_DEFAULT_TARGET_TUNING chain for that
+    // slot (index 5 -> 'B2'), not the 5-entry DEFAULT_TARGET_TUNING (which
+    // has no index 5 at all).
+    const long = resolveTargetTuning(['B0', 'E1', 'A1', 'D2', 'G2', 'garbage']);
+    check('resolveTargetTuning: malformed entry past the BEADG core falls back to the extended chain (B2)',
+        long.midiTuning, [23, 28, 33, 38, 43, 47]);
+    check('resolveTargetTuning: extended-chain fallback label', long.labels[5], 'B');
 }
 
 // AEADG target (drops only the lowest open string a whole step below
@@ -589,6 +603,221 @@ function songContext(sourceStringCount, tuning, capo, targetMidiTuning) {
     // 16 a hardcoded-fourth assumption would produce.
     check('irregular target: cascade uses the actual interval, not an assumed fourth/fifth',
         resolveTargetForFret(38, 3, 21, irregular.midiTuning), { s: 4, f: 17, adjustment: -4 });
+}
+
+// Variable target string count (Phase 11: add/remove strings in the Bass
+// Tuning settings editor). MIN/MAX are the enforced floor/ceiling — 4
+// matches highway_3d's own minimum, 8 matches MAX_RENDER_STRINGS
+// (screen.js), a real structural limit of the per-string material arrays.
+{
+    check('MIN_TARGET_STRING_COUNT is 4', MIN_TARGET_STRING_COUNT, 4);
+    check('MAX_TARGET_STRING_COUNT is 8', MAX_TARGET_STRING_COUNT, 8);
+}
+
+// defaultExtensionNote / midiToNoteLabel — the stateless default-note rule
+// a settings.html "+ Add string" click uses. Low extensions always drop a
+// perfect fourth; high extensions rise a major third ONLY from exactly the
+// BEADG default G2 (43), else a perfect fourth — see src/fse-retune.js's
+// own doc comment for the rationale.
+{
+    check('midiToNoteLabel round-trips every DEFAULT_TARGET_TUNING entry',
+        DEFAULT_TARGET_MIDI_TUNING.map(midiToNoteLabel), DEFAULT_TARGET_TUNING);
+
+    // The user's own literal example: BEADG (top string G2) + a high
+    // string defaults to B2 — the same "guitar's own B string" interval,
+    // not a uniform fourth.
+    check('add-high from BEADG default G2 -> B2 (major third, guitar convention)',
+        defaultExtensionNote('high', 43), { midi: 47, label: 'B2' });
+    // The user's other literal example: EADG (bottom string E1) + a low
+    // string defaults to B0 — restores BEADG's own low string exactly.
+    check('add-low from EADG default E1 -> B0 (perfect fourth, restores BEADG)',
+        defaultExtensionNote('low', 28), { midi: 23, label: 'B0' });
+
+    // Second+ extension in either direction always uses a perfect fourth —
+    // no further major-third special-casing once off the BEADG G2 edge.
+    check('add-high a second time from B2 -> E3 (perfect fourth)',
+        defaultExtensionNote('high', 47), { midi: 52, label: 'E3' });
+    check('add-low a second time from B0 -> F#0 (perfect fourth)',
+        defaultExtensionNote('low', 23), { midi: 18, label: 'F#0' });
+
+    // Extending a NON-default tuning (e.g. AEADG's own top string) never
+    // triggers the G2-only major-third special case — always a fourth.
+    check('add-high from a non-G2 edge (A1) uses a plain fourth, not a third',
+        defaultExtensionNote('high', 33), { midi: 38, label: 'D2' });
+
+    // These are exactly the notes EXTENDED_DEFAULT_TARGET_TUNING documents
+    // for the BEADG-adjacent chain — confirms the two tables agree.
+    check('EXTENDED_DEFAULT_TARGET_TUNING agrees with the low-extension default',
+        EXTENDED_DEFAULT_TARGET_TUNING[1], 'F#0');
+    check('EXTENDED_DEFAULT_TARGET_TUNING agrees with the high-extension default',
+        EXTENDED_DEFAULT_TARGET_TUNING[7], 'B2');
+}
+
+// colorRoleForNote / BEADG_COLOR_ROLES — the symbolic (not literal color)
+// half of the default-color system; screen.js owns mapping each role to an
+// actual pixel color (PALETTES.default / FSE.lowBColor() are screen.js/
+// Three.js-owned data this module has no business embedding), but WHICH
+// role a note or BEADG-core position gets is pure, tested here.
+{
+    // Every note defaultExtensionNote can produce for the first two
+    // extensions in each direction resolves to a distinct, correctly
+    // paired role.
+    check('colorRoleForNote: B0 -> lowB', colorRoleForNote(23), 'lowB');
+    check('colorRoleForNote: E1 -> e', colorRoleForNote(28), 'e');
+    check('colorRoleForNote: A1 -> a', colorRoleForNote(33), 'a');
+    check('colorRoleForNote: D2 -> d', colorRoleForNote(38), 'd');
+    check('colorRoleForNote: G2 -> g', colorRoleForNote(43), 'g');
+    check('colorRoleForNote: B2 (1st high ext) -> highB', colorRoleForNote(47), 'highB');
+    check('colorRoleForNote: E3 (2nd high ext) -> highE', colorRoleForNote(52), 'highE');
+    check('colorRoleForNote: F#0 (1st low ext) -> lowExt1', colorRoleForNote(18), 'lowExt1');
+    check('colorRoleForNote: C#0 (2nd low ext) -> lowExt2', colorRoleForNote(13), 'lowExt2');
+    // Anything beyond the known chain — a 3rd+ extension, or an arbitrary
+    // custom-tuning note (e.g. AEADG's A0) — is the explicit "no default"
+    // signal, not a guess.
+    check('colorRoleForNote: a 3rd low extension (C#0 - 5 = G#-1) -> gray', colorRoleForNote(8), 'gray');
+    check('colorRoleForNote: an arbitrary custom note (A0) -> gray', colorRoleForNote(21), 'gray');
+
+    // BEADG_COLOR_ROLES is index-based (deliberately NOT colorRoleForNote
+    // applied per-position) — this is what makes a custom tuning like
+    // AEADG, whose position 0 isn't literally B, still get the "low
+    // string" role at position 0 rather than 'gray'.
+    check('BEADG_COLOR_ROLES has exactly 5 entries, low to high',
+        BEADG_COLOR_ROLES, ['lowB', 'e', 'a', 'd', 'g']);
+}
+
+// isValidTuningStringsArray — the shared bounds/parse-validity check used
+// both when reading saved profiles back from storage and when validating
+// a freshly submitted one, so the two can't drift apart.
+{
+    check('isValidTuningStringsArray: BEADG (5) is valid', isValidTuningStringsArray(DEFAULT_TARGET_TUNING), true);
+    check('isValidTuningStringsArray: MIN_TARGET_STRING_COUNT (4) is valid',
+        isValidTuningStringsArray(['E1', 'A1', 'D2', 'G2']), true);
+    check('isValidTuningStringsArray: MAX_TARGET_STRING_COUNT (8) is valid',
+        isValidTuningStringsArray(['C#0', 'F#0', 'B0', 'E1', 'A1', 'D2', 'G2', 'B2']), true);
+    check('isValidTuningStringsArray: below the floor (3) is invalid',
+        isValidTuningStringsArray(['A1', 'D2', 'G2']), false);
+    check('isValidTuningStringsArray: above the ceiling (9) is invalid',
+        isValidTuningStringsArray(['C#0', 'F#0', 'B0', 'E1', 'A1', 'D2', 'G2', 'B2', 'E3']), false);
+    check('isValidTuningStringsArray: a malformed entry anywhere invalidates the whole array',
+        isValidTuningStringsArray(['B0', 'E1', 'garbage', 'D2', 'G2']), false);
+    check('isValidTuningStringsArray: non-array input is invalid', isValidTuningStringsArray(null), false);
+    check('isValidTuningStringsArray: non-array input (string) is invalid', isValidTuningStringsArray('B0,E1,A1,D2,G2'), false);
+}
+
+// intToHex / resolveColorsArray — the plain data-transform half of color
+// handling; screen.js supplies the actual default hex values (resolved via
+// its own role->color table), this module just does the array-shape
+// reconciliation uniformly regardless of what's "wrong" with the input.
+{
+    check('intToHex: round-trips a representative color', intToHex(0xe61f26), '#e61f26');
+    check('intToHex: pads a short hex value', intToHex(0x1), '#000001');
+    check('LIGHT_GRAY_COLOR is the documented CSS "light gray"', LIGHT_GRAY_COLOR, 0xd3d3d3);
+
+    const defaults = ['#111111', '#222222', '#333333', '#444444', '#555555'];
+    check('resolveColorsArray: colors entirely missing falls back to every default',
+        resolveColorsArray(undefined, 5, defaults), defaults);
+    check('resolveColorsArray: colors entirely missing (null) falls back to every default',
+        resolveColorsArray(null, 5, defaults), defaults);
+    check('resolveColorsArray: a valid entry is kept, invalid/missing entries fall back',
+        resolveColorsArray(['#abcdef', 'not-a-hex', undefined], 5, defaults),
+        ['#abcdef', '#222222', '#333333', '#444444', '#555555']);
+    check('resolveColorsArray: a too-short array treats missing trailing entries as invalid',
+        resolveColorsArray(['#abcdef'], 5, defaults),
+        ['#abcdef', '#222222', '#333333', '#444444', '#555555']);
+    check('resolveColorsArray: a too-long array ignores entries past `length`',
+        resolveColorsArray(['#111111', '#222222', '#333333', '#444444', '#555555', '#666666'], 5, defaults),
+        defaults);
+}
+
+// Explicit unplayable-low-note-drop regression test (user-requested): a
+// player who has removed the B string down to a 4-string EADG target must
+// have any note requiring a pitch below open E1 silently dropped, not
+// cascaded onto a nonexistent 5th string or thrown. Exercised both as a
+// direct resolveTargetForFret/remapNote call and end-to-end through
+// createRetuner (bundle.notes), the same path screen.js's draw() uses.
+{
+    const eadg = resolveTargetTuning(['E1', 'A1', 'D2', 'G2']);
+    check('EADG (4-string, B removed) target midiTuning', eadg.midiTuning, [28, 33, 38, 43]);
+
+    // Eb1 (27) is one half-step below open E1 (28) — unreachable on a
+    // 4-string target with no lower string to cascade to.
+    check('a pitch one half-step below open E1 is dropped on a 4-string EADG target',
+        remapNote(27, 0, 0, eadg.midiTuning), null);
+    check('resolveTargetForFret returns null (not a crash/undefined) for the same case',
+        resolveTargetForFret(27, 0, 0, eadg.midiTuning), null);
+    // Still fully playable on the fret above (open E itself).
+    check('open E1 itself remains playable on the EADG target',
+        remapNote(28, 0, 0, eadg.midiTuning), { s: 0, f: 0 });
+
+    // End-to-end: a chart written for a 5-string BEADG-standard bass whose
+    // open low string plays real B0 (23) notes. Under the full 5-string
+    // BEADG target it survives; under the reduced 4-string EADG target
+    // (the user removed the B string) it's silently dropped, while a note
+    // on an untouched string (A1, still present at target index 1) still
+    // comes through.
+    const { createRetuner } = FSE;
+    const retuner = createRetuner();
+    const rawNotes = [{ t: 0, s: 0, f: 0 }, { t: 1, s: 1, f: 0 }]; // open B string, open A string
+    const bundle = {
+        notes: rawNotes, chords: [], anchors: [], chordTemplates: [],
+        tuning: [0, 0, 0, 0, 0], capo: 0, stringCount: 5,
+    };
+    retuner.apply(bundle); // full 5-string BEADG default target
+    check('under the full BEADG target, the open B note survives', bundle.notes.length, 2);
+
+    bundle.notes = rawNotes; // simulate core re-supplying the pristine raw array
+    retuner.apply(bundle, eadg.midiTuning); // reduced 4-string EADG target
+    check('under a reduced EADG target, only the A-string note survives (B note dropped)',
+        bundle.notes.map(n => ({ s: n.s, f: n.f })), [{ s: 0, f: 0 }]);
+}
+
+// 6-string target (BEADG + a high string, e.g. the "+ Add string above"
+// default from a fresh BEADG editor session) — every remap function must
+// bound itself against the target's ACTUAL length (6), not a stale fixed 5.
+{
+    const sixString = resolveTargetTuning(['B0', 'E1', 'A1', 'D2', 'G2', 'B2']);
+    check('6-string target midiTuning', sixString.midiTuning, [23, 28, 33, 38, 43, 47]);
+    check('6-string target labels', sixString.labels, ['B', 'E', 'A', 'D', 'G', 'B']);
+
+    // A source tuned identically to each target string (supplied directly
+    // rather than via songContext/STANDARD_OPEN_STRING_MIDI, which has no
+    // 6-string BASS entry — its "6" entry is guitar EADGBE, an unrelated
+    // source-side concern) is a full identity remap across all 6 target
+    // strings — including string 5, which only exists because the target
+    // is 6-wide; a stale 5-wide bound would either drop it or misindex it.
+    const shiftK = computeArrangementShift(6, null, 0, sixString.midiTuning, sixString.midiTuning);
+    check('computeArrangementShift finds identity (k=0) using the real 6-string target bound', shiftK, 0);
+    for (let s = 0; s < 6; s++) {
+        for (let f = 0; f <= 20; f++) {
+            check(`6-string target identity s=${s} f=${f}`,
+                remapNote(sixString.midiTuning[s], s, f, sixString.midiTuning), { s, f });
+        }
+    }
+
+    // A note that overflows past fret 20 on the new 6th (highest) string
+    // has nowhere higher to cascade to and must drop — confirms the upper
+    // bound is the target's real length (6), not a leftover 5.
+    check('6-string target: overflow past fret 20 on the new top string drops',
+        remapNote(sixString.midiTuning[5], 5, 21, sixString.midiTuning), null);
+}
+
+// remapChordTemplate at a non-5 target length — the returned frets/fingers
+// arrays must be sized to the target's actual length, not a fixed 5.
+{
+    const eadg = resolveTargetTuning(['E1', 'A1', 'D2', 'G2']); // 4-string
+    const sourceOpenMidiByString = [28, 33, 38, 43]; // matches the 4-string EADG target exactly
+    const naturalTargetByString = [0, 1, 2, 3];
+    const template4 = { frets: [3, -1, -1, 2], fingers: [1, -1, -1, 4] };
+    const remapped4 = remapChordTemplate(sourceOpenMidiByString, naturalTargetByString, template4, eadg.midiTuning);
+    check('remapChordTemplate at a 4-string target sizes frets to 4', remapped4.frets.length, 4);
+    check('remapChordTemplate at a 4-string target sizes fingers to 4', remapped4.fingers.length, 4);
+    check('remapChordTemplate at a 4-string target: content remaps correctly', remapped4.frets, [3, -1, -1, 2]);
+
+    const sixString = resolveTargetTuning(['B0', 'E1', 'A1', 'D2', 'G2', 'B2']); // 6-string
+    const template6 = { frets: [-1, -1, -1, -1, -1, 5], fingers: [-1, -1, -1, -1, -1, 3] };
+    const remapped6 = remapChordTemplate([23, 28, 33, 38, 43, 47], [0, 1, 2, 3, 4, 5], template6, sixString.midiTuning);
+    check('remapChordTemplate at a 6-string target sizes frets to 6', remapped6.frets.length, 6);
+    check('remapChordTemplate at a 6-string target: the new 6th-string slot remaps correctly', remapped6.frets, [-1, -1, -1, -1, -1, 5]);
 }
 
 console.log(`OK - ${passed} assertions passed`);
