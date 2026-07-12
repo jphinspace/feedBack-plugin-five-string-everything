@@ -17,6 +17,9 @@ const {
     colorRoleForNote,
     BEADG_COLOR_ROLES,
     isValidTuningStringsArray,
+    BUILTIN_PRESET_TUNINGS,
+    BUILTIN_TUNING_ID,
+    resolveActiveTuning,
     resolveTargetTuning,
     computeOpenStringMidiByString,
     computeArrangementShift,
@@ -542,6 +545,36 @@ const SPOT_FRETS = [0, 10, 20];
         isValidTuningStringsArray(['B0', 'E1', 'garbage', 'D2', 'G2']), false);
     check('isValidTuningStringsArray: non-array input is invalid', isValidTuningStringsArray(null), false);
     check('isValidTuningStringsArray: non-array input (string) is invalid', isValidTuningStringsArray('B0,E1,A1,D2,G2'), false);
+}
+
+// BUILTIN_PRESET_TUNINGS / BUILTIN_TUNING_ID / resolveActiveTuning: the
+// built-in-preset resolution path screen.js's _fseResolveActiveTuning
+// delegates to wholesale.
+{
+    check('BUILTIN_TUNING_ID is BEADG, and BEADG is the first preset',
+        BUILTIN_TUNING_ID, 'beadg');
+    check('BEADG preset entry shares DEFAULT_TARGET_TUNING and has no concrete colors (live-tracked)',
+        { strings: BUILTIN_PRESET_TUNINGS[0].strings, colors: BUILTIN_PRESET_TUNINGS[0].colors },
+        { strings: DEFAULT_TARGET_TUNING, colors: null });
+    check('every non-BEADG preset carries concrete, valid colors',
+        BUILTIN_PRESET_TUNINGS.slice(1).every(p => Array.isArray(p.colors) && p.colors.length === p.strings.length && isValidTuningStringsArray(p.strings)),
+        true);
+
+    check('resolveActiveTuning: no id (fresh install) resolves to BEADG, live colors',
+        resolveActiveTuning(undefined, []), { strings: DEFAULT_TARGET_TUNING, colors: null });
+    check('resolveActiveTuning: explicit BEADG id resolves the same as no id',
+        resolveActiveTuning('beadg', []), { strings: DEFAULT_TARGET_TUNING, colors: null });
+    check('resolveActiveTuning: a non-BEADG preset id resolves its own strings + concrete colors',
+        resolveActiveTuning('cello_cgda', []),
+        { strings: ['C2', 'G2', 'D3', 'A3'], colors: ['#cc00aa', '#f18313', '#3fc413', '#ecd234'] });
+    check('resolveActiveTuning: a custom-tuning id resolves from the supplied list',
+        resolveActiveTuning('custom_abc', [{ id: 'custom_abc', name: 'AEADG', strings: ['A0', 'E1', 'A1', 'D2', 'G2'], colors: ['#111111', '#222222', '#333333', '#444444', '#555555'] }]),
+        { strings: ['A0', 'E1', 'A1', 'D2', 'G2'], colors: ['#111111', '#222222', '#333333', '#444444', '#555555'] });
+    check('resolveActiveTuning: an unknown/deleted id falls back to BEADG shape',
+        resolveActiveTuning('stale_deleted_id', []), { strings: DEFAULT_TARGET_TUNING, colors: null });
+    check('resolveActiveTuning: a preset id wins even if a custom tuning happens to share it',
+        resolveActiveTuning('cello_cgda', [{ id: 'cello_cgda', name: 'user override attempt', strings: ['E1', 'A1', 'D2', 'G2'], colors: ['#000', '#000', '#000', '#000'] }]),
+        { strings: ['C2', 'G2', 'D3', 'A3'], colors: ['#cc00aa', '#f18313', '#3fc413', '#ecd234'] });
 }
 
 // intToHex / resolveColorsArray: plain data-shape transforms.

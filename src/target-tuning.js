@@ -26,6 +26,49 @@ export const DEFAULT_TARGET_TUNING = ['B0', 'E1', 'A1', 'D2', 'G2'];
 export const EXTENDED_DEFAULT_TARGET_TUNING = ['C#0', 'F#0', 'B0', 'E1', 'A1', 'D2', 'G2', 'B2', 'E3'];
 export const EXTENDED_CORE_INDEX = 2;
 
+// Built-in tuning presets — selectable in the Active tuning dropdown,
+// never user-editable/deletable (no entry in the "Saved custom tunings"
+// list). BEADG (id 'beadg') is always first and is the default; `colors:
+// null` on that one entry is the sentinel resolveActiveTuning/screen.js's
+// _bgLoadSettings read to mean "live-track the global palette" (FSE.
+// lowBColor() + PALETTES.default) rather than a fixed set — the only preset
+// this applies to, since that live 5-wide E/A/D/G+lowB mapping is specific
+// to BEADG's own shape. Every other preset carries concrete hand-picked
+// colors and flows through the same resolution path a user-saved custom
+// tuning does.
+export const BUILTIN_PRESET_TUNINGS = [
+    {
+        id: 'beadg',
+        label: 'BEADG (default)',
+        strings: DEFAULT_TARGET_TUNING,
+        colors: null,
+    },
+    {
+        id: 'cello_cgda',
+        label: 'Cello (CGDA)',
+        strings: ['C2', 'G2', 'D3', 'A3'],
+        colors: ['#cc00aa', '#f18313', '#3fc413', '#ecd234'],
+    },
+];
+// The default preset's id — the single source of truth screen.js and
+// settings.html both point at, rather than each hardcoding their own
+// 'beadg' literal.
+export const BUILTIN_TUNING_ID = BUILTIN_PRESET_TUNINGS[0].id;
+
+// Resolves an active-tuning id to { strings, colors } against the built-in
+// presets first, then a caller-supplied custom-tuning list, falling back to
+// BEADG's own shape (colors: null) for anything unset/unknown/deleted — so
+// a stale id can never leave a caller without a usable tuning. Pure: the
+// caller owns reading `id`/`customTunings` from wherever they're persisted
+// (screen.js: global settings storage; settings.html: localStorage).
+export function resolveActiveTuning(id, customTunings) {
+    const targetId = id || BUILTIN_TUNING_ID;
+    const preset = BUILTIN_PRESET_TUNINGS.find(p => p.id === targetId);
+    if (preset) return { strings: preset.strings, colors: preset.colors };
+    const found = Array.isArray(customTunings) ? customTunings.find(p => p.id === targetId) : null;
+    return found ? { strings: found.strings, colors: found.colors } : { strings: DEFAULT_TARGET_TUNING, colors: null };
+}
+
 // Length in [MIN,MAX] and every entry parses. Shared by
 // window.fse3dSaveCustomTuning and the storage-read filter in screen.js.
 export function isValidTuningStringsArray(strings) {
