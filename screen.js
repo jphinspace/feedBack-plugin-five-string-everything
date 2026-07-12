@@ -2291,12 +2291,7 @@ import { FSE } from './src/fse-retune.js';
         return _bgBandsCache;
     }
 
-    const BG_DEFAULTS = { style: 'particles', intensity: 0.5, reactive: true, palette: 'default', bgTheme: 'default', hwTheme: 'default', showFretOnNote: true, fretNumberGhostScope: 'chords', cameraSmoothing: 0.5, zoomSmoothing: 0.5, tiltSmoothing: 0.5, cameraLockLow: false, cameraLockZoom: 0.5, cameraMode: 'lookahead', nutHeadstockVisible: true, tuningLabelsVisible: true, nutColor: '#f5f3f0', headstockColor: '#d4b48a', textSize: 0.5, vibrancy: 0.85, glow: 0.25, customImageDataUrl: '', customImageName: '', customVideoName: '', chordDiagramVisible: true, chordDiagramSize: 0.5, chordDiagramPosition: 'tl', fretColumnMarkerCadence: 1, projectionVisible: true, inlayLabelsVisible: false, sectionLabelsOnHighway: false, sectionHudVisible: false, sectionHudPosition: 'tr', sectionHudSize: 0.5, toneHudVisible: false, toneHudPosition: 'tl', toneHudSize: 0.5, fpsVisible: false, fretDividersVisible: true, slideArrowApproachVisible: true, slideArrowNeckVisible: true, slideArrowChainPreviewVisible: true, hitFx: 0.7, sparks: true, cinematic: true, verdictMarks: true, timingFx: true, streakFx: true, bloom: true, targetTuningId: 'beadg', customTunings: '[]' };
-    // Built-in target-tuning id — always available, never deletable. Its
-    // note spec lives in FSE.DEFAULT_TARGET_TUNING (src/fse-retune.js) so
-    // there's exactly one BEADG definition; this id is just the pointer
-    // settings/localStorage use to select it.
-    const FSE_BUILTIN_TUNING_ID = 'beadg';
+    const BG_DEFAULTS = { style: 'particles', intensity: 0.5, reactive: true, palette: 'default', bgTheme: 'default', hwTheme: 'default', showFretOnNote: true, fretNumberGhostScope: 'chords', cameraSmoothing: 0.5, zoomSmoothing: 0.5, tiltSmoothing: 0.5, cameraLockLow: false, cameraLockZoom: 0.5, cameraMode: 'lookahead', nutHeadstockVisible: true, tuningLabelsVisible: true, nutColor: '#f5f3f0', headstockColor: '#d4b48a', textSize: 0.5, vibrancy: 0.85, glow: 0.25, customImageDataUrl: '', customImageName: '', customVideoName: '', chordDiagramVisible: true, chordDiagramSize: 0.5, chordDiagramPosition: 'tl', fretColumnMarkerCadence: 1, projectionVisible: true, inlayLabelsVisible: false, sectionLabelsOnHighway: false, sectionHudVisible: false, sectionHudPosition: 'tr', sectionHudSize: 0.5, toneHudVisible: false, toneHudPosition: 'tl', toneHudSize: 0.5, fpsVisible: false, fretDividersVisible: true, slideArrowApproachVisible: true, slideArrowNeckVisible: true, slideArrowChainPreviewVisible: true, hitFx: 0.7, sparks: true, cinematic: true, verdictMarks: true, timingFx: true, streakFx: true, bloom: true, targetTuningId: FSE.BUILTIN_TUNING_ID, customTunings: '[]' };
     // User-selectable, persistable bg styles — must mirror settings.html's
     // VALID_STYLES. 'venue' is deliberately NOT here: it is an internal effective
     // style reached only via _venueSceneOverride (the viz-picker Venue flow), so
@@ -2890,11 +2885,13 @@ import { FSE } from './src/fse-retune.js';
 
     // Target-tuning profiles (feedback: some bassists tune AEADG or
     // BbEbAbDbGb rather than BEADG, and/or run more/fewer than 5 strings).
-    // One built-in profile (FSE_BUILTIN_TUNING_ID = 'beadg', notes from
-    // FSE.DEFAULT_TARGET_TUNING, colors always resolved live off
-    // FSE.lowBColor()/PALETTES.default — unchanged from before this string-
-    // count feature) plus any number of user-saved profiles in the
-    // 'customTunings' global JSON blob: [{ id, name, strings: string[4..8],
+    // The built-in presets (FSE.BUILTIN_PRESET_TUNINGS — BEADG plus any
+    // others, e.g. Cello) resolve first; BEADG's own colors are always
+    // resolved live off FSE.lowBColor()/PALETTES.default (unchanged from
+    // before this string-count feature), every other preset carries
+    // concrete colors like a custom profile does. Then any number of
+    // user-saved profiles in the 'customTunings' global JSON blob: [{ id,
+    // name, strings: string[4..8],
     // colors: string[4..8] }] — colors is always fully populated with
     // concrete hex, never a "track the live palette" sentinel (see
     // window.fse3dDefaultStringFor: a newly added string's color is a
@@ -2941,17 +2938,14 @@ import { FSE } from './src/fse-retune.js';
         _bgWriteGlobal('customTunings', JSON.stringify(list));
     }
     // Resolves the currently-active tuning to { strings, colors } — the
-    // built-in default (colors: null, meaning "always resolve live", see
-    // activePalette construction below) when unset/unknown/deleted, so a
-    // stale targetTuningId can never leave the renderer without a usable
-    // tuning.
+    // branching (built-in presets, then custom tunings, then a BEADG-shaped
+    // fallback for anything unset/unknown/deleted) is pure logic living in
+    // FSE.resolveActiveTuning (src/target-tuning.js); this just supplies
+    // the two screen.js-owned reads it needs.
     function _fseResolveActiveTuning() {
-        const id = _bgReadSetting(null, 'targetTuningId');
-        if (!id || id === FSE_BUILTIN_TUNING_ID) return { strings: FSE.DEFAULT_TARGET_TUNING, colors: null };
-        const found = _fseReadCustomTunings().find(p => p.id === id);
-        return found ? { strings: found.strings, colors: found.colors } : { strings: FSE.DEFAULT_TARGET_TUNING, colors: null };
+        return FSE.resolveActiveTuning(_bgReadSetting(null, 'targetTuningId'), _fseReadCustomTunings());
     }
-    window.fse3dSetActiveTuning = (id) => _bgWriteGlobal('targetTuningId', String(id || FSE_BUILTIN_TUNING_ID));
+    window.fse3dSetActiveTuning = (id) => _bgWriteGlobal('targetTuningId', String(id || FSE.BUILTIN_TUNING_ID));
     window.fse3dListCustomTunings = () => _fseReadCustomTunings();
     // Upserts a custom tuning profile by id (generates one for a new
     // profile). Validates strings via FSE.isValidTuningStringsArray and
@@ -2981,7 +2975,7 @@ import { FSE } from './src/fse-retune.js';
         // Fall back to the built-in default if the deleted profile was active
         // — otherwise the renderer would keep the old tuning alive purely
         // via the (now-orphaned) targetTuningId pointer.
-        if (_bgReadSetting(null, 'targetTuningId') === id) window.fse3dSetActiveTuning(FSE_BUILTIN_TUNING_ID);
+        if (_bgReadSetting(null, 'targetTuningId') === id) window.fse3dSetActiveTuning(FSE.BUILTIN_TUNING_ID);
     };
     // Bridge for settings.html's Bass Tuning editor "+ Add string above/
     // below" buttons — pure, stateless (see FSE.defaultExtensionNote's own

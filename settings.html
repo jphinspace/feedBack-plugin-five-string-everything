@@ -15,9 +15,11 @@
     <p class="text-xs text-gray-500 mb-3">
         Every chart, in any source tuning, is remapped onto this target
         tuning — which pitches, and how many strings (4-8), are up to you.
-        BEADG (5-string) is the built-in default; add your own for AEADG, a
-        half-step-flat BbEbAbDbGb, a 4-string EADG, a 6-string with a high
-        string on top, or anything else. Strings can only be added or
+        BEADG (5-string) is the built-in default; Cello (CGDA) is a second
+        built-in preset (not the default, not editable/deletable — pick it
+        from Active tuning below). Add your own for AEADG, a half-step-flat
+        BbEbAbDbGb, a 4-string EADG, a 6-string with a high string on top,
+        or anything else. Strings can only be added or
         removed from the top or bottom, never the middle. A newly added
         string always starts at a fresh default note + color for its
         position — colors of the strings that stay put never change, and
@@ -57,13 +59,15 @@
         <p id="fse3d-tuning-limit-note" class="text-[10px] text-gray-500 mt-1 hidden"></p>
 
         <p class="text-[10px] text-gray-500 mt-2">
-            Note + octave, scientific pitch notation, low string first —
-            e.g. <code>B0</code>, <code>Bb1</code>, <code>F#2</code>.
+            Pick each string's open note from the dropdown, low string
+            first — the five <span style="color:#f2c14e;font-weight:700">★ BEADG default</span>
+            notes (<code>B0</code>, <code>E1</code>, <code>A1</code>,
+            <code>D2</code>, <code>G2</code>) are marked in every list.
             Strings can repeat the same note + octave too (e.g. an
             intentional unison pair) — nothing requires them to be
             distinct, though a BDADG tuning's two D strings would typically
             be different octaves (<code>D2</code> and <code>D3</code>).
-            4-8 strings.
+            4-8 strings, C-1 to E5 (covers violin's open high E).
         </p>
         <p id="fse3d-tuning-form-error" class="text-xs text-red-400 mt-2 hidden"></p>
         <div class="flex gap-2 mt-3">
@@ -79,18 +83,32 @@
         const $ = (id) => document.getElementById(id);
         const BUILTIN_ID = 'beadg';
         const BEADG_STRINGS = ['B0', 'E1', 'A1', 'D2', 'G2'];
+        // Mirrors FSE.BUILTIN_PRESET_TUNINGS (src/target-tuning.js) — this
+        // script isn't a module and can't import it (same reason every other
+        // local mirror in this file exists). BEADG is always first and is
+        // the default (colors: null — resolved live off the global palette
+        // by screen.js, same as before this list existed); every other
+        // preset is selectable in the Active tuning dropdown alongside it
+        // but is never the default and never editable/deletable, so unlike
+        // custom tunings these never appear in readCustom()/the "Saved
+        // custom tunings" list.
+        const BUILTIN_PRESETS = [
+            { id: BUILTIN_ID, label: 'BEADG (default)', strings: BEADG_STRINGS, colors: null },
+            { id: 'cello_cgda', label: 'Cello (CGDA)', strings: ['C2', 'G2', 'D3', 'A3'], colors: ['#cc00aa', '#f18313', '#3fc413', '#ecd234'] },
+        ];
         // Mirrors FSE.MIN_TARGET_STRING_COUNT / MAX_TARGET_STRING_COUNT
         // (src/fse-retune.js) for immediate client-side feedback (button
         // disabling) — the authoritative floor/ceiling is enforced in
         // window.fse3dSaveCustomTuning.
         const MIN_STRINGS = 4;
         const MAX_STRINGS = 8;
-        // Note + octave, e.g. B0 / Bb1 / F#2 — mirrors FSE.parseTargetNote's
-        // regex (src/fse-retune.js) for immediate client-side field
-        // feedback. The authoritative validation still happens in
-        // window.fse3dSaveCustomTuning (calls the real parser), this is
-        // just so a bad field goes red before that round-trip.
-        const NOTE_RE = /^[A-Ga-g][#b]?-?\d+$/;
+        // Fixed note range offered in each per-string dropdown (MIDI 0-76,
+        // C-1 through E5 — E5 covers violin's open high E) — wide enough for
+        // any realistic tuning while keeping the option set fixed and always
+        // valid, so the editor no longer needs to parse/validate free-text
+        // note+octave input.
+        const NOTE_OPTION_MIN_MIDI = 0;
+        const NOTE_OPTION_MAX_MIDI = 76;
 
         function readActiveId() {
             try { return localStorage.getItem('fse_bg_targetTuningId') || BUILTIN_ID; } catch (_) { return BUILTIN_ID; }
@@ -161,6 +179,34 @@
             return window.fse3dResolveDisplayColor ? window.fse3dResolveDisplayColor(strings, colors, index) : localResolveDisplayColor(strings, colors, index);
         }
 
+        // Every BEADG-default note (B0/E1/A1/D2/G2), by MIDI — highlighted
+        // in each per-string dropdown regardless of that row's own position,
+        // so a familiar reference point is visible no matter which string
+        // you're setting.
+        const BEADG_DEFAULT_MIDIS = BEADG_STRINGS.map(localMidiFromNote);
+
+        // Fills a per-string <select> with the fixed note range, marking the
+        // BEADG-default notes. Matches `currentSpec` by MIDI (not exact
+        // spelling) so a flat-spelled legacy value (e.g. "Bb1") still lands
+        // on its equivalent option (A#1) instead of resetting silently.
+        function populateNoteOptions(selectEl, currentSpec) {
+            selectEl.innerHTML = '';
+            for (let midi = NOTE_OPTION_MIN_MIDI; midi <= NOTE_OPTION_MAX_MIDI; midi++) {
+                const label = localNoteFromMidi(midi);
+                const isDefault = BEADG_DEFAULT_MIDIS.includes(midi);
+                const opt = document.createElement('option');
+                opt.value = label;
+                opt.textContent = isDefault ? ('★ ' + label + ' (BEADG default)') : label;
+                if (isDefault) {
+                    opt.style.fontWeight = '700';
+                    opt.style.color = '#f2c14e';
+                }
+                selectEl.appendChild(opt);
+            }
+            const currentMidi = localMidiFromNote(currentSpec);
+            if (currentMidi != null) selectEl.value = localNoteFromMidi(currentMidi);
+        }
+
         const sel = $('fse3d-tuning-active');
         if (!sel) return;
         const listEl = $('fse3d-tuning-list');
@@ -192,10 +238,12 @@
             const activeId = readActiveId();
             const custom = readCustom();
             sel.innerHTML = '';
-            const beadgOpt = document.createElement('option');
-            beadgOpt.value = BUILTIN_ID;
-            beadgOpt.textContent = 'BEADG (default)';
-            sel.appendChild(beadgOpt);
+            for (const p of BUILTIN_PRESETS) {
+                const opt = document.createElement('option');
+                opt.value = p.id;
+                opt.textContent = p.label;
+                sel.appendChild(opt);
+            }
             for (const p of custom) {
                 const opt = document.createElement('option');
                 opt.value = p.id;
@@ -204,7 +252,7 @@
             }
             // A stale/deleted id falls back to the built-in default rather
             // than leaving the dropdown on a nonexistent selection.
-            sel.value = (activeId === BUILTIN_ID || custom.some((p) => p.id === activeId)) ? activeId : BUILTIN_ID;
+            sel.value = (BUILTIN_PRESETS.some((p) => p.id === activeId) || custom.some((p) => p.id === activeId)) ? activeId : BUILTIN_ID;
         }
 
         function renderManageList() {
@@ -258,13 +306,11 @@
                 label.textContent = 'String ' + (i + 1) + (isLow ? ' (low)' : isHigh ? ' (high)' : '');
                 rowDiv.appendChild(label);
 
-                const noteInput = document.createElement('input');
-                noteInput.type = 'text';
-                noteInput.value = r.note;
-                noteInput.placeholder = 'e.g. B0';
-                noteInput.className = 'fse3d-row-note flex-1 min-w-0 bg-dark-700 border border-gray-800 rounded px-2 py-1 text-xs text-gray-300 outline-none';
-                noteInput.addEventListener('input', () => { rows[i].note = noteInput.value; noteInput.classList.remove('border-red-500'); });
-                rowDiv.appendChild(noteInput);
+                const noteSelect = document.createElement('select');
+                noteSelect.className = 'fse3d-row-note flex-1 min-w-0 bg-dark-700 border border-gray-800 rounded px-2 py-1 text-xs text-gray-300 outline-none';
+                populateNoteOptions(noteSelect, r.note);
+                noteSelect.addEventListener('change', () => { rows[i].note = noteSelect.value; });
+                rowDiv.appendChild(noteSelect);
 
                 const colorInput = document.createElement('input');
                 colorInput.type = 'color';
@@ -383,16 +429,8 @@
                     showError('Tunings need between ' + MIN_STRINGS + ' and ' + MAX_STRINGS + ' strings.');
                     return;
                 }
-                const strings = rows.map((r) => r.note.trim());
+                const strings = rows.map((r) => r.note);
                 const colors = rows.map((r) => r.color);
-                let bad = false;
-                const noteInputs = rowsEl ? Array.from(rowsEl.querySelectorAll('.fse3d-row-note')) : [];
-                noteInputs.forEach((inp, i) => {
-                    const ok = NOTE_RE.test(strings[i]);
-                    inp.classList.toggle('border-red-500', !ok);
-                    if (!ok) bad = true;
-                });
-                if (bad) { showError('Each string needs a note + octave, e.g. B0, Bb1, F#2.'); return; }
                 const profile = { name: name, strings: strings, colors: colors };
                 if (editingId) profile.id = editingId;
                 let savedId = null;
