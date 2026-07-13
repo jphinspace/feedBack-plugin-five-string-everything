@@ -40,7 +40,7 @@
 //            same contract as an unplayable single note.
 
 import { notePitchClass } from './pitch.js';
-import { TARGET_MAX_FRET } from './target-tuning.js';
+import { DEFAULT_MAX_FRET } from './target-tuning.js';
 
 // Max fretted-fret difference within one chord: 3 = a four-fret box
 // (e.g. frets 5-6-7-8). A "5+ fret stretch" (max − min ≥ 4) is only
@@ -291,7 +291,7 @@ export function scoreVoicing(spec, voicing) {
 // count (opts.maxNotes) — the solver never emits more notes than the
 // chart had, which keeps _origNote/scoring semantics sane downstream.
 // Returns { voicing: [{ s, f, midi, pc }], cost } or null.
-export function solveVoicingSearch(spec, requiredPcs, targetMidiTuning, opts) {
+export function solveVoicingSearch(spec, requiredPcs, targetMidiTuning, opts, maxFret = DEFAULT_MAX_FRET) {
     const target = targetMidiTuning;
     if (!Array.isArray(target) || target.length === 0) return null;
     const nStr = target.length;
@@ -301,13 +301,13 @@ export function solveVoicingSearch(spec, requiredPcs, targetMidiTuning, opts) {
     // window covering the whole neck): a degenerate source span >= 20
     // (extreme GP import) must widen the search, never empty it — an
     // empty loop would also skip the open-string candidates it gates.
-    const allowedSpan = Math.min(Math.max(MAX_CHORD_SPAN, spec.span), TARGET_MAX_FRET - 1);
+    const allowedSpan = Math.min(Math.max(MAX_CHORD_SPAN, spec.span), maxFret - 1);
     const pcsArr = [...requiredPcs];
     const pcBit = new Map(pcsArr.map((pc, i) => [pc, 1 << i]));
     const fullMask = (1 << pcsArr.length) - 1;
     const srcPos = spec.minFretted !== null ? spec.minFretted : 1;
     const positions = [];
-    for (let p = 1; p <= TARGET_MAX_FRET - allowedSpan; p++) positions.push(p);
+    for (let p = 1; p <= maxFret - allowedSpan; p++) positions.push(p);
     positions.sort((a, b) => Math.abs(a - srcPos) - Math.abs(b - srcPos) || a - b);
 
     const W = SOLVER_WEIGHTS;
@@ -324,7 +324,7 @@ export function solveVoicingSearch(spec, requiredPcs, targetMidiTuning, opts) {
             const list = [null];
             const openBit = pcBit.get(pcOf(open));
             if (openBit !== undefined) list.push({ s: j, f: 0, midi: open, pc: pcOf(open), bit: openBit });
-            for (let f = p; f <= p + allowedSpan && f <= TARGET_MAX_FRET; f++) {
+            for (let f = p; f <= p + allowedSpan && f <= maxFret; f++) {
                 const midi = open + f;
                 const bit = pcBit.get(pcOf(midi));
                 if (bit !== undefined) list.push({ s: j, f, midi, pc: pcOf(midi), bit });
@@ -409,8 +409,9 @@ export function matchVoicingToSource(voicing, spec) {
 // comparing rungs on cost + rung * DEGRADE_RUNG (with an early break
 // once no later rung can win). Returns
 // { placements: [{ srcIndex, s, f }], tier: 0|2|3, rung } or null (drop
-// the chord).
-export function solveChord(spec, targetMidiTuning, exactCandidate) {
+// the chord). `maxFret` is the active tuning profile's own ceiling
+// (defaults to DEFAULT_MAX_FRET, the historical hardcoded 20).
+export function solveChord(spec, targetMidiTuning, exactCandidate, maxFret = DEFAULT_MAX_FRET) {
     if (!spec || spec.notes.length === 0) return null;
     if (Array.isArray(exactCandidate) && exactCandidate.length === spec.notes.length) {
         const byIdx = new Map(spec.notes.map(n => [n.idx, n]));
@@ -427,7 +428,7 @@ export function solveChord(spec, targetMidiTuning, exactCandidate) {
     const rungs = degradationLadder(spec);
     let best = null;
     for (let r = 0; r < rungs.length; r++) {
-        const found = solveVoicingSearch(spec, rungs[r], targetMidiTuning, { maxNotes: spec.noteCount });
+        const found = solveVoicingSearch(spec, rungs[r], targetMidiTuning, { maxNotes: spec.noteCount }, maxFret);
         if (found) {
             const total = found.cost + r * W.DEGRADE_RUNG;
             if (!best || total < best.total) {

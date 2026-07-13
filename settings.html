@@ -58,6 +58,19 @@
         </div>
 
         <div class="mt-3">
+            <label for="cr3d-tuning-maxfret" class="text-xs font-medium text-gray-400 mb-1 block">Max fret</label>
+            <select id="cr3d-tuning-maxfret"
+                class="w-full bg-dark-700 border border-gray-800 rounded-lg px-3 py-2 text-xs text-gray-300 outline-none">
+            </select>
+            <p class="text-[10px] text-gray-500 mt-1">
+                Highest fret this tuning remaps onto. Most charts never go
+                past fret 20 — raise it for extended-range instruments or the
+                occasional high transcribed solo, lower it for a
+                genuinely short-necked instrument.
+            </p>
+        </div>
+
+        <div class="mt-3">
             <button type="button" id="cr3d-tuning-add-low"
                 class="w-full text-xs px-3 py-1.5 rounded bg-dark-700 border border-gray-800 text-gray-300 hover:text-white">+ Add string below (low)</button>
         </div>
@@ -100,6 +113,11 @@
             { cls: 'lead', keySuffix: 'Lead' },
         ];
         const BEADG_STRINGS = ['B0', 'E1', 'A1', 'D2', 'G2'];
+        // Mirrors CR.MAX_FRET_OPTIONS / CR.DEFAULT_MAX_FRET
+        // (src/target-tuning.js).
+        const MAX_FRET_OPTIONS = [12, 14, 20, 21, 22, 24];
+        const DEFAULT_MAX_FRET = 20;
+        function isValidMaxFret(v) { return MAX_FRET_OPTIONS.indexOf(v) !== -1; }
         // Mirrors CR.BUILTIN_PRESET_TUNINGS (src/target-tuning.js) — not a
         // module, can't import it. DEFAULT_BASS_ID/DEFAULT_GUITAR_ID (not
         // array position) name which entries are the per-class defaults;
@@ -110,20 +128,22 @@
         // by explicit per-position roles in the real module (roles aren't
         // mirrored here — this editor never shows preset colors). None of
         // these are editable/deletable, so they never appear in
-        // readCustom().
+        // readCustom(). maxFret mirrors each preset's own ceiling — only
+        // used here to seed a brand-new custom tuning's max-fret dropdown
+        // from BUILTIN_PRESETS[0] (see seedRowsFromDefault).
         const BUILTIN_PRESETS = [
-            { id: DEFAULT_BASS_ID, label: 'EADG (default)', strings: BEADG_STRINGS.slice(1), colors: null },
-            { id: 'beadg', label: 'BEADG', strings: BEADG_STRINGS, colors: null },
-            { id: 'upright_solo_fsbea', label: 'Upright bass solo (F#BEA)', strings: ['F#1', 'B1', 'E2', 'A2'], colors: null },
-            { id: DEFAULT_GUITAR_ID, label: 'EADGBE (guitar)', strings: ['E2', 'A2', 'D3', 'G3', 'B3', 'E4'], colors: null },
-            { id: 'beadgbe', label: 'BEADGBE (7-string guitar)', strings: ['B1', 'E2', 'A2', 'D3', 'G3', 'B3', 'E4'], colors: null },
-            { id: 'baritone_beadfsb', label: 'Baritone (BEADF#B)', strings: ['B1', 'E2', 'A2', 'D3', 'F#3', 'B3'], colors: null },
-            { id: 'cello_cgda', label: 'Cello (CGDA)', strings: ['C2', 'G2', 'D3', 'A3'], colors: ['#cc00aa', '#f18313', '#3fc413', '#ecd234'] },
-            { id: 'viola_cgda', label: 'Viola (CGDA)', strings: ['C3', 'G3', 'D4', 'A4'], colors: ['#cc00aa', '#f18313', '#3fc413', '#ecd234'] },
-            { id: 'violin_gdae', label: 'Violin (GDAE)', strings: ['G3', 'D4', 'A4', 'E5'], colors: ['#f18313', '#3fc413', '#ecd234', '#e61f26'] },
-            { id: 'banjo4_cgbd', label: 'Banjo 4-string (CGBD)', strings: ['C3', 'G3', 'B3', 'D4'], colors: ['#cc00aa', '#f18313', '#1096e6', '#3fc413'] },
-            { id: 'banjo5_gdgbd', label: 'Banjo 5-string (gDGBD)', strings: ['G4', 'D3', 'G3', 'B3', 'D4'], colors: ['#f18313', '#3fc413', '#f18313', '#1096e6', '#3fc413'] },
-            { id: 'mandolin_ggddaaee', label: 'Mandolin (GGDDAAEE)', strings: ['G3', 'G3', 'D4', 'D4', 'A4', 'A4', 'E5', 'E5'], colors: ['#f18313', '#f18313', '#3fc413', '#3fc413', '#ecd234', '#ecd234', '#e61f26', '#e61f26'] },
+            { id: DEFAULT_BASS_ID, label: 'EADG (default)', strings: BEADG_STRINGS.slice(1), colors: null, maxFret: 20 },
+            { id: 'beadg', label: 'BEADG', strings: BEADG_STRINGS, colors: null, maxFret: 24 },
+            { id: 'upright_solo_fsbea', label: 'Upright bass solo (F#BEA)', strings: ['F#1', 'B1', 'E2', 'A2'], colors: null, maxFret: 24 },
+            { id: DEFAULT_GUITAR_ID, label: 'EADGBE (guitar)', strings: ['E2', 'A2', 'D3', 'G3', 'B3', 'E4'], colors: null, maxFret: 24 },
+            { id: 'beadgbe', label: 'BEADGBE (7-string guitar)', strings: ['B1', 'E2', 'A2', 'D3', 'G3', 'B3', 'E4'], colors: null, maxFret: 24 },
+            { id: 'baritone_beadfsb', label: 'Baritone (BEADF#B)', strings: ['B1', 'E2', 'A2', 'D3', 'F#3', 'B3'], colors: null, maxFret: 24 },
+            { id: 'cello_cgda', label: 'Cello (CGDA)', strings: ['C2', 'G2', 'D3', 'A3'], colors: ['#cc00aa', '#f18313', '#3fc413', '#ecd234'], maxFret: 24 },
+            { id: 'viola_cgda', label: 'Viola (CGDA)', strings: ['C3', 'G3', 'D4', 'A4'], colors: ['#cc00aa', '#f18313', '#3fc413', '#ecd234'], maxFret: 24 },
+            { id: 'violin_gdae', label: 'Violin (GDAE)', strings: ['G3', 'D4', 'A4', 'E5'], colors: ['#f18313', '#3fc413', '#ecd234', '#e61f26'], maxFret: 14 },
+            { id: 'banjo4_cgbd', label: 'Banjo 4-string (CGBD)', strings: ['C3', 'G3', 'B3', 'D4'], colors: ['#cc00aa', '#f18313', '#1096e6', '#3fc413'], maxFret: 24 },
+            { id: 'banjo5_gdgbd', label: 'Banjo 5-string (gDGBD)', strings: ['G4', 'D3', 'G3', 'B3', 'D4'], colors: ['#f18313', '#3fc413', '#f18313', '#1096e6', '#3fc413'], maxFret: 24 },
+            { id: 'mandolin_ggddaaee', label: 'Mandolin (GGDDAAEE)', strings: ['G3', 'G3', 'D4', 'D4', 'A4', 'A4', 'E5', 'E5'], colors: ['#f18313', '#f18313', '#3fc413', '#3fc413', '#ecd234', '#ecd234', '#e61f26', '#e61f26'], maxFret: 14 },
         ];
         // Mirrors CR.MIN/MAX_TARGET_STRING_COUNT — just for immediate
         // button-disabling feedback; the real floor/ceiling is enforced in
@@ -242,6 +262,7 @@
         if (sels.length === 0) return;
         const listEl = $('cr3d-tuning-list');
         const nameInput = $('cr3d-tuning-name');
+        const maxFretSelect = $('cr3d-tuning-maxfret');
         const rowsEl = $('cr3d-tuning-rows');
         const addLowBtn = $('cr3d-tuning-add-low');
         const addHighBtn = $('cr3d-tuning-add-high');
@@ -253,6 +274,7 @@
 
         let editingId = null; // null = "add new"
         let rows = []; // [{ note, color }], low to high — the editor's working state
+        let maxFret = DEFAULT_MAX_FRET; // the editor's working max-fret value
 
         function showError(msg) {
             if (!errorP) return;
@@ -305,7 +327,8 @@
                 row.className = 'flex items-center justify-between gap-2 text-xs bg-dark-700/40 border border-gray-800 rounded px-2 py-1.5';
                 const label = document.createElement('span');
                 label.className = 'text-gray-300 truncate';
-                label.textContent = profile.name + ' — ' + profile.strings.join(' ');
+                const maxFret = isValidMaxFret(profile.maxFret) ? profile.maxFret : DEFAULT_MAX_FRET;
+                label.textContent = profile.name + ' — ' + profile.strings.join(' ') + ' (max fret ' + maxFret + ')';
                 row.appendChild(label);
                 const btns = document.createElement('div');
                 btns.className = 'flex items-center gap-1 shrink-0';
@@ -391,6 +414,8 @@
 
         function seedRowsFromProfile(profile) {
             rows = profile.strings.map((note, i) => ({ note, color: resolveDisplayColor(profile.strings, profile.colors, i) }));
+            maxFret = isValidMaxFret(profile.maxFret) ? profile.maxFret : DEFAULT_MAX_FRET;
+            if (maxFretSelect) maxFretSelect.value = String(maxFret);
         }
         // Seeds a brand-new "Add a tuning" form from the built-in default
         // preset (BUILTIN_PRESETS[0] — EADG) rather than a hardcoded shape,
@@ -475,7 +500,8 @@
                 }
                 const strings = rows.map((r) => r.note);
                 const colors = rows.map((r) => r.color);
-                const profile = { name: name, strings: strings, colors: colors };
+                const savedMaxFret = isValidMaxFret(maxFret) ? maxFret : DEFAULT_MAX_FRET;
+                const profile = { name: name, strings: strings, colors: colors, maxFret: savedMaxFret };
                 if (editingId) profile.id = editingId;
                 let savedId = null;
                 if (window.cr3dSaveCustomTuning) {
@@ -483,7 +509,7 @@
                 } else {
                     const list = readCustom();
                     const id = editingId || ('custom_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8));
-                    const entry = { id: id, name: name, strings: strings, colors: colors };
+                    const entry = { id: id, name: name, strings: strings, colors: colors, maxFret: savedMaxFret };
                     const idx = list.findIndex((p) => p.id === id);
                     if (idx >= 0) list[idx] = entry; else list.push(entry);
                     writeCustomFallback(list);
@@ -493,6 +519,20 @@
                 resetForm();
                 renderActiveDropdowns();
                 renderManageList();
+            });
+        }
+
+        if (maxFretSelect) {
+            maxFretSelect.innerHTML = '';
+            for (const f of MAX_FRET_OPTIONS) {
+                const opt = document.createElement('option');
+                opt.value = String(f);
+                opt.textContent = String(f);
+                maxFretSelect.appendChild(opt);
+            }
+            maxFretSelect.addEventListener('change', () => {
+                const v = parseInt(maxFretSelect.value, 10);
+                maxFret = isValidMaxFret(v) ? v : DEFAULT_MAX_FRET;
             });
         }
 

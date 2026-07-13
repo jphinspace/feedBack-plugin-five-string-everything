@@ -42,6 +42,10 @@ Every saved tuning carries its own
 fixed per-string colors, set via a per-string color picker when you create
 or edit it, independent of the shared Highway String Colors setting.
 
+Every tuning also carries its own **max fret** (12, 14, 20, 21, 22, or 24)
+— the highest fret a chart is allowed to remap onto for that instrument.
+Set your own custom tunings' max fret when you create or edit them.
+
 ## Chords
 
 Single notes always keep their exact sounding pitch (or drop when the

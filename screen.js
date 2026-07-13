@@ -2928,10 +2928,13 @@ import { CR } from './src/chart-retune.js';
     // like a custom profile does. Then any number of
     // user-saved profiles in the 'customTunings' global JSON blob: [{ id,
     // name, strings: string[4..8],
-    // colors: string[4..8] }] — colors is always fully populated with
-    // concrete hex, never a "track the live palette" sentinel (see
+    // colors: string[4..8], maxFret }] — colors is always fully populated
+    // with concrete hex, never a "track the live palette" sentinel (see
     // window.cr3dDefaultStringFor: a newly added string's color is a
-    // one-time snapshot, not a live reference). Global-only (see
+    // one-time snapshot, not a live reference). maxFret is passed through
+    // as-read (possibly missing/invalid on a tuning saved before per-tuning
+    // max fret existed) — CR.resolveActiveTuning owns validating/defaulting
+    // it, the single source of truth for that fallback. Global-only (see
     // _bgReadSetting) — every panel remaps onto the same real instrument.
     function _crReadCustomTunings() {
         const raw = _bgReadSetting(null, 'customTunings');
@@ -2958,7 +2961,7 @@ import { CR } from './src/chart-retune.js';
             if (!Array.isArray(p.colors) || p.colors.length !== colors.length || p.colors.some((c, i) => c !== colors[i])) {
                 migrated = true;
             }
-            out.push({ id: p.id, name: p.name, strings: p.strings.slice(), colors });
+            out.push({ id: p.id, name: p.name, strings: p.strings.slice(), colors, maxFret: p.maxFret });
         }
         if (migrated) {
             // Written without _bgWriteGlobal/_bgEmitChange so this lazy
@@ -3018,19 +3021,22 @@ import { CR } from './src/chart-retune.js';
     // resolves colors via CR.resolveColorsArray (light gray substituted
     // for anything missing/invalid — the editor is responsible for
     // meaningful defaults via cr3dDefaultStringFor, this is just a safety
-    // net) so a malformed entry never reaches localStorage/the renderer.
-    // Returns the saved profile's id, or null if the input didn't validate.
+    // net) and maxFret via CR.isValidMaxFret (falls back to
+    // CR.DEFAULT_MAX_FRET) so a malformed entry never reaches
+    // localStorage/the renderer. Returns the saved profile's id, or null
+    // if the input didn't validate.
     window.cr3dSaveCustomTuning = (profile) => {
         if (!profile || typeof profile.name !== 'string' || !profile.name.trim()) return null;
         if (!CR.isValidTuningStringsArray(profile.strings)) return null;
         const n = profile.strings.length;
         const grayDefaults = profile.strings.map(() => CR.intToHex(CR.LIGHT_GRAY_COLOR));
         const colors = CR.resolveColorsArray(profile.colors, n, grayDefaults);
+        const maxFret = CR.isValidMaxFret(profile.maxFret) ? profile.maxFret : CR.DEFAULT_MAX_FRET;
         const list = _crReadCustomTunings();
         const id = (typeof profile.id === 'string' && profile.id)
             ? profile.id
             : 'custom_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-        const entry = { id, name: profile.name.trim(), strings: profile.strings.slice(0, n), colors };
+        const entry = { id, name: profile.name.trim(), strings: profile.strings.slice(0, n), colors, maxFret };
         const idx = list.findIndex(p => p.id === id);
         if (idx >= 0) list[idx] = entry; else list.push(entry);
         _crWriteCustomTunings(list);
@@ -4446,6 +4452,12 @@ import { CR } from './src/chart-retune.js';
         // separate "undo the drop" logic is needed; every tuning switch is
         // a from-scratch remap, not an incremental patch.
         let _activeTargetTuning = CR.resolveTargetTuning(CR.DEFAULT_TARGET_TUNING);
+        // The active profile's own remap ceiling (CR.resolveActiveTuning's
+        // maxFret — see src/target-tuning.js), threaded into
+        // _crRetuner.apply() below instead of a hardcoded fret limit.
+        // Refreshed in lockstep with _activeTargetTuning wherever that is
+        // (both PATCH POINTs: _primeActiveTargetTuningForInit, _bgLoadSettings).
+        let _crMaxFret = CR.DEFAULT_MAX_FRET;
         // Signature format matches _bgLoadSettings's tuningSig: strings
         // joined, '#', then colors joined (empty for a live-tracked tuning,
         // whose colors always resolve live — see isLiveTracked there).
@@ -4473,7 +4485,9 @@ import { CR } from './src/chart-retune.js';
             // first palette/tuning sync before buildBoard(). Resolves the
             // profile for this panel's arrangement class — init() seeds
             // _crArrClass from songInfo before this runs.
-            _activeTargetTuning = CR.resolveTargetTuning(_crResolveActiveTuning(_crArrClass).strings);
+            const activeTuning = _crResolveActiveTuning(_crArrClass);
+            _activeTargetTuning = CR.resolveTargetTuning(activeTuning.strings);
+            _crMaxFret = activeTuning.maxFret;
         }
         // Fret digits on the board ghost (hollow preview at Z=0), not on
         // flying note bodies — see fretNumberGhostScope for chord-hand vs all.
@@ -8407,6 +8421,11 @@ import { CR } from './src/chart-retune.js';
             // switches too.
             const activeTuning = _crResolveActiveTuning(_crArrClass);
             const tuningStrings = activeTuning.strings;
+            // maxFret doesn't affect strings/colors, so it's tracked
+            // independently of tuningSig below rather than folded into it —
+            // a maxFret-only edit (same strings/colors) shouldn't force the
+            // palette-recompute branch that tuningSig gates.
+            if (activeTuning.maxFret !== _crMaxFret) _crMaxFret = activeTuning.maxFret;
             // Named for what the colors:null sentinel actually MEANS (live-
             // track the global palette), not for "is this preset built-in"
             // — Cello is built-in too but carries concrete colors, so it
@@ -15787,7 +15806,7 @@ import { CR } from './src/chart-retune.js';
                         if (_cls !== _crArrClass) { _crArrClass = _cls; _bgLoadSettings(); }
                     }
                 }
-                _crRetuner.apply(bundle, _activeTargetTuning.midiTuning); // PATCH POINT (five-string retune) — before anything else reads bundle.notes/chords
+                _crRetuner.apply(bundle, _activeTargetTuning.midiTuning, _crMaxFret); // PATCH POINT (five-string retune) — before anything else reads bundle.notes/chords
                 if (!_chartPrewarmed) {
                     _chartPrewarmed = true;
                     _prewarmChart(bundle);
