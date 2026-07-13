@@ -19,6 +19,9 @@ const {
     isValidTuningStringsArray,
     BUILTIN_PRESET_TUNINGS,
     DEFAULT_TUNING_ID,
+    DEFAULT_GUITAR_TUNING_ID,
+    defaultTuningIdForClass,
+    arrangementClassFor,
     resolveActiveTuning,
     resolveTargetTuning,
     computeOpenStringMidiByString,
@@ -150,6 +153,45 @@ const SPOT_FRETS = [0, 10, 20];
 {
     check('below open B drops', remapNote(22, 0, 0), null);
     check('above fret 20 on G drops', remapNote(43, 4, 21), null);
+}
+
+// Non-monotonic targets (banjo5_gdgbd puts the HIGH G4 drone at index 0):
+// the walk moves in PITCH order, not index order, so overflow reaches the
+// drone string, and the direction lock guarantees termination (review
+// findings: wrongly-dropped notes on the banjo preset; a pre-existing
+// infinite loop when two pitch-adjacent strings sit >20 semitones apart).
+{
+    const banjo5 = resolveTargetTuning(['G4', 'D3', 'G3', 'B3', 'D4']).midiTuning;
+    check('banjo5 target midi (drone-first, non-monotonic)', banjo5, [67, 50, 55, 59, 62]);
+    check('overflow past the top fretted string walks to the HIGH drone at index 0',
+        resolveTargetForFret(75, 1, 8, banjo5), { s: 0, f: 16, adjustment: 8 });
+
+    // Completeness sweep: a standard-guitar chart remapped onto banjo5
+    // must never drop a note that SOME banjo string could play, and every
+    // kept note must sound its exact source pitch.
+    const src = computeOpenStringMidiByString(6, [0, 0, 0, 0, 0, 0], 0);
+    const k = computeArrangementShift(6, [0, 0, 0, 0, 0, 0], 0, src, banjo5);
+    let wronglyDropped = 0, pitchErrors = 0;
+    for (let s = 0; s < 6; s++) {
+        for (let f = 0; f <= 20; f++) {
+            const r = remapNote(src[s], s + k, f, banjo5);
+            const fits = banjo5.some(open => { const tf = f + (src[s] - open); return tf >= 0 && tf <= 20; });
+            if (fits && !r) wronglyDropped++;
+            if (r && banjo5[r.s] + r.f !== src[s] + f) pitchErrors++;
+        }
+    }
+    check('banjo5 completeness: zero wrongly-dropped notes across a full guitar chart sweep', wronglyDropped, 0);
+    check('banjo5 completeness: every kept note sounds its exact source pitch', pitchErrors, 0);
+
+    // The former infinite-loop input (strings 35 and 62 are pitch-adjacent
+    // in this non-monotonic target, 27 semitones apart): the pitch walk
+    // now FINDS the legitimate placement the index walk oscillated past.
+    check('pitch-adjacent >20-semitone gap: resolves instead of hanging',
+        resolveTargetForFret(45, 1, 15, [40, 35, 62, 55, 59, 64]), { s: 0, f: 20, adjustment: 5 });
+    // And when nothing fits anywhere, the direction lock returns null
+    // (this monotonic huge-gap case also looped forever before).
+    check('monotonic >20-semitone adjacent gap with no fit terminates with null',
+        resolveTargetForFret(50, 0, 5, [28, 60, 65, 70]), null);
 }
 
 // Slide notes.
@@ -553,37 +595,121 @@ const SPOT_FRETS = [0, 10, 20];
 {
     check('DEFAULT_TUNING_ID is EADG, and EADG is the first preset',
         DEFAULT_TUNING_ID, 'eadg');
+    check('DEFAULT_GUITAR_TUNING_ID is EADGBE', DEFAULT_GUITAR_TUNING_ID, 'eadgbe');
     check('EADG preset entry is DEFAULT_TARGET_TUNING minus the low B, live-tracked (colors: null) like BEADG',
         { strings: BUILTIN_PRESET_TUNINGS[0].strings, colors: BUILTIN_PRESET_TUNINGS[0].colors },
         { strings: DEFAULT_TARGET_TUNING.slice(1), colors: null });
     check('BEADG preset entry shares DEFAULT_TARGET_TUNING and has no concrete colors (live-tracked)',
         { strings: BUILTIN_PRESET_TUNINGS[1].strings, colors: BUILTIN_PRESET_TUNINGS[1].colors },
         { strings: DEFAULT_TARGET_TUNING, colors: null });
-    check('every preset other than EADG/BEADG carries concrete, valid colors',
-        BUILTIN_PRESET_TUNINGS.filter(p => p.id !== 'eadg' && p.id !== 'beadg').every(p => Array.isArray(p.colors) && p.colors.length === p.strings.length && isValidTuningStringsArray(p.strings)),
+    const eadgbePreset = BUILTIN_PRESET_TUNINGS.find(p => p.id === 'eadgbe');
+    check('EADGBE preset is standard 6-string guitar, live-tracked with explicit per-position roles',
+        { strings: eadgbePreset.strings, colors: eadgbePreset.colors, roles: eadgbePreset.roles },
+        { strings: ['E2', 'A2', 'D3', 'G3', 'B3', 'E4'], colors: null, roles: ['e', 'a', 'd', 'g', 'highB', 'highE'] });
+    check('EADGBE preset strings validate and resolve to standard guitar MIDI',
+        resolveTargetTuning(eadgbePreset.strings).midiTuning, [40, 45, 50, 55, 59, 64]);
+    const sevenPreset = BUILTIN_PRESET_TUNINGS.find(p => p.id === 'beadgbe');
+    check('BEADGBE 7-string preset resolves to standard 7-string guitar MIDI, low B takes the lowB role',
+        { midi: resolveTargetTuning(sevenPreset.strings).midiTuning, colors: sevenPreset.colors, roles: sevenPreset.roles },
+        { midi: [35, 40, 45, 50, 55, 59, 64], colors: null, roles: ['lowB', 'e', 'a', 'd', 'g', 'highB', 'highE'] });
+    const baritonePreset = BUILTIN_PRESET_TUNINGS.find(p => p.id === 'baritone_beadfsb');
+    check('Baritone preset is standard guitar down a fourth, roles position-parallel to EADGBE',
+        { midi: resolveTargetTuning(baritonePreset.strings).midiTuning, colors: baritonePreset.colors, roles: baritonePreset.roles },
+        { midi: [35, 40, 45, 50, 54, 59], colors: null, roles: ['e', 'a', 'd', 'g', 'highB', 'highE'] });
+    const violinPreset = BUILTIN_PRESET_TUNINGS.find(p => p.id === 'violin_gdae');
+    check('Violin preset resolves fifths tuning with concrete colors (no roles)',
+        { midi: resolveTargetTuning(violinPreset.strings).midiTuning, colors: violinPreset.colors, roles: violinPreset.roles },
+        { midi: [55, 62, 69, 76], colors: ['#f18313', '#3fc413', '#ecd234', '#e61f26'], roles: undefined });
+    const uprightPreset = BUILTIN_PRESET_TUNINGS.find(p => p.id === 'upright_solo_fsbea');
+    check('Upright solo preset is EADG up a whole step, live-tracked with bass-position roles',
+        { midi: resolveTargetTuning(uprightPreset.strings).midiTuning, colors: uprightPreset.colors, roles: uprightPreset.roles },
+        { midi: [30, 35, 40, 45], colors: null, roles: ['e', 'a', 'd', 'g'] });
+    const violaPreset = BUILTIN_PRESET_TUNINGS.find(p => p.id === 'viola_cgda');
+    check('Viola preset is Cello an octave up, same note-parallel colors',
+        { midi: resolveTargetTuning(violaPreset.strings).midiTuning, colors: violaPreset.colors },
+        { midi: [48, 55, 62, 69], colors: ['#cc00aa', '#f18313', '#3fc413', '#ecd234'] });
+    const banjo4Preset = BUILTIN_PRESET_TUNINGS.find(p => p.id === 'banjo4_cgbd');
+    check('Banjo 4-string preset resolves plectrum tuning with concrete colors',
+        { midi: resolveTargetTuning(banjo4Preset.strings).midiTuning, colors: banjo4Preset.colors },
+        { midi: [48, 55, 59, 62], colors: ['#cc00aa', '#f18313', '#1096e6', '#3fc413'] });
+    const banjo5Preset = BUILTIN_PRESET_TUNINGS.find(p => p.id === 'banjo5_gdgbd');
+    check('Banjo 5-string preset is non-monotonic open G: string 0 is the HIGH G4 drone (banjo tab order)',
+        { midi: resolveTargetTuning(banjo5Preset.strings).midiTuning, colors: banjo5Preset.colors },
+        { midi: [67, 50, 55, 59, 62], colors: ['#f18313', '#3fc413', '#f18313', '#1096e6', '#3fc413'] });
+    const mandolinPreset = BUILTIN_PRESET_TUNINGS.find(p => p.id === 'mandolin_ggddaaee');
+    check('Mandolin preset is four paired courses at the 8-string maximum, one color per course pair',
+        { midi: resolveTargetTuning(mandolinPreset.strings).midiTuning, colors: mandolinPreset.colors },
+        {
+            midi: [55, 55, 62, 62, 69, 69, 76, 76],
+            colors: ['#f18313', '#f18313', '#3fc413', '#3fc413', '#ecd234', '#ecd234', '#e61f26', '#e61f26'],
+        });
+    check('Mandolin preset sits exactly at MAX_TARGET_STRING_COUNT', mandolinPreset.strings.length, MAX_TARGET_STRING_COUNT);
+    check('every preset without live-tracked colors carries concrete, valid colors',
+        BUILTIN_PRESET_TUNINGS.filter(p => p.colors !== null).every(p => Array.isArray(p.colors) && p.colors.length === p.strings.length && isValidTuningStringsArray(p.strings)),
+        true);
+    check('every live-tracked preset has valid strings and roles (if any) matching its string count',
+        BUILTIN_PRESET_TUNINGS.filter(p => p.colors === null).every(p => isValidTuningStringsArray(p.strings) && (p.roles === undefined || p.roles.length === p.strings.length)),
         true);
 
     check('resolveActiveTuning: no id (fresh install) resolves to EADG, live colors',
-        resolveActiveTuning(undefined, []), { strings: DEFAULT_TARGET_TUNING.slice(1), colors: null });
+        resolveActiveTuning(undefined, []), { strings: DEFAULT_TARGET_TUNING.slice(1), colors: null, roles: null });
     check('resolveActiveTuning: explicit EADG id resolves the same as no id',
-        resolveActiveTuning('eadg', []), { strings: DEFAULT_TARGET_TUNING.slice(1), colors: null });
+        resolveActiveTuning('eadg', []), { strings: DEFAULT_TARGET_TUNING.slice(1), colors: null, roles: null });
     check('resolveActiveTuning: explicit BEADG id resolves BEADG, live colors',
-        resolveActiveTuning('beadg', []), { strings: DEFAULT_TARGET_TUNING, colors: null });
+        resolveActiveTuning('beadg', []), { strings: DEFAULT_TARGET_TUNING, colors: null, roles: null });
+    check('resolveActiveTuning: EADGBE id resolves guitar strings + roles passthrough',
+        resolveActiveTuning('eadgbe', []),
+        { strings: ['E2', 'A2', 'D3', 'G3', 'B3', 'E4'], colors: null, roles: ['e', 'a', 'd', 'g', 'highB', 'highE'] });
     check('resolveActiveTuning: a non-default preset id (Cello) resolves its own strings + concrete colors',
         resolveActiveTuning('cello_cgda', []),
-        { strings: ['C2', 'G2', 'D3', 'A3'], colors: ['#cc00aa', '#f18313', '#3fc413', '#ecd234'] });
-    check('resolveActiveTuning: a custom-tuning id resolves from the supplied list',
+        { strings: ['C2', 'G2', 'D3', 'A3'], colors: ['#cc00aa', '#f18313', '#3fc413', '#ecd234'], roles: null });
+    check('resolveActiveTuning: a custom-tuning id resolves from the supplied list (roles always null)',
         resolveActiveTuning('custom_abc', [{ id: 'custom_abc', name: 'AEADG', strings: ['A0', 'E1', 'A1', 'D2', 'G2'], colors: ['#111111', '#222222', '#333333', '#444444', '#555555'] }]),
-        { strings: ['A0', 'E1', 'A1', 'D2', 'G2'], colors: ['#111111', '#222222', '#333333', '#444444', '#555555'] });
-    check('resolveActiveTuning: an unknown/deleted id falls back to BEADG shape',
-        resolveActiveTuning('stale_deleted_id', []), { strings: DEFAULT_TARGET_TUNING, colors: null });
-    check('resolveActiveTuning: an unknown id with null customTunings falls back to BEADG shape (non-array guard)',
-        resolveActiveTuning('stale_deleted_id', null), { strings: DEFAULT_TARGET_TUNING, colors: null });
-    check('resolveActiveTuning: an unknown id with undefined customTunings falls back to BEADG shape (non-array guard)',
-        resolveActiveTuning('stale_deleted_id', undefined), { strings: DEFAULT_TARGET_TUNING, colors: null });
+        { strings: ['A0', 'E1', 'A1', 'D2', 'G2'], colors: ['#111111', '#222222', '#333333', '#444444', '#555555'], roles: null });
+    // Unknown/deleted ids fall back to the arrangement class's default
+    // preset (EADG shape for bass, EADGBE for guitar classes) — changed
+    // from the pre-guitar hardcoded BEADG-shape fallback (see PLANNING.md
+    // Phase 12): the class default matches what a fresh install shows.
+    check('resolveActiveTuning: an unknown/deleted id falls back to the class default (bass -> EADG)',
+        resolveActiveTuning('stale_deleted_id', []), { strings: DEFAULT_TARGET_TUNING.slice(1), colors: null, roles: null });
+    check('resolveActiveTuning: an unknown id with null customTunings falls back to class default (non-array guard)',
+        resolveActiveTuning('stale_deleted_id', null), { strings: DEFAULT_TARGET_TUNING.slice(1), colors: null, roles: null });
+    check('resolveActiveTuning: an unknown id with undefined customTunings falls back to class default (non-array guard)',
+        resolveActiveTuning('stale_deleted_id', undefined), { strings: DEFAULT_TARGET_TUNING.slice(1), colors: null, roles: null });
+    check('resolveActiveTuning: an unknown id under a guitar class falls back to EADGBE',
+        resolveActiveTuning('stale_deleted_id', [], 'lead'),
+        { strings: ['E2', 'A2', 'D3', 'G3', 'B3', 'E4'], colors: null, roles: ['e', 'a', 'd', 'g', 'highB', 'highE'] });
+    check('resolveActiveTuning: no id under the rhythm class resolves the guitar default',
+        resolveActiveTuning(undefined, [], 'rhythm'),
+        { strings: ['E2', 'A2', 'D3', 'G3', 'B3', 'E4'], colors: null, roles: ['e', 'a', 'd', 'g', 'highB', 'highE'] });
+    check('resolveActiveTuning: an explicit id resolves the same regardless of class (any profile may use any tuning)',
+        resolveActiveTuning('eadg', [], 'lead'), { strings: DEFAULT_TARGET_TUNING.slice(1), colors: null, roles: null });
     check('resolveActiveTuning: a preset id wins even if a custom tuning happens to share it',
         resolveActiveTuning('cello_cgda', [{ id: 'cello_cgda', name: 'user override attempt', strings: ['E1', 'A1', 'D2', 'G2'], colors: ['#000', '#000', '#000', '#000'] }]),
-        { strings: ['C2', 'G2', 'D3', 'A3'], colors: ['#cc00aa', '#f18313', '#3fc413', '#ecd234'] });
+        { strings: ['C2', 'G2', 'D3', 'A3'], colors: ['#cc00aa', '#f18313', '#3fc413', '#ecd234'], roles: null });
+}
+
+// defaultTuningIdForClass / arrangementClassFor: the per-class profile
+// routing screen.js's _crProfileKeyFor/_crArrClass tracking delegates to.
+{
+    check('defaultTuningIdForClass: bass -> EADG', defaultTuningIdForClass('bass'), 'eadg');
+    check('defaultTuningIdForClass: rhythm -> EADGBE', defaultTuningIdForClass('rhythm'), 'eadgbe');
+    check('defaultTuningIdForClass: lead -> EADGBE', defaultTuningIdForClass('lead'), 'eadgbe');
+
+    check('arrangementClassFor: "Bass"', arrangementClassFor('Bass'), 'bass');
+    check('arrangementClassFor: "Bass 2"', arrangementClassFor('Bass 2'), 'bass');
+    check('arrangementClassFor: "Lead"', arrangementClassFor('Lead'), 'lead');
+    check('arrangementClassFor: "Rhythm"', arrangementClassFor('Rhythm'), 'rhythm');
+    check('arrangementClassFor: "Combo" routes to rhythm', arrangementClassFor('Combo'), 'rhythm');
+    check('arrangementClassFor: plain "Guitar 22" routes to rhythm', arrangementClassFor('Guitar 22'), 'rhythm');
+    check('arrangementClassFor: bass wins over lead when both words appear', arrangementClassFor('Lead Bass'), 'bass');
+    check('arrangementClassFor: word boundary — "BasslineKeys" is not bass', arrangementClassFor('BasslineKeys'), 'rhythm');
+    check('arrangementClassFor: case-insensitive', arrangementClassFor('LEAD'), 'lead');
+    check('arrangementClassFor: empty string pins bass (pre-guitar behavior for hosts without arrangement)',
+        arrangementClassFor(''), 'bass');
+    check('arrangementClassFor: whitespace-only pins bass', arrangementClassFor('   '), 'bass');
+    check('arrangementClassFor: undefined pins bass', arrangementClassFor(undefined), 'bass');
+    check('arrangementClassFor: non-string pins bass', arrangementClassFor(42), 'bass');
 }
 
 // intToHex / resolveColorsArray: plain data-shape transforms.

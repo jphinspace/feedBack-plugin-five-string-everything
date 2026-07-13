@@ -827,7 +827,7 @@ import { CR } from './src/chart-retune.js';
     // palette size so a malformed bundle or a 12-string chart doesn't
     // index past the per-string material arrays.
     // PATCH POINT (five-string retune): the ACTIVE TARGET TUNING's own
-    // string count (4-8, user-configurable via the Bass Tuning settings
+    // string count (4-8, user-configurable via the Target Tunings settings
     // editor — see _activeTargetTuning) — never the chart's own string
     // count. `targetStringCount` is the caller's
     // `_activeTargetTuning.midiTuning.length` (per-panel state; this
@@ -2299,7 +2299,7 @@ import { CR } from './src/chart-retune.js';
         return _bgBandsCache;
     }
 
-    const BG_DEFAULTS = { style: 'particles', intensity: 0.5, reactive: true, palette: 'default', bgTheme: 'default', hwTheme: 'default', showFretOnNote: true, fretNumberGhostScope: 'chords', cameraSmoothing: 0.5, zoomSmoothing: 0.5, tiltSmoothing: 0.5, cameraLockLow: false, cameraLockZoom: 0.5, cameraMode: 'lookahead', nutHeadstockVisible: true, tuningLabelsVisible: true, nutColor: '#f5f3f0', headstockColor: '#d4b48a', textSize: 0.5, vibrancy: 0.85, glow: 0.25, customImageDataUrl: '', customImageName: '', customVideoName: '', chordDiagramVisible: true, chordDiagramSize: 0.5, chordDiagramPosition: 'tl', fretColumnMarkerCadence: 1, projectionVisible: true, inlayLabelsVisible: false, sectionLabelsOnHighway: false, sectionHudVisible: false, sectionHudPosition: 'tr', sectionHudSize: 0.5, toneHudVisible: false, toneHudPosition: 'tl', toneHudSize: 0.5, fpsVisible: false, fretDividersVisible: true, slideArrowApproachVisible: true, slideArrowNeckVisible: true, slideArrowChainPreviewVisible: true, hitFx: 0.7, sparks: true, cinematic: true, verdictMarks: true, timingFx: true, streakFx: true, bloom: true, targetTuningId: CR.DEFAULT_TUNING_ID, customTunings: '[]' };
+    const BG_DEFAULTS = { style: 'particles', intensity: 0.5, reactive: true, palette: 'default', bgTheme: 'default', hwTheme: 'default', showFretOnNote: true, fretNumberGhostScope: 'chords', cameraSmoothing: 0.5, zoomSmoothing: 0.5, tiltSmoothing: 0.5, cameraLockLow: false, cameraLockZoom: 0.5, cameraMode: 'lookahead', nutHeadstockVisible: true, tuningLabelsVisible: true, nutColor: '#f5f3f0', headstockColor: '#d4b48a', textSize: 0.5, vibrancy: 0.85, glow: 0.25, customImageDataUrl: '', customImageName: '', customVideoName: '', chordDiagramVisible: true, chordDiagramSize: 0.5, chordDiagramPosition: 'tl', fretColumnMarkerCadence: 1, projectionVisible: true, inlayLabelsVisible: false, sectionLabelsOnHighway: false, sectionHudVisible: false, sectionHudPosition: 'tr', sectionHudSize: 0.5, toneHudVisible: false, toneHudPosition: 'tl', toneHudSize: 0.5, fpsVisible: false, fretDividersVisible: true, slideArrowApproachVisible: true, slideArrowNeckVisible: true, slideArrowChainPreviewVisible: true, hitFx: 0.7, sparks: true, cinematic: true, verdictMarks: true, timingFx: true, streakFx: true, bloom: true, targetTuningIdBass: CR.DEFAULT_TUNING_ID, targetTuningIdRhythm: CR.DEFAULT_GUITAR_TUNING_ID, targetTuningIdLead: CR.DEFAULT_GUITAR_TUNING_ID, customTunings: '[]' };
     // User-selectable, persistable bg styles — must mirror settings.html's
     // VALID_STYLES. 'venue' is deliberately NOT here: it is an internal effective
     // style reached only via _venueSceneOverride (the viz-picker Venue flow), so
@@ -2659,6 +2659,19 @@ import { CR } from './src/chart-retune.js';
     // localStorage overrides still win because they're an explicit
     // per-instance opt-out and shouldn't be shadowed by a global edit.
     const _bgMemFallback = Object.create(null);
+    // PATCH POINT (guitar profiles): the single source of truth for the
+    // per-arrangement-class tuning-profile setting keys. The GLOBAL-only
+    // exclusion in _bgReadSetting, the _bgListener change case,
+    // _crProfileKeyFor, and cr3dDeleteCustomTuning's class loop all
+    // derive from this map — adding or renaming a class is a one-place
+    // edit here (plus settings.html's mirrored PROFILE_CLASSES).
+    const _CR_PROFILE_KEY_BY_CLASS = {
+        bass: 'targetTuningIdBass',
+        rhythm: 'targetTuningIdRhythm',
+        lead: 'targetTuningIdLead',
+    };
+    const _CR_PROFILE_CLASSES = Object.keys(_CR_PROFILE_KEY_BY_CLASS);
+    const _CR_PROFILE_KEYS = Object.values(_CR_PROFILE_KEY_BY_CLASS);
     function _bgReadSetting(panelKey, key) {
         let panelVal = null;
         let globalVal = null;
@@ -2668,12 +2681,18 @@ import { CR } from './src/chart-retune.js';
             // UI, so a panel must never be shadowed by a stale per-panel override
             // (chart_retuner_bg_panel<idx>_palette / _customColors). Neither is a
             // BG_DEFAULTS key, so per-panel scoping never applied to them.
-            // 'targetTuningId' + 'customTunings' are GLOBAL-only for the same
-            // reason as customColors above, plus a semantic one: the active
-            // tuning describes the player's REAL physical instrument, not a
-            // per-panel aesthetic choice — every splitscreen panel should
-            // remap onto the same bass.
-            if (key !== 'palette' && key !== 'customColors' && key !== 'targetTuningId' && key !== 'customTunings') {
+            // PATCH POINT (guitar profiles): the per-class tuning profile
+            // ids (_CR_PROFILE_KEYS) + 'customTunings' are GLOBAL-only for
+            // the same reason as customColors above, plus a semantic one:
+            // a tuning profile describes the player's REAL physical
+            // instrument, not a per-panel aesthetic choice — every
+            // splitscreen panel showing the same arrangement CLASS should
+            // remap onto the same instrument (panels showing different
+            // classes differ via their own per-panel _crArrClass, not
+            // per-panel settings).
+            if (key !== 'palette' && key !== 'customColors'
+                && _CR_PROFILE_KEYS.indexOf(key) === -1
+                && key !== 'customTunings') {
                 panelVal = localStorage.getItem('chart_retuner_bg_' + panelKey + '_' + key);
             }
             globalVal = localStorage.getItem('chart_retuner_bg_' + key);
@@ -2954,15 +2973,45 @@ import { CR } from './src/chart-retune.js';
     function _crWriteCustomTunings(list) {
         _bgWriteGlobal('customTunings', JSON.stringify(list));
     }
-    // Resolves the currently-active tuning to { strings, colors } — the
-    // branching (built-in presets, then custom tunings, then a BEADG-shaped
-    // fallback for anything unset/unknown/deleted) is pure logic living in
-    // CR.resolveActiveTuning (src/target-tuning.js); this just supplies
-    // the two screen.js-owned reads it needs.
-    function _crResolveActiveTuning() {
-        return CR.resolveActiveTuning(_bgReadSetting(null, 'targetTuningId'), _crReadCustomTunings());
+    // PATCH POINT (guitar profiles): three per-arrangement-class tuning
+    // profiles (bass / rhythm / lead), each a pointer into the SAME shared
+    // pool of built-in presets + saved custom tunings — any profile may
+    // use any tuning. The setting key for a class (an unknown class
+    // resolves the bass key, matching CR.arrangementClassFor's fallback):
+    function _crProfileKeyFor(arrClass) {
+        return _CR_PROFILE_KEY_BY_CLASS[arrClass] || _CR_PROFILE_KEY_BY_CLASS.bass;
     }
-    window.cr3dSetActiveTuning = (id) => _bgWriteGlobal('targetTuningId', String(id || CR.DEFAULT_TUNING_ID));
+    // One-time migration from the single pre-guitar 'targetTuningId'
+    // setting: an existing user's tuning pick becomes their BASS profile
+    // (it was always a bass tuning — this plugin was bass-only). Rhythm/
+    // Lead intentionally start at the guitar default rather than
+    // inheriting the bass pick. Idempotent (guarded on the Bass key
+    // already existing); written without _bgWriteGlobal/_bgEmitChange so
+    // load-time migration can't re-enter the change listener (mirrors the
+    // hwTheme backward-compat backfill in _bgLoadSettings). The legacy key
+    // is left in place — settings.html's pre-load fallback still reads it
+    // for the bass class, and it's harmless otherwise.
+    (function _crMigrateLegacyTuningProfile() {
+        try {
+            if (localStorage.getItem('chart_retuner_bg_targetTuningIdBass') != null) return;
+            const legacy = localStorage.getItem('chart_retuner_bg_targetTuningId');
+            if (legacy == null) return;
+            _bgMemFallback.targetTuningIdBass = legacy;
+            localStorage.setItem('chart_retuner_bg_targetTuningIdBass', legacy);
+        } catch (_) { /* storage blocked — per-class defaults apply */ }
+    })();
+    // Resolves a class's active tuning to { strings, colors, roles } — the
+    // branching (built-in presets, then custom tunings, then the class-
+    // default preset for anything unset/unknown/deleted) is pure logic
+    // living in CR.resolveActiveTuning (src/target-tuning.js); this just
+    // supplies the screen.js-owned reads it needs.
+    function _crResolveActiveTuning(arrClass) {
+        return CR.resolveActiveTuning(_bgReadSetting(null, _crProfileKeyFor(arrClass)), _crReadCustomTunings(), arrClass);
+    }
+    // Signature change with guitar profiles: takes the arrangement class
+    // first. settings.html is the only caller; the two ship together.
+    window.cr3dSetActiveTuning = (arrClass, id) =>
+        _bgWriteGlobal(_crProfileKeyFor(arrClass), String(id || CR.defaultTuningIdForClass(arrClass)));
     window.cr3dListCustomTunings = () => _crReadCustomTunings();
     // Upserts a custom tuning profile by id (generates one for a new
     // profile). Validates strings via CR.isValidTuningStringsArray and
@@ -2989,12 +3038,16 @@ import { CR } from './src/chart-retune.js';
     };
     window.cr3dDeleteCustomTuning = (id) => {
         _crWriteCustomTunings(_crReadCustomTunings().filter(p => p.id !== id));
-        // Fall back to the built-in default if the deleted profile was active
-        // — otherwise the renderer would keep the old tuning alive purely
-        // via the (now-orphaned) targetTuningId pointer.
-        if (_bgReadSetting(null, 'targetTuningId') === id) window.cr3dSetActiveTuning(CR.DEFAULT_TUNING_ID);
+        // Fall back to each class's built-in default for every profile
+        // that pointed at the deleted tuning — otherwise the renderer
+        // would keep the old tuning alive purely via a (now-orphaned)
+        // profile pointer. All three classes are checked: the same custom
+        // tuning may be assigned to any number of profiles.
+        for (const cls of _CR_PROFILE_CLASSES) {
+            if (_bgReadSetting(null, _crProfileKeyFor(cls)) === id) window.cr3dSetActiveTuning(cls, null);
+        }
     };
-    // Bridge for settings.html's Bass Tuning editor "+ Add string above/
+    // Bridge for settings.html's Target Tunings editor "+ Add string above/
     // below" buttons — pure, stateless (see CR.defaultExtensionNote's own
     // doc comment): given the direction and the CURRENT edge row's note
     // spec, returns the new row's default { note, color }.
@@ -4381,7 +4434,7 @@ import { CR } from './src/chart-retune.js';
         // playthrough, not just the next song). This falls out of how
         // _crRetuner.apply() is called every frame with whatever
         // _activeTargetTuning.midiTuning currently is: the moment this
-        // variable is reassigned (see the 'targetTuningId'/'customTunings'
+        // variable is reassigned (see the profile-id/'customTunings'
         // _bgListener case below, which fires the instant the setting
         // changes), createRetuner's own targetSig cache check
         // (src/chart-retune.js) detects the mismatch on the very next draw() call and
@@ -4397,6 +4450,24 @@ import { CR } from './src/chart-retune.js';
         // joined, '#', then colors joined (empty for a live-tracked tuning,
         // whose colors always resolve live — see isLiveTracked there).
         let _crTuningSig = CR.DEFAULT_TARGET_TUNING.join('|') + '#';
+        // PATCH POINT (guitar profiles): this panel's arrangement class
+        // ('bass' | 'rhythm' | 'lead'), selecting WHICH of the three
+        // global tuning profiles _bgLoadSettings resolves. Per-panel state
+        // (splitscreen panels may show different arrangements
+        // simultaneously) while the profile settings themselves stay
+        // global. Seeded in init() when songInfo is already present,
+        // corrected in draw() the moment the arrangement (or a song
+        // switch) changes class — draw() then calls _bgLoadSettings(),
+        // whose resolved-output tuningSig comparison decides whether
+        // anything actually needs rebuilding (two profiles pointing at the
+        // same tuning correctly no-op). Hosts that never populate
+        // songInfo.arrangement pin 'bass' — this plugin's pre-guitar
+        // behavior (CR.arrangementClassFor routes empty names to 'bass').
+        // _crArrSeen caches the last-classified raw arrangement string so
+        // draw() only re-runs the classifier's regexes when the string
+        // actually changes (a song/arrangement switch), not per frame.
+        let _crArrClass = 'bass';
+        let _crArrSeen;
         // Fret digits on the board ghost (hollow preview at Z=0), not on
         // flying note bodies — see fretNumberGhostScope for chord-hand vs all.
         let showFretOnNote = false;
@@ -8013,14 +8084,17 @@ import { CR } from './src/chart-retune.js';
                     if (_tuningLabelSprites.length) _disposeOpenStringPitchSprites();
                     return;
                 }
-                if (changedKey === 'targetTuningId' || changedKey === 'customTunings') {
-                    // Active target tuning changed (or a saved custom
+                if (_CR_PROFILE_KEYS.indexOf(changedKey) !== -1 || changedKey === 'customTunings') {
+                    // A tuning profile changed (or a saved custom
                     // profile's own notes were edited). _bgLoadSettings
                     // re-resolves _activeTargetTuning and, on an actual
                     // change, already disposes the nut label sprites itself
                     // (see the tuningSig check inside it) — nothing further
                     // to do here: the chart remap picks up the new
-                    // _activeTargetTuning.midiTuning on the very next draw() call.
+                    // _activeTargetTuning.midiTuning on the very next draw()
+                    // call. A change to a profile this panel's arrangement
+                    // class doesn't use resolves to the same tuningSig and
+                    // no-ops.
                     _bgLoadSettings();
                     return;
                 }
@@ -8315,12 +8389,16 @@ import { CR } from './src/chart-retune.js';
             // PATCH POINT (five-string retune, custom tunings): re-resolve
             // the active target tuning (strings + colors). Cheap so it's
             // safe to check every _bgLoadSettings call rather than only on
-            // the 'targetTuningId'/'customTunings' listener cases — a
-            // custom tuning's OWN string/color specs can change via
-            // Save/Edit without the active id changing, and
-            // _bgLoadSettings is the only place that runs on every settings
-            // reload regardless of which key triggered it.
-            const activeTuning = _crResolveActiveTuning();
+            // the profile-id/'customTunings' listener cases — a custom
+            // tuning's OWN string/color specs can change via Save/Edit
+            // without the active id changing, and _bgLoadSettings is the
+            // only place that runs on every settings reload regardless of
+            // which key triggered it. PATCH POINT (guitar profiles): which
+            // of the three profiles resolves is this panel's arrangement
+            // class — draw() re-invokes _bgLoadSettings when the class
+            // changes, so this stays current across song/arrangement
+            // switches too.
+            const activeTuning = _crResolveActiveTuning(_crArrClass);
             const tuningStrings = activeTuning.strings;
             // Named for what the colors:null sentinel actually MEANS (live-
             // track the global palette), not for "is this preset built-in"
@@ -8353,11 +8431,20 @@ import { CR } from './src/chart-retune.js';
                     // off _activeTargetTuning, since that's only refreshed
                     // a few lines below and would still be stale (the OLD
                     // tuning's shape) the first time a tuning switch reaches
-                    // this call.
-                    const roles = tuningStrings.map((spec) => {
-                        const parsed = CR.parseTargetNote(spec);
-                        return parsed ? CR.colorRoleForNote(parsed.midi) : 'gray';
-                    });
+                    // this call. PATCH POINT (guitar profiles): a preset
+                    // may carry an explicit per-position roles array
+                    // (EADGBE — its guitar-octave notes sit outside the
+                    // bass-octave note-identity chain); prefer it over
+                    // note-identity derivation. tuningSig deliberately
+                    // omits roles: they're a static function of the preset
+                    // id, and no two live-tracked presets share strings
+                    // while differing in roles.
+                    const roles = Array.isArray(activeTuning.roles)
+                        ? activeTuning.roles
+                        : tuningStrings.map((spec) => {
+                            const parsed = CR.parseTargetNote(spec);
+                            return parsed ? CR.colorRoleForNote(parsed.midi) : 'gray';
+                        });
                     activePalette = roles.map((role) => _crColorForRole(role, newPalette));
                     _crActiveRoles = roles;
                     _crPaletteSrcRef = newPalette;
@@ -15580,6 +15667,16 @@ import { CR } from './src/chart-retune.js';
                 _invertedCached = !!(bundle && bundle.inverted);
                 _leftyCached = !!(bundle && bundle.lefty);
                 _renderScale = (bundle && bundle.renderScale) || 1;
+                // PATCH POINT (guitar profiles): best-effort seed of this
+                // panel's arrangement class so initScene's _bgLoadSettings
+                // call (and the nStr derived from _activeTargetTuning just
+                // after it) resolve the right profile from frame one.
+                // songInfo may still be empty here (bundle arrays are only
+                // guaranteed post-ready) — draw() corrects on its first
+                // call and the existing newNStr !== nStr path rebuilds the
+                // board if the class flip changed the string count.
+                _crArrSeen = bundle && bundle.songInfo ? bundle.songInfo.arrangement : undefined;
+                _crArrClass = CR.arrangementClassFor(_crArrSeen);
                 // Per-render background opt-out. A plugin borrowing the highway as
                 // a visualization can set bundle.bgReactive === false to suppress
                 // the audio-reactive background for THIS instance only — without
@@ -15665,6 +15762,23 @@ import { CR } from './src/chart-retune.js';
             draw(bundle) {
                 if (!_isReady) return;
                 if (_ctxLost) return;   // GPU context lost (alt-tab / reset) — skip until restored
+                // PATCH POINT (guitar profiles): track the arrangement
+                // class and re-resolve the active profile the moment it
+                // changes (song switch, splitscreen panel arrangement
+                // swap). Gated on the raw arrangement STRING changing, so
+                // the per-frame cost is one strict compare — the regex
+                // classifier only runs on actual transitions, and
+                // _bgLoadSettings' resolved-output tuningSig check makes
+                // even those a no-op when both classes' profiles point at
+                // the same tuning.
+                {
+                    const _arr = bundle.songInfo && bundle.songInfo.arrangement;
+                    if (_arr !== _crArrSeen) {
+                        _crArrSeen = _arr;
+                        const _cls = CR.arrangementClassFor(_arr);
+                        if (_cls !== _crArrClass) { _crArrClass = _cls; _bgLoadSettings(); }
+                    }
+                }
                 _crRetuner.apply(bundle, _activeTargetTuning.midiTuning); // PATCH POINT (five-string retune) — before anything else reads bundle.notes/chords
                 if (!_chartPrewarmed) {
                     _chartPrewarmed = true;
@@ -16082,14 +16196,15 @@ import { CR } from './src/chart-retune.js';
         readBandsForBridgeTest: _bgReadBands,
         resetAnalyserBridgeForTest() { _bgBridgeKeys.clear(); _bgAudio = null; _bgAudioCore = null; _bgAudioFailedAt = 0; },
     };
-    // MVP scope: bass arrangements only (the string/fret offset engine
-    // assumes an is-bass source tuning throughout). Narrower than
-    // highway_3d's own \b(?:lead|rhythm|bass|combo|guitar)\b
-    // match on purpose. Word boundary keeps us from matching arrangements
-    // that merely contain "bass" as a substring (e.g. "BasslineKeys").
+    // PATCH POINT (guitar profiles): bass + guitar (lead/rhythm/combo)
+    // arrangements — the same predicate as highway_3d's own, now that the
+    // engine handles guitar sources (chord-aware remap, per-class tuning
+    // profiles). Word boundaries keep us from matching arrangements that
+    // merely contain one of the words as a substring (e.g. "BasslineKeys").
+    // Keys arrangements are matched by the piano plugin instead.
     window.feedBackViz_chart_retuner.matchesArrangement = function (songInfo) {
         const arr = (songInfo && songInfo.arrangement) || '';
-        return /\bbass\b/i.test(arr);
+        return /\b(?:lead|rhythm|bass|combo|guitar)\b/i.test(arr);
     };
 
 })();

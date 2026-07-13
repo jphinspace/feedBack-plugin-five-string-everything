@@ -26,21 +26,39 @@ export const DEFAULT_TARGET_TUNING = ['B0', 'E1', 'A1', 'D2', 'G2'];
 export const EXTENDED_DEFAULT_TARGET_TUNING = ['C#0', 'F#0', 'B0', 'E1', 'A1', 'D2', 'G2', 'B2', 'E3'];
 export const EXTENDED_CORE_INDEX = 2;
 
-// Built-in tuning presets — selectable in the Active tuning dropdown,
+// Built-in tuning presets — selectable in the Active tuning dropdowns,
 // never user-editable/deletable (no entry in the "Saved custom tunings"
-// list). There can be any number of these; DEFAULT_TUNING_ID (below) names
-// which ONE is the default rather than that being implied by "built-in" or
-// by array position. EADG (id 'eadg', standard 4-string bass) is the
-// default today. `colors: null` on both EADG and BEADG is the sentinel
-// resolveActiveTuning/screen.js's _bgLoadSettings read to mean "live-track
-// the global palette" (CR.lowBColor() + PALETTES.default) rather than a
-// fixed set — both share it because EADG's strings are literally BEADG's
-// own E/A/D/G strings minus the low B, so the same live E/A/D/G mapping
-// (plus lowB when present) applies to both; screen.js derives each preset's
-// activePalette per-string by note identity (CR.colorRoleForNote), not by a
-// hardcoded position table, so this generalizes to either shape. Every
-// other preset carries concrete hand-picked colors and flows through the
-// same resolution path a user-saved custom tuning does.
+// list). There can be any number of these; DEFAULT_TUNING_ID /
+// DEFAULT_GUITAR_TUNING_ID (below) name which ones are the per-class
+// defaults rather than that being implied by "built-in" or by array
+// position. EADG (id 'eadg', standard 4-string bass) is the bass default;
+// EADGBE (standard 6-string guitar) is the rhythm/lead default. `colors:
+// null` is the sentinel resolveActiveTuning/screen.js's _bgLoadSettings
+// read to mean "live-track the global palette" (CR.lowBColor() +
+// PALETTES.default) rather than a fixed set — EADG and BEADG share it
+// because EADG's strings are literally BEADG's own E/A/D/G strings minus
+// the low B, so the same live E/A/D/G mapping (plus lowB when present)
+// applies to both; screen.js derives each such preset's activePalette
+// per-string by note identity (CR.colorRoleForNote), not by a hardcoded
+// position table, so this generalizes to either shape. The guitar presets
+// (EADGBE, 7-string BEADGBE, baritone BEADF#B) are also live-tracked, but
+// their guitar-octave notes sit outside the bass-octave note-identity
+// chain, so each carries an explicit per-position `roles` array instead —
+// resolveActiveTuning passes it through and screen.js prefers it over
+// note-identity derivation. (The chain itself is deliberately NOT
+// extended with guitar octaves: defaultExtensionNote and the settings
+// editor's color suggestions key off the bass chain, and adding guitar
+// MIDIs there would silently change what a user adding an E2/A2/...
+// string to a custom bass tuning is offered.) Baritone's roles are
+// position-parallel to standard guitar — colors pinned to string
+// POSITION, matching the plugin-wide rule that switching tunings never
+// reshuffles colors — and the 7-string's extra low string takes the
+// dedicated 'lowB' role (core's own "Low B" swatch is the 7-string low-B
+// color). Every other preset carries concrete hand-picked colors and
+// flows through the same resolution path a user-saved custom tuning does;
+// Violin's colors follow the Cello preset's note-parallel picks (shared
+// G/D/A hues) plus a red for its E, since no live-tracked role fits a
+// fifths-tuned instrument.
 export const BUILTIN_PRESET_TUNINGS = [
     {
         id: 'eadg',
@@ -57,39 +75,168 @@ export const BUILTIN_PRESET_TUNINGS = [
         colors: null,
     },
     {
+        id: 'upright_solo_fsbea',
+        label: 'Upright bass solo (F#BEA)',
+        // Double-bass solo tuning — standard EADG up a whole step
+        // (MIDI 30,35,40,45). Live-tracked, roles position-parallel to
+        // EADG: it IS a 4-string bass, each string keeps its position's
+        // slot.
+        strings: ['F#1', 'B1', 'E2', 'A2'],
+        colors: null,
+        roles: ['e', 'a', 'd', 'g'],
+    },
+    {
+        id: 'eadgbe',
+        label: 'EADGBE (guitar)',
+        // Standard 6-string guitar (MIDI 40,45,50,55,59,64).
+        strings: ['E2', 'A2', 'D3', 'G3', 'B3', 'E4'],
+        colors: null,
+        // Live-track the global palette by POSITION via these roles (the
+        // same slots highway_3d gives a 6-string guitar chart's strings) —
+        // see the note-identity-chain rationale in the block comment above.
+        roles: ['e', 'a', 'd', 'g', 'highB', 'highE'],
+    },
+    {
+        id: 'beadgbe',
+        label: 'BEADGBE (7-string guitar)',
+        // Standard 7-string guitar (MIDI 35,40,45,50,55,59,64) — EADGBE
+        // plus a low B, which takes the dedicated 'lowB' role (core's
+        // "Low B" Highway String Colors swatch).
+        strings: ['B1', 'E2', 'A2', 'D3', 'G3', 'B3', 'E4'],
+        colors: null,
+        roles: ['lowB', 'e', 'a', 'd', 'g', 'highB', 'highE'],
+    },
+    {
+        id: 'baritone_beadfsb',
+        label: 'Baritone (BEADF#B)',
+        // Baritone guitar — standard guitar down a perfect fourth
+        // (MIDI 35,40,45,50,54,59). Roles are position-parallel to
+        // EADGBE: it IS a 6-string guitar, so each string keeps the slot
+        // its position has on a standard guitar.
+        strings: ['B1', 'E2', 'A2', 'D3', 'F#3', 'B3'],
+        colors: null,
+        roles: ['e', 'a', 'd', 'g', 'highB', 'highE'],
+    },
+    {
         id: 'cello_cgda',
         label: 'Cello (CGDA)',
         strings: ['C2', 'G2', 'D3', 'A3'],
         colors: ['#cc00aa', '#f18313', '#3fc413', '#ecd234'],
     },
+    {
+        id: 'viola_cgda',
+        label: 'Viola (CGDA)',
+        // Cello's note names an octave up (MIDI 48,55,62,69) — same
+        // note-parallel colors.
+        strings: ['C3', 'G3', 'D4', 'A4'],
+        colors: ['#cc00aa', '#f18313', '#3fc413', '#ecd234'],
+    },
+    {
+        id: 'violin_gdae',
+        label: 'Violin (GDAE)',
+        // MIDI 55,62,69,76. Fixed colors like Cello: its G/D/A strings
+        // reuse Cello's note-parallel hues, the E adds a red.
+        strings: ['G3', 'D4', 'A4', 'E5'],
+        colors: ['#f18313', '#3fc413', '#ecd234', '#e61f26'],
+    },
+    {
+        id: 'banjo4_cgbd',
+        label: 'Banjo 4-string (CGBD)',
+        // Plectrum banjo (MIDI 48,55,59,62). Note-parallel family hues;
+        // B adds a blue.
+        strings: ['C3', 'G3', 'B3', 'D4'],
+        colors: ['#cc00aa', '#f18313', '#1096e6', '#3fc413'],
+    },
+    {
+        id: 'banjo5_gdgbd',
+        label: 'Banjo 5-string (gDGBD)',
+        // Open-G 5-string banjo (MIDI 67,50,55,59,62). String 0 is the
+        // HIGH G4 drone — deliberately non-monotonic: banjo tab's bottom
+        // line is the 5th (drone) string, and the tuning is
+        // conventionally written drone-first (gDGBD). Non-monotonic
+        // targets are handled by resolveTargetForFret's pitch-ordered
+        // walk (retune-engine.js — added for exactly this preset; the
+        // solver was always index-order-agnostic), so the drone simply
+        // renders as the bottom lane. The drone string's short neck (no
+        // frets below its 5th) is NOT modeled — see PLANNING.md "Future
+        // enhancements". Duplicate notes share their note-parallel hue.
+        strings: ['G4', 'D3', 'G3', 'B3', 'D4'],
+        colors: ['#f18313', '#3fc413', '#f18313', '#1096e6', '#3fc413'],
+    },
+    {
+        id: 'mandolin_ggddaaee',
+        label: 'Mandolin (GGDDAAEE)',
+        // Four paired courses, violin notes doubled (MIDI 55×2, 62×2,
+        // 69×2, 76×2) — 8 strings, the render maximum. Each course pair
+        // shares one color: two strings, one logical course.
+        strings: ['G3', 'G3', 'D4', 'D4', 'A4', 'A4', 'E5', 'E5'],
+        colors: ['#f18313', '#f18313', '#3fc413', '#3fc413', '#ecd234', '#ecd234', '#e61f26', '#e61f26'],
+    },
 ];
-// The default preset's id — the single source of truth screen.js and
+// The default preset ids — the single source of truth screen.js and
 // settings.html both point at, rather than each hardcoding their own
-// 'eadg' literal. Named for what it selects (the default), not "built-in"
-// — BUILTIN_PRESET_TUNINGS can hold more than one built-in preset, only
-// one of which is ever the default.
+// literals. DEFAULT_TUNING_ID is the BASS default (named before guitar
+// support existed, kept for compatibility); DEFAULT_GUITAR_TUNING_ID is
+// the rhythm/lead default.
 export const DEFAULT_TUNING_ID = BUILTIN_PRESET_TUNINGS[0].id;
+export const DEFAULT_GUITAR_TUNING_ID = 'eadgbe';
 
-// Resolves an active-tuning id to { strings, colors } against the built-in
-// presets first (an unset id resolves to DEFAULT_TUNING_ID, i.e. EADG),
-// then a caller-supplied custom-tuning list, falling back to BEADG's own
-// shape (colors: null) only for an id that matches neither — an unknown or
-// deleted one — so a stale id can never leave a caller without a usable
-// tuning. Pure: the caller owns reading `id`/`customTunings` from wherever
-// they're persisted (screen.js: global settings storage; settings.html:
-// localStorage).
-export function resolveActiveTuning(id, customTunings) {
-    const targetId = id || DEFAULT_TUNING_ID;
+// The default tuning-profile preset id for an arrangement class
+// ('bass' | 'rhythm' | 'lead'): bass defaults to EADG, both guitar
+// classes to EADGBE.
+export function defaultTuningIdForClass(arrClass) {
+    return arrClass === 'bass' ? DEFAULT_TUNING_ID : DEFAULT_GUITAR_TUNING_ID;
+}
+
+// Which tuning-profile class an arrangement name routes to:
+//   - contains the word "bass"  -> 'bass'  (checked first: "Lead Bass"
+//     is a bass arrangement)
+//   - contains the word "lead"  -> 'lead'
+//   - anything else guitar-ish (rhythm, combo, plain "guitar", unknown
+//     non-empty names) -> 'rhythm'
+//   - empty/missing (a host that never populates songInfo.arrangement)
+//     -> 'bass', preserving this plugin's pre-guitar behavior for such
+//     hosts.
+// Word boundaries keep substrings from matching ("BasslineKeys" is not
+// bass), mirroring matchesArrangement in screen.js.
+export function arrangementClassFor(arrangementName) {
+    const a = typeof arrangementName === 'string' ? arrangementName.trim() : '';
+    if (a === '') return 'bass';
+    if (/\bbass\b/i.test(a)) return 'bass';
+    if (/\blead\b/i.test(a)) return 'lead';
+    return 'rhythm';
+}
+
+// Resolves an active-tuning id to { strings, colors, roles } against the
+// built-in presets first (an unset id resolves to the arrangement class's
+// default — EADG for bass, EADGBE for rhythm/lead), then a caller-supplied
+// custom-tuning list, falling back to the class-default preset for an id
+// that matches neither — an unknown or deleted one — so a stale id can
+// never leave a caller without a usable tuning. (Pre-guitar versions fell
+// back to a hardcoded BEADG shape; the class default is now both more
+// predictable — it matches what a fresh install shows — and right for
+// guitar profiles.) `roles` is non-null only for a preset that carries an
+// explicit per-position role array (EADGBE today); custom tunings always
+// resolve roles: null since they carry concrete colors. Pure: the caller
+// owns reading `id`/`customTunings` from wherever they're persisted
+// (screen.js: global settings storage; settings.html: localStorage).
+export function resolveActiveTuning(id, customTunings, arrClass = 'bass') {
+    const targetId = id || defaultTuningIdForClass(arrClass);
+    // .slice() on preset strings/roles: they're shared module constants —
+    // a caller mutating the returned array must never corrupt them for
+    // every future resolution. found.strings (the custom-tuning branch) is
+    // already a fresh per-read copy from the caller (see screen.js's
+    // _crReadCustomTunings), so it's returned as-is.
+    const asResult = p => ({
+        strings: p.strings.slice(),
+        colors: p.colors,
+        roles: Array.isArray(p.roles) ? p.roles.slice() : null,
+    });
     const preset = BUILTIN_PRESET_TUNINGS.find(p => p.id === targetId);
-    // .slice() on the built-in/fallback strings: preset.strings (BEADG's is
-    // literally DEFAULT_TARGET_TUNING) and DEFAULT_TARGET_TUNING itself are
-    // shared module constants — a caller mutating the returned array must
-    // never corrupt them for every future resolution. found.strings (the
-    // custom-tuning branch) is already a fresh per-read copy from the
-    // caller (see screen.js's _crReadCustomTunings), so it's returned as-is.
-    if (preset) return { strings: preset.strings.slice(), colors: preset.colors };
+    if (preset) return asResult(preset);
     const found = Array.isArray(customTunings) ? customTunings.find(p => p.id === targetId) : null;
-    return found ? { strings: found.strings, colors: found.colors } : { strings: DEFAULT_TARGET_TUNING.slice(), colors: null };
+    if (found) return { strings: found.strings, colors: found.colors, roles: null };
+    return asResult(BUILTIN_PRESET_TUNINGS.find(p => p.id === defaultTuningIdForClass(arrClass)));
 }
 
 // Length in [MIN,MAX] and every entry parses. Shared by

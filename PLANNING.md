@@ -1,4 +1,4 @@
-# Chart Retuner — bass tuning-remap plugin for feedBack
+# Chart Retuner — bass & guitar tuning-remap plugin for feedBack
 
 *Note: this plugin and repo were originally named "Five-String Everything"
 (internal abbreviation `FSE` / `fse-retune.js`); renamed to Chart Retuner in
@@ -1283,3 +1283,274 @@ unchanged pass/fail behavior — same test cases, now exercised through the
 barrel's re-exports), and a direct check that
 `Object.keys(FSE)` is still the same 33 keys as before the split (no
 name collisions across the four modules, nothing accidentally dropped).
+
+---
+
+## Phase 12 — Guitar arrangements: per-class tuning profiles (2026-07-12)
+
+Widens scope from bass-only to bass + guitar (Lead/Rhythm/Combo/plain
+"Guitar"). The string/tuning machinery was already general (Phases 10-11);
+what guitar needed was (a) its own tuning defaults, (b) profile routing by
+arrangement, and (c) chord-aware remapping (Phase 13).
+
+**Three tuning profiles, one pool.** Settings grow from one global
+`targetTuningId` to three GLOBAL-only keys — `targetTuningIdBass` /
+`targetTuningIdRhythm` / `targetTuningIdLead` — each a pointer into the
+SAME pool of built-in presets + saved custom tunings, so any profile may
+use any tuning (a bass tuning on a guitar arrangement is legal, per
+explicit product direction). Bass defaults to `eadg` (unchanged); rhythm
+and lead default to the new built-in **EADGBE** preset (`E2 A2 D3 G3 B3
+E4`, MIDI 40/45/50/55/59/64). A one-time idempotent migration
+(`_crMigrateLegacyTuningProfile`, screen.js) copies a pre-existing
+`targetTuningId` into the Bass key without emitting a change event
+(hwTheme-backfill pattern); rhythm/lead deliberately do NOT inherit the
+bass pick. `cr3dSetActiveTuning` now takes `(arrClass, id)`;
+`cr3dDeleteCustomTuning` resets every profile pointing at the deleted id
+to its own class default. settings.html's "Bass Tuning" section became
+"Target Tunings" with three selects sharing one dropdown pool + the single
+shared editor; its mirrored constants gained `eadgbe`, per-class defaults,
+and per-class localStorage keys (bass reads the legacy key as a pre-load
+fallback).
+
+**Routing (`CR.arrangementClassFor`)**: word-bounded, case-insensitive —
+`bass` → bass (checked first: "Lead Bass" is bass), `lead` → lead,
+anything else guitar-ish (rhythm/combo/guitar/unknown non-empty) → rhythm
+(product decision: combos are chord-heavy). Empty/missing arrangement →
+bass, preserving pre-guitar behavior for hosts that never populate
+`songInfo.arrangement`. Per-PANEL state (`_crArrClass`): splitscreen
+panels may show different arrangements simultaneously, so draw() tracks
+the class per panel and calls `_bgLoadSettings()` on change; the class is
+NOT folded into `_crTuningSig` — the sig compares *resolved*
+strings+colors, so two profiles pointing at one tuning correctly no-op on
+an arrangement flip, and the existing rebuild path fires when they differ.
+
+**EADGBE colors.** Guitar-octave notes sit outside the bass-octave
+note-identity chain (`colorRoleForNote` would return 'gray'), so the
+preset carries an explicit per-position `roles` array
+(`['e','a','d','g','highB','highE']`) that `resolveActiveTuning` passes
+through and `_bgLoadSettings`'s live-tracked branch prefers over
+note-identity derivation. The chain itself is deliberately NOT extended
+with guitar MIDIs — `defaultExtensionNote` and the editor's color
+suggestions key off the bass chain, and extending it would silently change
+what a user adding an E2/A2/... string to a custom bass tuning is offered.
+`_crColorForRole` and `GEM_GRADIENT_ROLE_INDEX` already had highB/highE
+slots (4/5), so no palette plumbing changed.
+
+**Deliberate behavior change:** `resolveActiveTuning`'s unknown/deleted-id
+fallback moved from the hardcoded BEADG shape to the *class default
+preset* (EADG for bass, EADGBE for guitar classes) — more predictable (it
+matches a fresh install) and right for guitar profiles. Auto-mode's
+`matchesArrangement` widened from `/\bbass\b/i` back to highway_3d's own
+`/\b(?:lead|rhythm|bass|combo|guitar)\b/i`.
+
+**More presets (same session):** three further built-ins — **BEADGBE**
+(7-string guitar, MIDI 35..64; live-tracked, low string on the dedicated
+`lowB` role since core's "Low B" swatch is literally the 7-string low-B
+color), **Baritone BEADF#B** (standard guitar down a fourth, MIDI
+35,40,45,50,54,59; live-tracked with roles position-parallel to EADGBE —
+colors pinned to string position per the plugin-wide rule), and **Violin
+GDAE** (MIDI 55,62,69,76; concrete colors like Cello — no live role fits
+a fifths instrument — reusing Cello's note-parallel G/D/A hues plus a red
+E). All three mirrored into settings.html's `BUILTIN_PRESETS`.
+
+Five more in the same batch: **Upright bass solo F#BEA** (EADG up a whole
+step, MIDI 30,35,40,45; live-tracked, bass-position roles
+`['e','a','d','g']`), **Viola CGDA** (Cello an octave up, MIDI
+48,55,62,69, Cello's colors), **Banjo 4-string CGBD** (plectrum, MIDI
+48,55,59,62; family hues, B adds `#1096e6`), **Banjo 5-string gDGBD**
+(open G, MIDI **67**,50,55,59,62 — string 0 is deliberately the HIGH G4
+drone, matching banjo tab's bottom-line-is-5th-string convention and the
+drone-first way the tuning is written; the engine/solver make no
+ascending-pitch assumption so a non-monotonic target is legal; the drone
+string's short neck is NOT modeled — see Future enhancements), and
+**Mandolin GGDDAAEE** (four paired courses, MIDI 55/62/69/76 doubled —
+exactly `MAX_TARGET_STRING_COUNT`; one color per course pair, a course
+being one logical string).
+
+**Debt note:** settings.html's mirrored constants grew again (3 profile
+keys, 2 class defaults, 9 new presets). If it grows further, consider
+serving the constants as JSON from `routes.py` so the panel stops
+duplicating `src/target-tuning.js` — out of scope here.
+
+**Verify:** `node test/retune-engine.test.mjs` (EADGBE preset resolution,
+`arrangementClassFor` routing incl. word-boundary/empty cases, per-class
+defaulting + fallback, roles passthrough). Browser: legacy
+`chart_retuner_bg_targetTuningId` migrates to Bass; a Lead chart renders a
+6-string board with guitar palette slots; splitscreen bass+lead panels get
+4 and 6 strings simultaneously; deleting a custom tuning assigned to two
+profiles resets both to their class defaults.
+
+---
+
+## Phase 13 — Chord-aware remapping (2026-07-12)
+
+Guitar charts are full of open/barre chords that don't survive per-note
+pitch-exact remapping across tunings (an open shape under a -1 tuning
+shift drops its open strings to fret −1). New pure module
+**`src/chord-solver.js`** (fifth module in the `CR` barrel; depends only
+on `pitch.js`/`target-tuning.js` — never on `retune-engine.js`, keeping
+the Phase-9 one-way dependency graph) plus routing inside
+`createRetuner().apply()`.
+
+**Priorities (product direction, in order):** (1) playable — fretted
+stretch within a 4-fret box (`MAX_CHORD_SPAN = 3` as max−min) unless the
+source chord itself stretched further, ≤ 4 fretting fingers with barre /
+contiguous-run (mini-barre) grouping; (2) hand shape comparable — chord
+identity is the pitch-class set + root ("revoice near position"): exact
+sounded pitches strongly preferred, but openness / position / no-new-barre
+similarity wins over pitch fidelity when they conflict; (3) root in the
+bass — weakest term, inversions/triads acceptable.
+
+**Tier ladder** (`solveChord`): Tier 0 = the existing per-note remap,
+accepted when drop/collision-free AND playable, or when it IS the source
+voicing verbatim (chart-given = playable by definition) — this is what
+keeps bass output identical wherever today's path was clean. Tier 2 =
+position-windowed DFS revoicing search (`solveVoicingSearch`,
+branch-and-bound on the exact-pitch partial cost, positions visited
+nearest-to-source-position first; voicing size hard-capped at the source
+note count). No "Tier 1": the search enumerates every exact-pitch voicing
+anyway, so a strong `EXACT_PITCH_MISS` weight subsumes it. Tier 3 =
+degradation ladder (full pcs → triad → root+5th dyad → bare root), rungs
+compared on cost + rung × `DEGRADE_RUNG`. Weights live in
+`SOLVER_WEIGHTS` (starting points, pinned by tests): shape terms
+collectively outweigh `ROOT_NOT_IN_BASS`, encoding priority 2 > 3.
+
+**Integration (`createRetuner`, PATCH POINT (chord solver)):** templates
+solve FIRST (per remap run, cached by ordered s/f/slide signature +
+name), so chord instances — including difficulty-filtered SUBSETS, applied
+per source string — and the hand-shape chords screen.js synthesizes
+straight from `bundle.chordTemplates` follow the same voicing by
+construction. Flat same-onset buckets of ≥ 2 notes route through the same
+solver; single notes keep the per-note path byte-for-byte. Materialized
+notes keep source fields + `_origNote` (scorer contract); Tier-0
+placements reuse the engine entry (incl. remapped slide endpoints),
+revoiced ones re-apply the source slide delta clamped to fret 20.
+Template fingers: carried per string on Tier 0 (pre-solver behavior)
+unless a note crossed the open/fretted boundary; otherwise
+`computeChordFingers` derives plausible ones (canonical per-note first,
+barre + run grouping when needed, all −1 when ambiguous).
+
+**Deliberate behavior changes (bass):** a bucket whose notes collide on
+one target string no longer silently loses a pitch — the solver revoices
+(pinned in tests); an exactly-mapped group that is *unplayable as a chord*
+(span/finger blowout from non-uniform per-string adjustments) also
+revoices now. Everything drop/collision-free and playable is Tier 0 =
+unchanged. Template `fingers` may now be a generated array where the
+source had none.
+
+**Cost:** cold remap of a 60-template / 2000-note synthetic chart ≈ 4 ms
+(once per song/tuning switch, inside the existing whole-remap cache);
+per-frame cache-hit apply ≈ 0.1 µs. Labels are NOT rewritten when a chord
+degrades (an "Am7" diagram may show a simplified voicing) — accepted for
+now; revisit if feedback wants a marker. Scoring still keys on the
+ORIGINAL chart positions via `_origNote` — revoiced chords widen the gap
+between what's judged and what's fretted; documented in the README.
+
+**Verify:** `node test/chord-solver.test.mjs` (root parsing, barre/run
+finger heuristics, playability, spec/ladder construction, search identity
++ revoicing cases, plus end-to-end `createRetuner().apply()`: E-std→EADGBE
+identity, E→Drop-D Tier 0, capo-2 shape shift, Eb-std→E-std revoice with
+template/subset consistency, Drop-D flat-bucket, chord slides, bass
+double-stop regression + collision-improvement pin, 7-string GP
+degradation, mid-run target switch). `node test/retune-engine.test.mjs`
+passes with zero changes to the pre-existing engine-function assertions.
+
+---
+
+## Future enhancements (backlog, no phase yet)
+
+Collected from Phase 12/13 work and the preset expansion — none blocking,
+all candidates for their own phase later:
+
+- **Wider stretch allowance for short-scale / high-register targets.**
+  `MAX_CHORD_SPAN` (4-fret box) encodes a guitar-scale hand. Violin/viola/
+  mandolin scale lengths make wider reaches normal (and fifths tunings
+  need them); consider a per-preset span allowance, or deriving it from
+  the target's register.
+- **Anchor-donor refinement after revoicing.** `remapAnchors` borrows the
+  fret adjustment of the nearest remapped note; an octave-revoiced
+  (tier ≥ 2) donor can lurch the hand-position ghost. Prefer tier-0 /
+  single-note donors when one is nearby. Cosmetic.
+- **Chunk the cold solve across frames** if a pathological chart
+  (thousands of distinct simultaneous-note shapes) ever hitches on song
+  load — the bucket-signature cache makes this unlikely (measured ≈4 ms
+  for a 60-template chart), so wait for a real report.
+- **Degraded-chord label marker.** After the ladder simplifies a chord,
+  the diagram still shows the chart's original name ("Am7" over a power
+  chord). Consider a displayName suffix on the rebuilt template.
+- **Serve settings.html's mirrored constants from routes.py** as JSON —
+  the panel duplicates presets/defaults/keys from `src/target-tuning.js`
+  (can't import modules there) and the mirror keeps growing.
+- **Judgment translation for revoiced chords.** Scoring (note_detect)
+  keys on `_origNote` — the ORIGINAL chart positions — so revoiced chords
+  are judged against frets the player isn't fretting. Documented in the
+  README; a deeper core integration could translate judgments to the
+  remapped positions.
+- **Instrument quirks presets can't express.** A 5-string banjo's drone
+  string is short (nothing below its 5th fret) and never barred; the
+  solver has no per-string fret floor, so it may place low fretted notes
+  on the drone lane. A per-string min-fret field on presets would model
+  it if banjo targets see real use.
+
+---
+
+## Phase 14 — Post-review fixes (2026-07-13)
+
+An xhigh-effort `/code-review` over the Phase 12/13 diff surfaced 11
+findings (3 confirmed bugs, 3 plausible, 5 cleanup). All fixed:
+
+1. **Pitch-ordered string walk** (`resolveTargetForFret`,
+   retune-engine.js): the old walk stepped by INDEX (j±1), assuming
+   ascending pitch — banjo5_gdgbd's drone-first layout broke that (29 of
+   126 swept guitar-chart notes wrongly dropped: overflow marched away
+   from the high drone at index 0). The walk now moves in PITCH order via
+   per-target rank tables (WeakMap-cached by array identity; ascending
+   arrays — the common case — skip the tables entirely and behave
+   byte-identically). A direction lock doubles as a termination
+   guarantee: reversing direction proves the note fits nowhere. That also
+   fixes a PRE-EXISTING hard hang — two pitch-adjacent strings more than
+   TARGET_MAX_FRET semitones apart (any user custom tuning like
+   E1+high-E5) made the old walk oscillate forever on the render thread.
+   The new walk is complete (finds a placement iff one exists), pinned by
+   a full-chart sweep test asserting zero wrongly-dropped notes and exact
+   pitch preservation on banjo5.
+2. **Null chord id** (createRetuner): `Number(null) === 0` let a chord
+   with `id: null` alias template index 0's solved voicing. Guarded with
+   the same `== null` check screen.js's chord-ghost helpers use.
+3. **Duplicate-source-string dedup** (createRetuner, template-first
+   branch): a malformed chord doubling a string emitted two notes stacked
+   on one target string/fret; now first-wins deduped, matching the
+   one-note-per-slot invariant of every other path.
+4. **Sliding chords skip the template shortcut** (createRetuner): the
+   template solution is solved from PLAIN frets and can't reproduce
+   remapSlide's lower-endpoint anchoring, so chords carrying sl/slu now
+   route ad-hoc (whose Tier 0 goes through remapNoteEntry/remapSlide).
+   Pinned with a case where the two paths pick different strings.
+5. **Degenerate span no longer empties the search** (solveVoicingSearch):
+   `allowedSpan` is clamped to TARGET_MAX_FRET-1 so a 20+-fret source
+   span (extreme GP import) widens the window instead of skipping the
+   position loop — which also gated the open-string candidates — and
+   silently dropping the chord.
+6. **Non-array `template.fingers` passthrough** (createRetuner): charts
+   that omit finger data entirely keep the omission (no fabricated
+   digits), restoring the pre-solver invariant; GP's all--1 ARRAYS still
+   get plausible fingers on revoiced shapes as designed.
+7. **Per-frame classifier guard** (screen.js draw()): the arrangement
+   class is re-derived only when the raw arrangement STRING changes; the
+   steady-state per-frame cost is one strict compare.
+8. **Shared pitch-class parsing**: pitch.js gains `notePitchClass`
+   (letter+accidental -> 0..11), used by both parseTargetNote and
+   chord-solver's parseChordRootFromName — the duplicated note-letter
+   table is gone.
+9. **One fret clamp**: `_clampFret` is the module's single clamp;
+   remapSlide's local duplicate removed.
+10. **One profile-key source of truth** (screen.js):
+    `_CR_PROFILE_KEY_BY_CLASS` / `_CR_PROFILE_CLASSES` / `_CR_PROFILE_KEYS`
+    drive the GLOBAL-only exclusion, the change-listener case,
+    `_crProfileKeyFor`, and `cr3dDeleteCustomTuning`'s loop.
+
+**Verify:** `node test/retune-engine.test.mjs` (315 assertions — banjo5
+pitch-walk completeness sweep, drone-reach, termination cases) and
+`node test/chord-solver.test.mjs` (107 — null-id routing, duplicate
+dedup, slide anchoring, degenerate span, fingers passthrough);
+`node --check` on screen.js + all src modules.

@@ -1,32 +1,64 @@
 # Chart Retuner
 
 A [feedBack](https://github.com/got-feedBack/feedBack) plugin that lets a
-bass player play **any** chart, in any source tuning (Drop D, Drop C#,
-whatever), by remapping each note to the correct string/fret for a target
-tuning of your choice instead of the chart's original tuning. Notes outside
-a 20-fret target instrument's range are dropped.
+bass or guitar player play **any** chart, in any source tuning (Drop D,
+Drop C#, whatever), by remapping each note to the correct string/fret for
+a target tuning of your choice instead of the chart's original tuning.
+Notes outside a 20-fret target instrument's range are dropped.
 
-Scope today: bass arrangements only. Guitar (lead/rhythm) support is planned
-but not yet implemented — Auto-mode only picks this plugin for arrangements
-whose name contains "bass".
+Scope: bass, lead, and rhythm arrangements (Auto-mode matches the same
+lead/rhythm/bass/combo/guitar arrangement names `highway_3d` does; Keys
+belongs to the piano plugin).
 
-## Target tuning
+## Target tunings
 
-The target tuning — both which pitches and how many strings (4 to 8) — is
-fully configurable in the plugin's settings (Bass Tuning section), and can
-be switched at any times:
+Each arrangement class has its own tuning profile, configurable in the
+plugin's settings (Target Tunings section) and switchable at any time —
+even mid-song:
 
-- **EADG (4-string)** — the built-in default, standard bass tuning. Its
-  string colors track feedBack's shared "Highway String Colors" setting,
-  the same as `highway_3d`.
-- **BEADG (5-string)** — a second built-in preset, selectable from the
-  Active tuning dropdown but not the default. Same live-tracked colors as
+- **Bass arrangements** default to **EADG** (standard 4-string bass).
+- **Lead** and **Rhythm/other guitar** arrangements default to **EADGBE**
+  (standard 6-string guitar). "Combo" and plain "Guitar" arrangements use
+  the Rhythm profile.
+
+All three profiles pick from the same pool of tunings — any pitches, 4 to
+8 strings — so a guitarist can keep one tuning for rhythm charts and
+another for lead, and nothing stops you from pointing a guitar profile at
+a bass tuning or vice versa:
+
+- **EADG (4-string)** — standard bass, the bass default. Its string colors
+  track feedBack's shared "Highway String Colors" setting, the same as
+  `highway_3d`.
+- **BEADG (5-string)** — built-in preset. Same live-tracked colors as
   EADG (plus a dedicated Low B color for the extra low string) — EADG's
   strings are literally BEADG's own E/A/D/G minus the low B, so they share
   the same live mapping.
-- **Cello (CGDA, 4-string)** — a third built-in preset, selectable from
-  the Active tuning dropdown but not the default and not editable/deletable.
-  Fixed per-string colors, unlike EADG/BEADG.
+- **EADGBE (6-string)** — standard guitar, the lead/rhythm default. Also
+  live-tracks the shared string colors (the same slots `highway_3d` gives
+  a 6-string guitar chart).
+- **BEADGBE (7-string)** — standard 7-string guitar. Live-tracked like
+  EADGBE; the extra low string uses the dedicated Low B color.
+- **Baritone (BEADF#B, 6-string)** — baritone guitar, standard tuning
+  down a perfect fourth. Live-tracked, colors position-parallel to
+  EADGBE (each string keeps the slot its position has on a standard
+  guitar).
+- **Upright bass solo (F#BEA, 4-string)** — double-bass solo tuning,
+  standard bass up a whole step. Live-tracked, colors position-parallel
+  to EADG.
+- **Cello (CGDA, 4-string)** — built-in preset, not editable/deletable.
+  Fixed per-string colors, unlike the live-tracked presets.
+- **Viola (CGDA, 4-string)** — the cello's notes an octave up, same
+  fixed colors.
+- **Violin (GDAE, 4-string)** — fifths tuning, an octave-and-change above
+  the cello. Fixed per-string colors sharing Cello's G/D/A hues.
+- **Banjo 4-string (CGBD)** — plectrum banjo. Fixed colors in the same
+  note-parallel family.
+- **Banjo 5-string (gDGBD)** — open G. String 1 is the **high G4 drone**
+  (banjo tab convention puts the 5th string on the bottom line); note the
+  drone string's short neck isn't modeled, so remaps may occasionally
+  place low fretted notes on that lane.
+- **Mandolin (GGDDAAEE, 8-string)** — four paired courses at the
+  plugin's 8-string maximum, one fixed color per course pair.
 - **Your own saved custom profiles** — any note/octave per string (AEADG, a
   half-step-flat BbEbAbDbGb, a 6- or 7-string with extra strings on top or
   bottom, anything else).
@@ -37,6 +69,32 @@ or edit it, independent of the shared Highway String Colors setting.
 Colors stay pinned to string **position**, not note name, so switching
 tunings never reshuffles them, and a removed string's color is never
 remembered for a later re-add.
+
+## Chords
+
+Single notes always keep their exact sounding pitch (or drop when the
+target instrument can't reach them). Chords get smarter treatment,
+because open and barre shapes don't map note-for-note across tunings.
+When the exact note-for-note mapping of a chord is playable, it's used
+as-is; when it isn't, the chord is **revoiced** on the target tuning —
+same chord (same notes-of-the-chord, octaves may shuffle) — following
+these priorities, in order:
+
+1. **Playable** — no stretches wider than a 4-fret box (unless the
+   original chart chord stretched further) and never more than 4 fretting
+   fingers, barres included.
+2. **Comparable hand shape** — open-position chords stay open-ish and the
+   hand stays near the original fret position; a barre is never
+   introduced where the chart had none if a better option exists.
+3. **Root in the bass** — preferred, but an inversion or a simplified
+   voicing wins when it fits priorities 1-2 better.
+
+When no full voicing fits, the chord simplifies progressively (drop
+doubled notes → triad → power chord → single root note) rather than
+disappearing. Chord diagrams and hand-shape highlights follow the
+remapped voicing; the chord *name* still shows the chart's original
+label. Note that scoring (note_detect) keys off the original chart
+positions, so judgments follow the chart, not the remapped shape.
 
 ## Fork of `highway_3d` — manual sync required
 
