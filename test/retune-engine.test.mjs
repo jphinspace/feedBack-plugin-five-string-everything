@@ -5,7 +5,9 @@ import assert from 'node:assert';
 import { CR } from '../src/chart-retune.js';
 
 const {
-    TARGET_MAX_FRET,
+    DEFAULT_MAX_FRET,
+    MAX_FRET_OPTIONS,
+    isValidMaxFret,
     MAX_TARGET_STRING_COUNT,
     MIN_TARGET_STRING_COUNT,
     DEFAULT_TARGET_MIDI_TUNING,
@@ -240,8 +242,8 @@ const SPOT_FRETS = [0, 10, 20];
 
     const clampLow = remapAnchors([{ time: 0, fret: 0, width: 4 }], [{ t: 0, f: 0, _origNote: { t: 0, f: 3 } }]);
     check('anchor clamps at fret 0', clampLow[0], { time: 0, fret: 0, width: 4 });
-    const clampHigh = remapAnchors([{ time: 0, fret: TARGET_MAX_FRET - 1, width: 4 }], [{ t: 0, f: TARGET_MAX_FRET, _origNote: { t: 0, f: 0 } }]);
-    check('anchor clamps at fret 20', clampHigh[0], { time: 0, fret: TARGET_MAX_FRET, width: 4 });
+    const clampHigh = remapAnchors([{ time: 0, fret: DEFAULT_MAX_FRET - 1, width: 4 }], [{ t: 0, f: DEFAULT_MAX_FRET, _origNote: { t: 0, f: 0 } }]);
+    check('anchor clamps at fret 20', clampHigh[0], { time: 0, fret: DEFAULT_MAX_FRET, width: 4 });
 
     const passthrough = remapAnchors([{ time: 0, fret: 5, width: 4 }], []);
     check('anchor passes through unchanged with no surviving notes', passthrough[0], { time: 0, fret: 5, width: 4 });
@@ -480,6 +482,54 @@ const SPOT_FRETS = [0, 10, 20];
     check('un-drop test: switching back to BEADG drops the note again', bundle.notes.length, 0);
 }
 
+// maxFret: per-tuning-profile ceiling (PLANNING.md — replaces the old
+// blanket hardcoded 20). Every engine entry point defaults to
+// DEFAULT_MAX_FRET (20, exercised throughout this file already); these
+// cases pin the actual widening/narrowing behavior a non-default value
+// produces.
+{
+    // Single-string target at exactly the source's open pitch (adjustment
+    // 0), so the target fret always equals the source fret — isolates the
+    // ceiling check from any natural-string/adjustment interaction.
+    const oneString = [40];
+    check('resolveTargetForFret: a fret past 20 drops at the default ceiling',
+        resolveTargetForFret(40, 0, 21, oneString), null);
+    check('resolveTargetForFret: the same fret resolves once maxFret widens to 24',
+        resolveTargetForFret(40, 0, 21, oneString, 24), { s: 0, f: 21, adjustment: 0 });
+    check('resolveTargetForFret: a fret past a narrower 14-fret ceiling drops',
+        resolveTargetForFret(40, 0, 15, oneString, 14), null);
+
+    check('remapAnchors: clamps to the passed maxFret, not the hardcoded default',
+        remapAnchors([{ time: 0, fret: 23, width: 4 }], [{ t: 0, f: 0, _origNote: { t: 0, f: 0 } }], 24),
+        [{ time: 0, fret: 23, width: 4 }]);
+    check('remapAnchors: still clamps at the default 20-fret ceiling when maxFret is omitted',
+        remapAnchors([{ time: 0, fret: 23, width: 4 }], [{ t: 0, f: 0, _origNote: { t: 0, f: 0 } }]),
+        [{ time: 0, fret: 20, width: 4 }]);
+
+    // Single-string source/target (as above) so there's no adjacent string
+    // the walk could escape to — isolates the ceiling from string choice.
+    const { createRetuner } = CR;
+    const retuner = createRetuner();
+    const rawNotes = [{ t: 0, s: 0, f: 21 }];
+    const bundle = {
+        notes: rawNotes, chords: [], anchors: [], chordTemplates: [],
+        tuning: [0], capo: 0, stringCount: 1,
+    };
+    retuner.apply(bundle, oneString, 20);
+    check('createRetuner: a fret-21 note drops under the default 20-fret ceiling', bundle.notes.length, 0);
+
+    bundle.notes = rawNotes;
+    retuner.apply(bundle, oneString, 24);
+    check('createRetuner: the same note survives once maxFret widens to 24', bundle.notes.length, 1);
+    check('createRetuner: it keeps its exact source fret', bundle.notes[0].f, 21);
+
+    // Cache invalidation: same tuning, different maxFret must NOT cache-hit
+    // (targetSig folds maxFret in) — re-running at 20 drops it again.
+    bundle.notes = rawNotes;
+    retuner.apply(bundle, oneString, 20);
+    check('createRetuner: switching maxFret back down re-invalidates the cache and re-drops the note', bundle.notes.length, 0);
+}
+
 // Duplicate note+octave across strings is allowed — no uniqueness
 // constraint anywhere in the engine.
 {
@@ -652,41 +702,62 @@ const SPOT_FRETS = [0, 10, 20];
         true);
 
     check('resolveActiveTuning: no id (fresh install) resolves to EADG, live colors',
-        resolveActiveTuning(undefined, []), { strings: DEFAULT_TARGET_TUNING.slice(1), colors: null, roles: null });
+        resolveActiveTuning(undefined, []), { strings: DEFAULT_TARGET_TUNING.slice(1), colors: null, roles: null, maxFret: 20 });
     check('resolveActiveTuning: explicit EADG id resolves the same as no id',
-        resolveActiveTuning('eadg', []), { strings: DEFAULT_TARGET_TUNING.slice(1), colors: null, roles: null });
+        resolveActiveTuning('eadg', []), { strings: DEFAULT_TARGET_TUNING.slice(1), colors: null, roles: null, maxFret: 20 });
     check('resolveActiveTuning: explicit BEADG id resolves BEADG, live colors',
-        resolveActiveTuning('beadg', []), { strings: DEFAULT_TARGET_TUNING, colors: null, roles: null });
+        resolveActiveTuning('beadg', []), { strings: DEFAULT_TARGET_TUNING, colors: null, roles: null, maxFret: 24 });
     check('resolveActiveTuning: EADGBE id resolves guitar strings + roles passthrough',
         resolveActiveTuning('eadgbe', []),
-        { strings: ['E2', 'A2', 'D3', 'G3', 'B3', 'E4'], colors: null, roles: ['e', 'a', 'd', 'g', 'highB', 'highE'] });
+        { strings: ['E2', 'A2', 'D3', 'G3', 'B3', 'E4'], colors: null, roles: ['e', 'a', 'd', 'g', 'highB', 'highE'], maxFret: 24 });
     check('resolveActiveTuning: a non-default preset id (Cello) resolves its own strings + concrete colors',
         resolveActiveTuning('cello_cgda', []),
-        { strings: ['C2', 'G2', 'D3', 'A3'], colors: ['#cc00aa', '#f18313', '#3fc413', '#ecd234'], roles: null });
-    check('resolveActiveTuning: a custom-tuning id resolves from the supplied list (roles always null)',
+        { strings: ['C2', 'G2', 'D3', 'A3'], colors: ['#cc00aa', '#f18313', '#3fc413', '#ecd234'], roles: null, maxFret: 24 });
+    check('resolveActiveTuning: a custom-tuning id resolves from the supplied list (roles always null, maxFret defaults when absent)',
         resolveActiveTuning('custom_abc', [{ id: 'custom_abc', name: 'AEADG', strings: ['A0', 'E1', 'A1', 'D2', 'G2'], colors: ['#111111', '#222222', '#333333', '#444444', '#555555'] }]),
-        { strings: ['A0', 'E1', 'A1', 'D2', 'G2'], colors: ['#111111', '#222222', '#333333', '#444444', '#555555'], roles: null });
+        { strings: ['A0', 'E1', 'A1', 'D2', 'G2'], colors: ['#111111', '#222222', '#333333', '#444444', '#555555'], roles: null, maxFret: 20 });
+    check('resolveActiveTuning: a custom-tuning id carries its own valid maxFret through',
+        resolveActiveTuning('custom_mf', [{ id: 'custom_mf', name: 'Custom24', strings: ['A0', 'E1', 'A1', 'D2', 'G2'], colors: ['#111111', '#222222', '#333333', '#444444', '#555555'], maxFret: 24 }]),
+        { strings: ['A0', 'E1', 'A1', 'D2', 'G2'], colors: ['#111111', '#222222', '#333333', '#444444', '#555555'], roles: null, maxFret: 24 });
+    check('resolveActiveTuning: a custom-tuning id with an invalid maxFret falls back to the default',
+        resolveActiveTuning('custom_bad_mf', [{ id: 'custom_bad_mf', name: 'BadMF', strings: ['A0', 'E1', 'A1', 'D2', 'G2'], colors: ['#111111', '#222222', '#333333', '#444444', '#555555'], maxFret: 17 }]),
+        { strings: ['A0', 'E1', 'A1', 'D2', 'G2'], colors: ['#111111', '#222222', '#333333', '#444444', '#555555'], roles: null, maxFret: 20 });
     // Unknown/deleted ids fall back to the arrangement class's default
     // preset (EADG shape for bass, EADGBE for guitar classes) — changed
     // from the pre-guitar hardcoded BEADG-shape fallback (see PLANNING.md
     // Phase 12): the class default matches what a fresh install shows.
     check('resolveActiveTuning: an unknown/deleted id falls back to the class default (bass -> EADG)',
-        resolveActiveTuning('stale_deleted_id', []), { strings: DEFAULT_TARGET_TUNING.slice(1), colors: null, roles: null });
+        resolveActiveTuning('stale_deleted_id', []), { strings: DEFAULT_TARGET_TUNING.slice(1), colors: null, roles: null, maxFret: 20 });
     check('resolveActiveTuning: an unknown id with null customTunings falls back to class default (non-array guard)',
-        resolveActiveTuning('stale_deleted_id', null), { strings: DEFAULT_TARGET_TUNING.slice(1), colors: null, roles: null });
+        resolveActiveTuning('stale_deleted_id', null), { strings: DEFAULT_TARGET_TUNING.slice(1), colors: null, roles: null, maxFret: 20 });
     check('resolveActiveTuning: an unknown id with undefined customTunings falls back to class default (non-array guard)',
-        resolveActiveTuning('stale_deleted_id', undefined), { strings: DEFAULT_TARGET_TUNING.slice(1), colors: null, roles: null });
+        resolveActiveTuning('stale_deleted_id', undefined), { strings: DEFAULT_TARGET_TUNING.slice(1), colors: null, roles: null, maxFret: 20 });
     check('resolveActiveTuning: an unknown id under a guitar class falls back to EADGBE',
         resolveActiveTuning('stale_deleted_id', [], 'lead'),
-        { strings: ['E2', 'A2', 'D3', 'G3', 'B3', 'E4'], colors: null, roles: ['e', 'a', 'd', 'g', 'highB', 'highE'] });
+        { strings: ['E2', 'A2', 'D3', 'G3', 'B3', 'E4'], colors: null, roles: ['e', 'a', 'd', 'g', 'highB', 'highE'], maxFret: 24 });
     check('resolveActiveTuning: no id under the rhythm class resolves the guitar default',
         resolveActiveTuning(undefined, [], 'rhythm'),
-        { strings: ['E2', 'A2', 'D3', 'G3', 'B3', 'E4'], colors: null, roles: ['e', 'a', 'd', 'g', 'highB', 'highE'] });
+        { strings: ['E2', 'A2', 'D3', 'G3', 'B3', 'E4'], colors: null, roles: ['e', 'a', 'd', 'g', 'highB', 'highE'], maxFret: 24 });
     check('resolveActiveTuning: an explicit id resolves the same regardless of class (any profile may use any tuning)',
-        resolveActiveTuning('eadg', [], 'lead'), { strings: DEFAULT_TARGET_TUNING.slice(1), colors: null, roles: null });
+        resolveActiveTuning('eadg', [], 'lead'), { strings: DEFAULT_TARGET_TUNING.slice(1), colors: null, roles: null, maxFret: 20 });
     check('resolveActiveTuning: a preset id wins even if a custom tuning happens to share it',
         resolveActiveTuning('cello_cgda', [{ id: 'cello_cgda', name: 'user override attempt', strings: ['E1', 'A1', 'D2', 'G2'], colors: ['#000', '#000', '#000', '#000'] }]),
-        { strings: ['C2', 'G2', 'D3', 'A3'], colors: ['#cc00aa', '#f18313', '#3fc413', '#ecd234'], roles: null });
+        { strings: ['C2', 'G2', 'D3', 'A3'], colors: ['#cc00aa', '#f18313', '#3fc413', '#ecd234'], roles: null, maxFret: 24 });
+
+    check('MAX_FRET_OPTIONS is the expected selectable ceiling list', MAX_FRET_OPTIONS, [12, 14, 20, 21, 22, 24]);
+    check('isValidMaxFret accepts every listed option', MAX_FRET_OPTIONS.every(isValidMaxFret), true);
+    check('isValidMaxFret rejects an unlisted value', isValidMaxFret(17), false);
+    check('isValidMaxFret rejects non-numeric input', isValidMaxFret('20'), false);
+    check('every built-in preset carries a valid maxFret',
+        BUILTIN_PRESET_TUNINGS.every(p => isValidMaxFret(p.maxFret)), true);
+    check('EADG (bass default) keeps the historical 20-fret ceiling',
+        BUILTIN_PRESET_TUNINGS.find(p => p.id === 'eadg').maxFret, 20);
+    check('BEADG (5-string bass) uses the wider 24-fret ceiling',
+        BUILTIN_PRESET_TUNINGS.find(p => p.id === 'beadg').maxFret, 24);
+    check('every guitar preset (EADGBE/7-string/baritone) uses 24 frets',
+        ['eadgbe', 'beadgbe', 'baritone_beadfsb'].every(id => BUILTIN_PRESET_TUNINGS.find(p => p.id === id).maxFret === 24), true);
+    check('violin and mandolin use the shorter 14-fret ceiling',
+        ['violin_gdae', 'mandolin_ggddaaee'].every(id => BUILTIN_PRESET_TUNINGS.find(p => p.id === id).maxFret === 14), true);
 }
 
 // defaultTuningIdForClass / arrangementClassFor: the per-class profile

@@ -14,7 +14,20 @@ const STANDARD_OPEN_STRING_MIDI = {
     8: [30, 35, 40, 45, 50, 55, 59, 64],
 };
 
-export const TARGET_MAX_FRET = 20;
+// Engine fallback when a caller resolves no active tuning at all (deep
+// safety net — screen.js always threads a resolved profile's own maxFret
+// through). Also the pre-guitar hardcoded ceiling every preset/custom
+// tuning defaulted to before per-tuning max fret existed.
+export const DEFAULT_MAX_FRET = 20;
+// Selectable ceiling for a tuning profile's remap range (settings.html's
+// "Max fret" dropdown + each BUILTIN_PRESET_TUNINGS entry below). Charts
+// rarely carry data above fret 20 — usually transcribed solos — so 24
+// (the render/UI-safe top of the list) is a fine default for anything
+// not explicitly tuned narrower.
+export const MAX_FRET_OPTIONS = [12, 14, 20, 21, 22, 24];
+export function isValidMaxFret(v) {
+    return MAX_FRET_OPTIONS.indexOf(v) !== -1;
+}
 // 8 = MAX_RENDER_STRINGS in screen.js (per-string material arrays are
 // only sized that far). 4 matches highway_3d's own floor.
 export const MAX_TARGET_STRING_COUNT = 8;
@@ -59,6 +72,18 @@ export const EXTENDED_CORE_INDEX = 2;
 // Violin's colors follow the Cello preset's note-parallel picks (shared
 // G/D/A hues) plus a red for its E, since no live-tracked role fits a
 // fifths-tuned instrument.
+//
+// Each preset also carries a `maxFret` (see DEFAULT_MAX_FRET/
+// MAX_FRET_OPTIONS above) — the highest fret its remap range reaches,
+// user-set per instrument rather than the old blanket 20. Bass (EADG)
+// keeps the historical 20; the 5-string bass and every guitar preset get
+// the generous 24 (guitar/bass charts occasionally carry a high
+// transcribed solo passage above fret 20). Violin and mandolin — genuinely
+// short-necked fretless/course instruments in practice — get 14. The
+// remaining orchestral/folk presets (upright bass solo, cello, viola,
+// both banjos) don't have a settled real-world fret-equivalent count, so
+// they default to the same generous 24 rather than a guessed narrower
+// number.
 export const BUILTIN_PRESET_TUNINGS = [
     {
         id: 'eadg',
@@ -67,12 +92,14 @@ export const BUILTIN_PRESET_TUNINGS = [
         // strings, without the low B.
         strings: DEFAULT_TARGET_TUNING.slice(1),
         colors: null,
+        maxFret: 20,
     },
     {
         id: 'beadg',
         label: 'BEADG',
         strings: DEFAULT_TARGET_TUNING,
         colors: null,
+        maxFret: 24,
     },
     {
         id: 'upright_solo_fsbea',
@@ -84,6 +111,7 @@ export const BUILTIN_PRESET_TUNINGS = [
         strings: ['F#1', 'B1', 'E2', 'A2'],
         colors: null,
         roles: ['e', 'a', 'd', 'g'],
+        maxFret: 24,
     },
     {
         id: 'eadgbe',
@@ -95,6 +123,7 @@ export const BUILTIN_PRESET_TUNINGS = [
         // same slots highway_3d gives a 6-string guitar chart's strings) —
         // see the note-identity-chain rationale in the block comment above.
         roles: ['e', 'a', 'd', 'g', 'highB', 'highE'],
+        maxFret: 24,
     },
     {
         id: 'beadgbe',
@@ -105,6 +134,7 @@ export const BUILTIN_PRESET_TUNINGS = [
         strings: ['B1', 'E2', 'A2', 'D3', 'G3', 'B3', 'E4'],
         colors: null,
         roles: ['lowB', 'e', 'a', 'd', 'g', 'highB', 'highE'],
+        maxFret: 24,
     },
     {
         id: 'baritone_beadfsb',
@@ -116,12 +146,14 @@ export const BUILTIN_PRESET_TUNINGS = [
         strings: ['B1', 'E2', 'A2', 'D3', 'F#3', 'B3'],
         colors: null,
         roles: ['e', 'a', 'd', 'g', 'highB', 'highE'],
+        maxFret: 24,
     },
     {
         id: 'cello_cgda',
         label: 'Cello (CGDA)',
         strings: ['C2', 'G2', 'D3', 'A3'],
         colors: ['#cc00aa', '#f18313', '#3fc413', '#ecd234'],
+        maxFret: 24,
     },
     {
         id: 'viola_cgda',
@@ -130,6 +162,7 @@ export const BUILTIN_PRESET_TUNINGS = [
         // note-parallel colors.
         strings: ['C3', 'G3', 'D4', 'A4'],
         colors: ['#cc00aa', '#f18313', '#3fc413', '#ecd234'],
+        maxFret: 24,
     },
     {
         id: 'violin_gdae',
@@ -138,6 +171,7 @@ export const BUILTIN_PRESET_TUNINGS = [
         // reuse Cello's note-parallel hues, the E adds a red.
         strings: ['G3', 'D4', 'A4', 'E5'],
         colors: ['#f18313', '#3fc413', '#ecd234', '#e61f26'],
+        maxFret: 14,
     },
     {
         id: 'banjo4_cgbd',
@@ -146,6 +180,7 @@ export const BUILTIN_PRESET_TUNINGS = [
         // B adds a blue.
         strings: ['C3', 'G3', 'B3', 'D4'],
         colors: ['#cc00aa', '#f18313', '#1096e6', '#3fc413'],
+        maxFret: 24,
     },
     {
         id: 'banjo5_gdgbd',
@@ -162,6 +197,7 @@ export const BUILTIN_PRESET_TUNINGS = [
         // enhancements". Duplicate notes share their note-parallel hue.
         strings: ['G4', 'D3', 'G3', 'B3', 'D4'],
         colors: ['#f18313', '#3fc413', '#f18313', '#1096e6', '#3fc413'],
+        maxFret: 24,
     },
     {
         id: 'mandolin_ggddaaee',
@@ -171,6 +207,7 @@ export const BUILTIN_PRESET_TUNINGS = [
         // shares one color: two strings, one logical course.
         strings: ['G3', 'G3', 'D4', 'D4', 'A4', 'A4', 'E5', 'E5'],
         colors: ['#f18313', '#f18313', '#3fc413', '#3fc413', '#ecd234', '#ecd234', '#e61f26', '#e61f26'],
+        maxFret: 14,
     },
 ];
 // The default preset ids — the single source of truth screen.js and
@@ -207,19 +244,23 @@ export function arrangementClassFor(arrangementName) {
     return 'rhythm';
 }
 
-// Resolves an active-tuning id to { strings, colors, roles } against the
-// built-in presets first (an unset id resolves to the arrangement class's
-// default — EADG for bass, EADGBE for rhythm/lead), then a caller-supplied
-// custom-tuning list, falling back to the class-default preset for an id
-// that matches neither — an unknown or deleted one — so a stale id can
-// never leave a caller without a usable tuning. (Pre-guitar versions fell
-// back to a hardcoded BEADG shape; the class default is now both more
-// predictable — it matches what a fresh install shows — and right for
-// guitar profiles.) `roles` is non-null only for a preset that carries an
-// explicit per-position role array (EADGBE today); custom tunings always
-// resolve roles: null since they carry concrete colors. Pure: the caller
-// owns reading `id`/`customTunings` from wherever they're persisted
-// (screen.js: global settings storage; settings.html: localStorage).
+// Resolves an active-tuning id to { strings, colors, roles, maxFret }
+// against the built-in presets first (an unset id resolves to the
+// arrangement class's default — EADG for bass, EADGBE for rhythm/lead),
+// then a caller-supplied custom-tuning list, falling back to the
+// class-default preset for an id that matches neither — an unknown or
+// deleted one — so a stale id can never leave a caller without a usable
+// tuning. (Pre-guitar versions fell back to a hardcoded BEADG shape; the
+// class default is now both more predictable — it matches what a fresh
+// install shows — and right for guitar profiles.) `roles` is non-null
+// only for a preset that carries an explicit per-position role array
+// (EADGBE today); custom tunings always resolve roles: null since they
+// carry concrete colors. `maxFret` on a custom tuning falls back to
+// DEFAULT_MAX_FRET when missing/invalid — covers tunings saved before
+// per-tuning max fret existed, and any corrupted stored value. Pure: the
+// caller owns reading `id`/`customTunings` from wherever they're
+// persisted (screen.js: global settings storage; settings.html:
+// localStorage).
 export function resolveActiveTuning(id, customTunings, arrClass = 'bass') {
     const targetId = id || defaultTuningIdForClass(arrClass);
     // .slice() on preset strings/roles: they're shared module constants —
@@ -231,11 +272,19 @@ export function resolveActiveTuning(id, customTunings, arrClass = 'bass') {
         strings: p.strings.slice(),
         colors: p.colors,
         roles: Array.isArray(p.roles) ? p.roles.slice() : null,
+        maxFret: p.maxFret,
     });
     const preset = BUILTIN_PRESET_TUNINGS.find(p => p.id === targetId);
     if (preset) return asResult(preset);
     const found = Array.isArray(customTunings) ? customTunings.find(p => p.id === targetId) : null;
-    if (found) return { strings: found.strings, colors: found.colors, roles: null };
+    if (found) {
+        return {
+            strings: found.strings,
+            colors: found.colors,
+            roles: null,
+            maxFret: isValidMaxFret(found.maxFret) ? found.maxFret : DEFAULT_MAX_FRET,
+        };
+    }
     return asResult(BUILTIN_PRESET_TUNINGS.find(p => p.id === defaultTuningIdForClass(arrClass)));
 }
 

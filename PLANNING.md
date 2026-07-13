@@ -1554,3 +1554,68 @@ pitch-walk completeness sweep, drone-reach, termination cases) and
 `node test/chord-solver.test.mjs` (107 — null-id routing, duplicate
 dedup, slide anchoring, degenerate span, fingers passthrough);
 `node --check` on screen.js + all src modules.
+
+## Phase 15 — Per-tuning max fret (2026-07-13)
+
+Replaces the engine's blanket hardcoded 20-fret ceiling (`TARGET_MAX_FRET`)
+with a per-tuning-profile `maxFret`, selectable from a fixed option list
+(12, 14, 20, 21, 22, 24) rather than free-typed — matches how the rest of
+the tuning editor avoids free-text validation. Charts rarely carry data
+above fret 20 (usually a transcribed solo passage), so 24 is a safe,
+generous default for anything not deliberately narrower.
+
+1. **`src/target-tuning.js`**: `TARGET_MAX_FRET` renamed
+   `DEFAULT_MAX_FRET` (still the engine's fallback when no profile-specific
+   value is threaded through — deep safety net, not a real code path since
+   screen.js always resolves one). New `MAX_FRET_OPTIONS` +
+   `isValidMaxFret`. Every `BUILTIN_PRESET_TUNINGS` entry gets a `maxFret`:
+   EADG (bass default) keeps the historical 20; the 5-string bass and
+   every guitar preset (EADGBE, 7-string, baritone) get 24; Violin and
+   Mandolin — genuinely short-necked/fretless instruments — get 14; the
+   remaining orchestral/folk presets (upright bass solo, Cello, Viola,
+   both banjos) don't have a settled real-world fret-equivalent, so they
+   also default to 24 rather than a guessed narrower number.
+   `resolveActiveTuning` returns `maxFret` alongside
+   `strings`/`colors`/`roles`; a custom tuning's own `maxFret` is validated
+   via `isValidMaxFret` and falls back to `DEFAULT_MAX_FRET` when
+   missing/invalid (covers tunings saved before this feature existed).
+2. **`src/retune-engine.js` / `src/chord-solver.js`**: every function that
+   used to read the `TARGET_MAX_FRET` constant now takes `maxFret` as a
+   trailing parameter defaulting to `DEFAULT_MAX_FRET` — backward
+   compatible by construction, so the entire existing test suite kept
+   passing unchanged except for the constant rename.
+   `createRetuner().apply(bundle, targetMidiTuning, maxFret)` threads it
+   through the whole remap (templates, chord instances, flat-note buckets,
+   anchors), and folds it into the internal `targetSig` cache key — two
+   profiles sharing the same strings but a different ceiling must not
+   cache-hit each other's remap.
+3. **screen.js**: new per-panel `_crMaxFret`, refreshed in lockstep with
+   `_activeTargetTuning` at both PATCH POINTs
+   (`_primeActiveTargetTuningForInit`, `_bgLoadSettings`) and threaded into
+   the per-frame `_crRetuner.apply()` call. Tracked independently of
+   `_bgLoadSettings`'s `tuningSig` (which gates the palette-recompute
+   branch) since `maxFret` doesn't affect colors — a maxFret-only edit
+   shouldn't force an unrelated palette re-derivation.
+   `cr3dSaveCustomTuning` validates/defaults the saved `maxFret`;
+   `_crReadCustomTunings` passes it through as read, relying on
+   `CR.resolveActiveTuning` as the single source of truth for the
+   missing/invalid fallback.
+4. **settings.html**: new "Max fret" `<select>` in the custom-tuning
+   editor (12/14/20/21/22/24), seeded from the tuning being edited (or
+   `BUILTIN_PRESETS[0]`/EADG's 20 for a brand-new tuning) and saved
+   alongside strings/colors. Mirrored `MAX_FRET_OPTIONS`/
+   `DEFAULT_MAX_FRET`/`isValidMaxFret` (same mirror-debt tradeoff as the
+   rest of this panel — see the routes.py-served-constants backlog item
+   below). The manage list shows each saved tuning's max fret alongside
+   its strings.
+
+**Verify:** `node test/retune-engine.test.mjs` (335 assertions — adds
+`resolveActiveTuning`/preset `maxFret` coverage plus engine-level ceiling
+tests: a fret drops at the default 20, resolves once widened to 24, drops
+again at a narrower 14; `createRetuner` end-to-end widen/narrow +
+cache-invalidation) and `node test/chord-solver.test.mjs` (113 — a
+root pitch-class reachable only past a narrow ceiling is unsolvable there
+and solvable once the ceiling widens, for both `solveVoicingSearch` and
+`solveChord`); `node --check` on screen.js + all src modules; the four
+inline `<script>` blocks in settings.html syntax-checked individually
+(not covered by `node --check` on an .html file).

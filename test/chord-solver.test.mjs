@@ -253,6 +253,30 @@ const shape = voicing => voicing.map(({ s, f }) => ({ s, f })).sort((a, b) => a.
     check('determinism', solveChord(spec, E_STD, null), solveChord(spec, E_STD, null));
 }
 
+// maxFret: solveVoicingSearch/solveChord respect the ceiling passed in
+// (defaults to DEFAULT_MAX_FRET, the historical hardcoded 20 — every test
+// above that omits it exercises that default), not a fixed constant.
+{
+    // Single-string target tuned to pc 1 (MIDI 1): the root pc (C, pc 0)
+    // only reappears at fret 11 (mod-12 periodicity, 1+11=12) or fret 23 —
+    // nowhere reachable within a narrow ceiling.
+    const oneStringTarget = [1];
+    const spec = chordSpecFromNotes([12], v([[0, 0]]), 'C');
+    check('solveVoicingSearch: root pc unreachable within a narrow 10-fret ceiling',
+        solveVoicingSearch(spec, new Set([0]), oneStringTarget, undefined, 10), null);
+    const found = solveVoicingSearch(spec, new Set([0]), oneStringTarget, undefined, 14);
+    assert.ok(found, 'solveVoicingSearch: root pc found once the ceiling widens to 14');
+    check('solveVoicingSearch: finds it at the periodic fret 11', found.voicing[0].f, 11);
+    passed += 1;
+
+    const r = solveChord(spec, oneStringTarget, null, 14);
+    assert.ok(r, 'solveChord: solvable once maxFret widens enough to reach the root');
+    check('solveChord: lands on fret 11', r.placements[0].f, 11);
+    passed += 1;
+    check('solveChord: drops when maxFret is too narrow to reach the root anywhere',
+        solveChord(spec, oneStringTarget, null, 10), null);
+}
+
 // matchVoicingToSource — exact matches first, then same-pc nearest.
 {
     const spec = chordSpecFromNotes(E_STD, v([[1, 3], [2, 2], [3, 0]]), 'C'); // C3 E3 G3
