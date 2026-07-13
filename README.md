@@ -6,8 +6,6 @@ Drop C#, whatever), by remapping each note to the correct string/fret for
 a target tuning of your choice instead of the chart's original tuning.
 Notes outside a target instrument's range are dropped.
 
-Scope: bass, lead, and rhythm arrangements.
-
 > **Disclaimer:** the mapping is not perfect. A remapped chart may not
 > sound exactly like the original (notes can land in different octaves,
 > chords may be revoiced or simplified, and out-of-range notes are
