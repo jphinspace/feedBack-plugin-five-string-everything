@@ -490,7 +490,7 @@ const SPOT_FRETS = [0, 10, 20];
     check('un-drop test: switching back to BEADG drops the note again', bundle.notes.length, 0);
 }
 
-// maxFret: per-tuning-profile ceiling (PLANNING.md — replaces the old
+// maxFret: per-tuning-profile ceiling (HISTORY.md Phase 15 — replaces the old
 // blanket hardcoded 20). Every engine entry point defaults to
 // DEFAULT_MAX_FRET (20, exercised throughout this file already); these
 // cases pin the actual widening/narrowing behavior a non-default value
@@ -736,7 +736,7 @@ const SPOT_FRETS = [0, 10, 20];
         adj('custom_bad_mf', { strings: ['A0', 'E1', 'A1', 'D2', 'G2'], colors: ['#111111', '#222222', '#333333', '#444444', '#555555'], roles: null, maxFret: 20 }));
     // Unknown/deleted ids fall back to the arrangement class's default
     // preset (EADG shape for bass, EADGBE for guitar classes) — changed
-    // from the pre-guitar hardcoded BEADG-shape fallback (see PLANNING.md
+    // from the pre-guitar hardcoded BEADG-shape fallback (see HISTORY.md
     // Phase 12): the class default matches what a fresh install shows.
     check('resolveActiveTuning: an unknown/deleted id falls back to the class default (bass -> EADG)',
         resolveActiveTuning('stale_deleted_id', []), adj('eadg', { strings: DEFAULT_TARGET_TUNING.slice(1), colors: null, roles: null, maxFret: 20 }));
