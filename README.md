@@ -127,9 +127,9 @@ its **own independent copy** of `screen.js`, forked from and patched against
 It does **not** automatically pick up upstream fixes/features — that copy
 has to be **manually re-synced** whenever the upstream file changes. See
 [Syncing from upstream](#syncing-from-upstream-highway_3d) below for the
-procedure, and [`PLANNING.md`](PLANNING.md) for the full design writeup —
+procedure, and [`HISTORY.md`](HISTORY.md) for the full design writeup —
 the algorithm, every patch point against `highway_3d`, and why each one
-exists.
+exists. Future work is tracked in [`PLANNING.md`](PLANNING.md).
 
 You can track this improvement in the main feedBack repository at https://github.com/got-feedBack/feedBack/issues/952
 
@@ -176,17 +176,18 @@ plugin rather than silently drifting. Short version:
 1. Shallow-clone `https://github.com/got-feedBack/feedBack` somewhere
    scratch (never point this repo's own remotes at it).
 2. Diff its `plugins/highway_3d/screen.js` against the version this
-   plugin was last synced to (noted in `PLANNING.md`'s sync-log entries).
+   plugin was last synced to (noted in `HISTORY.md`'s sync-log entries).
 3. For each changed hunk, find the same surrounding code in this repo's
    `screen.js` (by content, not line number — we've diverged) and reapply
-   it — *unless* it touches one of our patch points (search `PLANNING.md`
-   for "patch point"), in which case reconcile by hand instead of copying
+   it — *unless* it touches one of our patch points (listed in
+   `HISTORY.md`), in which case reconcile by hand instead of copying
    blindly.
 4. Re-run the test suite and diff this repo's `screen.js` against the fresh
    upstream copy — every remaining hunk should trace to a documented patch
    point.
 
-Full procedure and the current sync log: `PLANNING.md`, Phase 8.
+Full procedure: `PLANNING.md` ("Syncing from upstream"). Sync log (what was
+synced, when): `HISTORY.md`.
 
 ## License
 

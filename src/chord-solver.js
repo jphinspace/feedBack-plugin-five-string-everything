@@ -5,7 +5,7 @@
 // pitch-preserving remap of an open chord under a shifted tuning drops
 // notes (fret -1) or blows the shape apart. This module solves a
 // comparable voicing on the TARGET tuning instead. Priorities, in order
-// (user-set, see PLANNING.md Phase 13):
+// (user-set, see HISTORY.md Phase 13):
 //   1. Playable — fretted stretch never exceeds a 4-fret box
 //      (max fretted fret − min fretted fret ≤ MAX_CHORD_SPAN) unless the
 //      ORIGINAL chord itself stretched further, and never needs more
