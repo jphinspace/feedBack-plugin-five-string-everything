@@ -24,11 +24,11 @@ All three profiles pick from the same pool of tunings — any pitches, 4 to
 another for lead, and nothing stops you from pointing a guitar profile at
 a bass tuning or vice versa:
 
-- **EADG (4-string)** - E standard (bass) (default)
-- **BEADG (5-string)**
-- **EADGBE (6-string)** - E standard (guitar) (default)
-- **BEADGBE (7-string)**
-- **Baritone (BEADF#B, 6-string)**
+- **Bass EADG (4-string)** (default for bass)
+- **Bass BEADG (5-string)**
+- **Guitar EADGBE (6-string)** (default for lead/rhythm)
+- **Guitar BEADGBE (7-string)**
+- **Baritone Guitar (BEADF#B, 6-string)**
 - **Upright bass solo (F#BEA, 4-string)**
 - **Cello (CGDA, 4-string)**
 - **Viola (CGDA, 4-string)**
