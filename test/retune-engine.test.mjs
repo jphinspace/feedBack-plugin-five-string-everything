@@ -8,6 +8,14 @@ const {
     DEFAULT_MAX_FRET,
     MAX_FRET_OPTIONS,
     isValidMaxFret,
+    isValidCapo,
+    resolveCapo,
+    MIN_OCTAVE_OFFSET,
+    MAX_OCTAVE_OFFSET,
+    isValidOctaveOffset,
+    resolveOctaveOffset,
+    effectiveTargetMidiTuning,
+    effectiveMaxFret,
     MAX_TARGET_STRING_COUNT,
     MIN_TARGET_STRING_COUNT,
     DEFAULT_TARGET_MIDI_TUNING,
@@ -701,48 +709,52 @@ const SPOT_FRETS = [0, 10, 20];
         BUILTIN_PRESET_TUNINGS.filter(p => p.colors === null).every(p => isValidTuningStringsArray(p.strings) && (p.roles === undefined || p.roles.length === p.strings.length)),
         true);
 
+    // Every resolution also reports the RESOLVED id plus capo/octaveOffset
+    // (v0.4.0, both 0 unless the profile carries valid values) — folded
+    // into the expected shapes below via this tiny helper.
+    const adj = (id, shape) => Object.assign({ id, capo: 0, octaveOffset: 0 }, shape);
     check('resolveActiveTuning: no id (fresh install) resolves to EADG, live colors',
-        resolveActiveTuning(undefined, []), { strings: DEFAULT_TARGET_TUNING.slice(1), colors: null, roles: null, maxFret: 20 });
+        resolveActiveTuning(undefined, []), adj('eadg', { strings: DEFAULT_TARGET_TUNING.slice(1), colors: null, roles: null, maxFret: 20 }));
     check('resolveActiveTuning: explicit EADG id resolves the same as no id',
-        resolveActiveTuning('eadg', []), { strings: DEFAULT_TARGET_TUNING.slice(1), colors: null, roles: null, maxFret: 20 });
+        resolveActiveTuning('eadg', []), adj('eadg', { strings: DEFAULT_TARGET_TUNING.slice(1), colors: null, roles: null, maxFret: 20 }));
     check('resolveActiveTuning: explicit BEADG id resolves BEADG, live colors',
-        resolveActiveTuning('beadg', []), { strings: DEFAULT_TARGET_TUNING, colors: null, roles: null, maxFret: 24 });
+        resolveActiveTuning('beadg', []), adj('beadg', { strings: DEFAULT_TARGET_TUNING, colors: null, roles: null, maxFret: 24 }));
     check('resolveActiveTuning: EADGBE id resolves guitar strings + roles passthrough',
         resolveActiveTuning('eadgbe', []),
-        { strings: ['E2', 'A2', 'D3', 'G3', 'B3', 'E4'], colors: null, roles: ['e', 'a', 'd', 'g', 'highB', 'highE'], maxFret: 24 });
+        adj('eadgbe', { strings: ['E2', 'A2', 'D3', 'G3', 'B3', 'E4'], colors: null, roles: ['e', 'a', 'd', 'g', 'highB', 'highE'], maxFret: 24 }));
     check('resolveActiveTuning: a non-default preset id (Cello) resolves its own strings + concrete colors',
         resolveActiveTuning('cello_cgda', []),
-        { strings: ['C2', 'G2', 'D3', 'A3'], colors: ['#cc00aa', '#f18313', '#3fc413', '#ecd234'], roles: null, maxFret: 24 });
+        adj('cello_cgda', { strings: ['C2', 'G2', 'D3', 'A3'], colors: ['#cc00aa', '#f18313', '#3fc413', '#ecd234'], roles: null, maxFret: 24 }));
     check('resolveActiveTuning: a custom-tuning id resolves from the supplied list (roles always null, maxFret defaults when absent)',
         resolveActiveTuning('custom_abc', [{ id: 'custom_abc', name: 'AEADG', strings: ['A0', 'E1', 'A1', 'D2', 'G2'], colors: ['#111111', '#222222', '#333333', '#444444', '#555555'] }]),
-        { strings: ['A0', 'E1', 'A1', 'D2', 'G2'], colors: ['#111111', '#222222', '#333333', '#444444', '#555555'], roles: null, maxFret: 20 });
+        adj('custom_abc', { strings: ['A0', 'E1', 'A1', 'D2', 'G2'], colors: ['#111111', '#222222', '#333333', '#444444', '#555555'], roles: null, maxFret: 20 }));
     check('resolveActiveTuning: a custom-tuning id carries its own valid maxFret through',
         resolveActiveTuning('custom_mf', [{ id: 'custom_mf', name: 'Custom24', strings: ['A0', 'E1', 'A1', 'D2', 'G2'], colors: ['#111111', '#222222', '#333333', '#444444', '#555555'], maxFret: 24 }]),
-        { strings: ['A0', 'E1', 'A1', 'D2', 'G2'], colors: ['#111111', '#222222', '#333333', '#444444', '#555555'], roles: null, maxFret: 24 });
+        adj('custom_mf', { strings: ['A0', 'E1', 'A1', 'D2', 'G2'], colors: ['#111111', '#222222', '#333333', '#444444', '#555555'], roles: null, maxFret: 24 }));
     check('resolveActiveTuning: a custom-tuning id with an invalid maxFret falls back to the default',
         resolveActiveTuning('custom_bad_mf', [{ id: 'custom_bad_mf', name: 'BadMF', strings: ['A0', 'E1', 'A1', 'D2', 'G2'], colors: ['#111111', '#222222', '#333333', '#444444', '#555555'], maxFret: 17 }]),
-        { strings: ['A0', 'E1', 'A1', 'D2', 'G2'], colors: ['#111111', '#222222', '#333333', '#444444', '#555555'], roles: null, maxFret: 20 });
+        adj('custom_bad_mf', { strings: ['A0', 'E1', 'A1', 'D2', 'G2'], colors: ['#111111', '#222222', '#333333', '#444444', '#555555'], roles: null, maxFret: 20 }));
     // Unknown/deleted ids fall back to the arrangement class's default
     // preset (EADG shape for bass, EADGBE for guitar classes) — changed
     // from the pre-guitar hardcoded BEADG-shape fallback (see PLANNING.md
     // Phase 12): the class default matches what a fresh install shows.
     check('resolveActiveTuning: an unknown/deleted id falls back to the class default (bass -> EADG)',
-        resolveActiveTuning('stale_deleted_id', []), { strings: DEFAULT_TARGET_TUNING.slice(1), colors: null, roles: null, maxFret: 20 });
+        resolveActiveTuning('stale_deleted_id', []), adj('eadg', { strings: DEFAULT_TARGET_TUNING.slice(1), colors: null, roles: null, maxFret: 20 }));
     check('resolveActiveTuning: an unknown id with null customTunings falls back to class default (non-array guard)',
-        resolveActiveTuning('stale_deleted_id', null), { strings: DEFAULT_TARGET_TUNING.slice(1), colors: null, roles: null, maxFret: 20 });
+        resolveActiveTuning('stale_deleted_id', null), adj('eadg', { strings: DEFAULT_TARGET_TUNING.slice(1), colors: null, roles: null, maxFret: 20 }));
     check('resolveActiveTuning: an unknown id with undefined customTunings falls back to class default (non-array guard)',
-        resolveActiveTuning('stale_deleted_id', undefined), { strings: DEFAULT_TARGET_TUNING.slice(1), colors: null, roles: null, maxFret: 20 });
+        resolveActiveTuning('stale_deleted_id', undefined), adj('eadg', { strings: DEFAULT_TARGET_TUNING.slice(1), colors: null, roles: null, maxFret: 20 }));
     check('resolveActiveTuning: an unknown id under a guitar class falls back to EADGBE',
         resolveActiveTuning('stale_deleted_id', [], 'lead'),
-        { strings: ['E2', 'A2', 'D3', 'G3', 'B3', 'E4'], colors: null, roles: ['e', 'a', 'd', 'g', 'highB', 'highE'], maxFret: 24 });
+        adj('eadgbe', { strings: ['E2', 'A2', 'D3', 'G3', 'B3', 'E4'], colors: null, roles: ['e', 'a', 'd', 'g', 'highB', 'highE'], maxFret: 24 }));
     check('resolveActiveTuning: no id under the rhythm class resolves the guitar default',
         resolveActiveTuning(undefined, [], 'rhythm'),
-        { strings: ['E2', 'A2', 'D3', 'G3', 'B3', 'E4'], colors: null, roles: ['e', 'a', 'd', 'g', 'highB', 'highE'], maxFret: 24 });
+        adj('eadgbe', { strings: ['E2', 'A2', 'D3', 'G3', 'B3', 'E4'], colors: null, roles: ['e', 'a', 'd', 'g', 'highB', 'highE'], maxFret: 24 }));
     check('resolveActiveTuning: an explicit id resolves the same regardless of class (any profile may use any tuning)',
-        resolveActiveTuning('eadg', [], 'lead'), { strings: DEFAULT_TARGET_TUNING.slice(1), colors: null, roles: null, maxFret: 20 });
+        resolveActiveTuning('eadg', [], 'lead'), adj('eadg', { strings: DEFAULT_TARGET_TUNING.slice(1), colors: null, roles: null, maxFret: 20 }));
     check('resolveActiveTuning: a preset id wins even if a custom tuning happens to share it',
         resolveActiveTuning('cello_cgda', [{ id: 'cello_cgda', name: 'user override attempt', strings: ['E1', 'A1', 'D2', 'G2'], colors: ['#000', '#000', '#000', '#000'] }]),
-        { strings: ['C2', 'G2', 'D3', 'A3'], colors: ['#cc00aa', '#f18313', '#3fc413', '#ecd234'], roles: null, maxFret: 24 });
+        adj('cello_cgda', { strings: ['C2', 'G2', 'D3', 'A3'], colors: ['#cc00aa', '#f18313', '#3fc413', '#ecd234'], roles: null, maxFret: 24 }));
 
     check('MAX_FRET_OPTIONS is the expected selectable ceiling list', MAX_FRET_OPTIONS, [12, 14, 20, 21, 22, 24]);
     check('isValidMaxFret accepts every listed option', MAX_FRET_OPTIONS.every(isValidMaxFret), true);
@@ -871,6 +883,142 @@ const SPOT_FRETS = [0, 10, 20];
     const remapped6 = remapChordTemplate([23, 28, 33, 38, 43, 47], [0, 1, 2, 3, 4, 5], template6, sixString.midiTuning);
     check('remapChordTemplate at a 6-string target sizes frets to 6', remapped6.frets.length, 6);
     check('remapChordTemplate at a 6-string target: the new 6th-string slot remaps correctly', remapped6.frets, [-1, -1, -1, -1, -1, 5]);
+}
+
+// ── Capo & octave offset (v0.4.0) ────────────────────────────────────
+
+// Validation helpers.
+{
+    check('isValidCapo: 0 is valid (means "no capo")', isValidCapo(0, 20), true);
+    check('isValidCapo: maxFret-1 is the ceiling', isValidCapo(19, 20), true);
+    check('isValidCapo: capo AT the max fret is invalid', isValidCapo(20, 20), false);
+    check('isValidCapo: a negative capo is invalid', isValidCapo(-1, 20), false);
+    check('isValidCapo: non-integers are invalid', isValidCapo(1.5, 20), false);
+    check('resolveCapo: invalid values resolve to 0', resolveCapo(25, 20), 0);
+    check('resolveCapo: a valid capo passes through', resolveCapo(4, 20), 4);
+    check('octave-offset bounds', [MIN_OCTAVE_OFFSET, MAX_OCTAVE_OFFSET], [-2, 2]);
+    check('isValidOctaveOffset over the boundary values',
+        [isValidOctaveOffset(-2), isValidOctaveOffset(2), isValidOctaveOffset(0), isValidOctaveOffset(3), isValidOctaveOffset(-3), isValidOctaveOffset(0.5)],
+        [true, true, true, false, false, false]);
+    check('resolveOctaveOffset: invalid values resolve to 0', resolveOctaveOffset(9), 0);
+    check('effectiveTargetMidiTuning: capo raises each open, +1 octave lowers by 12',
+        effectiveTargetMidiTuning([28, 33, 38, 43], 2, 1), [18, 23, 28, 33]);
+    check('effectiveMaxFret subtracts the capo from the neck', effectiveMaxFret(20, 3), 17);
+    check('effectiveMaxFret never collapses below 1', effectiveMaxFret(20, 25), 1);
+}
+
+// Capo cancellation identity: tuning every string down k half-steps and
+// clamping a capo at fret k is a cumulative offset of 0 — the remapped
+// chart must equal the un-capo'd original exactly (for charts that fit
+// the capo-shortened neck), for k = 1..4. End-to-end via createRetuner,
+// the same path screen.js's draw() uses.
+{
+    const { createRetuner } = CR;
+    const eadg = resolveTargetTuning(['E1', 'A1', 'D2', 'G2']);
+    const rawNotes = [
+        { t: 0, s: 0, f: 0 }, { t: 1, s: 1, f: 3 },
+        { t: 2, s: 2, f: 12 }, { t: 3, s: 3, f: 16 },
+    ];
+    const rawChords = [{ id: null, t: 4, notes: [{ t: 4, s: 1, f: 2 }, { t: 4, s: 2, f: 2 }] }];
+    const mkBundle = () => ({
+        notes: rawNotes, chords: rawChords, anchors: [], chordTemplates: [],
+        tuning: [0, 0, 0, 0], capo: 0, stringCount: 4,
+    });
+
+    const baseline = mkBundle();
+    createRetuner().apply(baseline, eadg.midiTuning, 20);
+    const expectedNotes = baseline.notes.map(n => ({ s: n.s, f: n.f }));
+    const expectedChord = baseline.chords[0].notes.map(n => ({ s: n.s, f: n.f }));
+    check('capo baseline: E-standard chart on EADG is the identity',
+        expectedNotes, rawNotes.map(n => ({ s: n.s, f: n.f })));
+
+    for (const k of [1, 2, 3, 4]) {
+        const downTuned = eadg.midiTuning.map(m => m - k);
+        check(`capo ${k}: effective opens equal plain EADG (cumulative offset 0)`,
+            effectiveTargetMidiTuning(downTuned, k, 0), eadg.midiTuning);
+        const bundle = mkBundle();
+        createRetuner().apply(bundle, effectiveTargetMidiTuning(downTuned, k, 0), effectiveMaxFret(20, k));
+        check(`capo ${k}: notes identical to the un-capo'd chart`,
+            bundle.notes.map(n => ({ s: n.s, f: n.f })), expectedNotes);
+        check(`capo ${k}: chord voicing identical to the un-capo'd chart`,
+            bundle.chords[0].notes.map(n => ({ s: n.s, f: n.f })), expectedChord);
+    }
+}
+
+// Octave-offset identity: an E-standard bass chart with a +1 octave
+// offset lands on a standard guitar's lowest four strings (E2 A2 D3 G3)
+// note-for-note; the reverse (-1 octave) puts a guitar chart's low-four-
+// string notes back on the bass unchanged.
+{
+    const { createRetuner } = CR;
+    const bass = resolveTargetTuning(['E1', 'A1', 'D2', 'G2']);
+    const guitar = resolveTargetTuning(['E2', 'A2', 'D3', 'G3', 'B3', 'E4']);
+
+    const bassNotes = [
+        { t: 0, s: 0, f: 0 }, { t: 1, s: 1, f: 5 },
+        { t: 2, s: 2, f: 7 }, { t: 3, s: 3, f: 12 },
+    ];
+    const mkBass = () => ({
+        notes: bassNotes, chords: [], anchors: [], chordTemplates: [],
+        tuning: [0, 0, 0, 0], capo: 0, stringCount: 4,
+    });
+    const onBass = mkBass();
+    createRetuner().apply(onBass, bass.midiTuning, 20);
+    const bassExpected = onBass.notes.map(n => ({ s: n.s, f: n.f }));
+    check('octave baseline: bass chart on the bass target is the identity',
+        bassExpected, bassNotes.map(n => ({ s: n.s, f: n.f })));
+
+    const onGuitar = mkBass();
+    createRetuner().apply(onGuitar, effectiveTargetMidiTuning(guitar.midiTuning, 0, 1), effectiveMaxFret(24, 0));
+    check('+1 octave: the bass chart lands on the guitar\'s low four strings identically',
+        onGuitar.notes.map(n => ({ s: n.s, f: n.f })), bassExpected);
+
+    const guitarNotes = [
+        { t: 0, s: 0, f: 3 }, { t: 1, s: 1, f: 0 },
+        { t: 2, s: 2, f: 9 }, { t: 3, s: 3, f: 14 },
+    ];
+    const onBassDown = {
+        notes: guitarNotes, chords: [], anchors: [], chordTemplates: [],
+        tuning: [0, 0, 0, 0, 0, 0], capo: 0, stringCount: 6,
+    };
+    createRetuner().apply(onBassDown, effectiveTargetMidiTuning(bass.midiTuning, 0, -1), effectiveMaxFret(20, 0));
+    check('-1 octave: a guitar chart\'s low-four-string notes land on the bass identically',
+        onBassDown.notes.map(n => ({ s: n.s, f: n.f })), guitarNotes.map(n => ({ s: n.s, f: n.f })));
+}
+
+// resolveActiveTuning: resolved id + capo/octaveOffset fields, and the
+// v0.4.0 ukulele presets.
+{
+    const t = resolveActiveTuning('eadgbe', []);
+    check('resolveActiveTuning reports the resolved id', t.id, 'eadgbe');
+    check('built-in presets default to capo 0 / octave 0', [t.capo, t.octaveOffset], [0, 0]);
+
+    const uke = resolveActiveTuning('ukulele_gcea', []);
+    check('ukulele preset strings (reentrant gCEA)', uke.strings, ['G4', 'C4', 'E4', 'A4']);
+    check('ukulele preset max fret', uke.maxFret, 12);
+    const bari = resolveActiveTuning('baritone_uke_dgbe', []);
+    check('baritone ukulele preset strings (DGBE)', bari.strings, ['D3', 'G3', 'B3', 'E4']);
+
+    const customs = [
+        { id: 'c1', name: 'Octave cello', strings: ['C2', 'G2', 'D3', 'A3'], colors: ['#111111', '#222222', '#333333', '#444444'], maxFret: 24, capo: 2, octaveOffset: 1 },
+        { id: 'c2', name: 'Bad adjust', strings: ['C2', 'G2', 'D3', 'A3'], colors: ['#111111', '#222222', '#333333', '#444444'], maxFret: 12, capo: 20, octaveOffset: 9 },
+    ];
+    const c1 = resolveActiveTuning('c1', customs);
+    check('a custom tuning carries its saved capo/octave', [c1.id, c1.capo, c1.octaveOffset], ['c1', 2, 1]);
+    const c2 = resolveActiveTuning('c2', customs);
+    check('a saved capo at/past the tuning\'s own max fret disables the capo; out-of-range octave resolves to 0',
+        [c2.capo, c2.octaveOffset], [0, 0]);
+    const fb = resolveActiveTuning('nonexistent', [], 'bass');
+    check('the class-default fallback reports its own id', fb.id, 'eadg');
+
+    // Reentrant uke target sanity: non-monotonic (high-G drone at index
+    // 0) flows through the same pitch-ordered walk banjo5 exercised.
+    const ukeTarget = resolveTargetTuning(uke.strings);
+    check('ukulele target midiTuning', ukeTarget.midiTuning, [67, 60, 64, 69]);
+    check('reentrant uke: a note below the lowest open (C4) drops rather than crashing',
+        remapNote(59, 1, 0, ukeTarget.midiTuning, 12), null);
+    check('reentrant uke: open C4 stays on its own string',
+        remapNote(60, 1, 0, ukeTarget.midiTuning, 12), { s: 1, f: 0 });
 }
 
 console.log(`OK - ${passed} assertions passed`);

@@ -28,6 +28,52 @@ export const MAX_FRET_OPTIONS = [12, 14, 20, 21, 22, 24];
 export function isValidMaxFret(v) {
     return MAX_FRET_OPTIONS.indexOf(v) !== -1;
 }
+
+// Capo (v0.4.0) — a per-tuning-profile fret the player clamps a capo on,
+// ON TOP of the tuning's own string pitches. One capo fret = one
+// half-step up per string, and the frets above (maxFret - capo) fall off
+// the far end of the neck. 0 means "no capo". Negative capos and capos
+// at/beyond the tuning's max fret are invalid (the settings slider runs
+// 0..maxFret-1). Deliberate identity: tuning every string down k
+// half-steps + capo at fret k reproduces the un-capo'd chart exactly
+// (cumulative offset 0) for any chart that fits the shortened neck.
+export function isValidCapo(v, maxFret) {
+    return Number.isInteger(v) && v >= 0 && v < (Number.isInteger(maxFret) ? maxFret : DEFAULT_MAX_FRET);
+}
+export function resolveCapo(v, maxFret) {
+    return isValidCapo(v, maxFret) ? v : 0;
+}
+
+// Octave offset (v0.4.0) — shifts the WHOLE CHART ±N octaves before
+// remapping, no key change involved. +1 makes an E-standard bass chart
+// land on a guitar profile's lowest four strings (E2 A2 D3 G3 sounding
+// an octave above the bass's E1 A1 D2 G2) note-for-note; -1 is the
+// reverse. Bounded to ±2 octaves; 0 = no shift.
+export const MIN_OCTAVE_OFFSET = -2;
+export const MAX_OCTAVE_OFFSET = 2;
+export function isValidOctaveOffset(v) {
+    return Number.isInteger(v) && v >= MIN_OCTAVE_OFFSET && v <= MAX_OCTAVE_OFFSET;
+}
+export function resolveOctaveOffset(v) {
+    return isValidOctaveOffset(v) ? v : 0;
+}
+
+// The open-string MIDI array the remap engine should actually match
+// against, given the profile's capo + octave offset. A capo RAISES each
+// sounding open pitch by `capo` half-steps; a +N octave offset shifts
+// the chart up N octaves, which is equivalent to LOWERING the target
+// opens by 12·N for matching purposes (the engine transposes the chart
+// by moving the target, so no engine change is needed). Callers pair
+// this with effectiveMaxFret below.
+export function effectiveTargetMidiTuning(midiTuning, capo, octaveOffset) {
+    const c = capo | 0, oct = octaveOffset | 0;
+    return midiTuning.map(m => m + c - 12 * oct);
+}
+// Frets remaining above the capo. capo is validated < maxFret, so this
+// is always >= 1 for a valid profile.
+export function effectiveMaxFret(maxFret, capo) {
+    return Math.max(1, (maxFret | 0) - (capo | 0));
+}
 // 8 = MAX_RENDER_STRINGS in screen.js (per-string material arrays are
 // only sized that far). 4 matches highway_3d's own floor.
 export const MAX_TARGET_STRING_COUNT = 8;
@@ -200,6 +246,30 @@ export const BUILTIN_PRESET_TUNINGS = [
         maxFret: 24,
     },
     {
+        id: 'ukulele_gcea',
+        label: 'Ukulele (gCEA)',
+        // Standard reentrant ukulele (MIDI 67,60,64,69) — string 0 is the
+        // HIGH G4, above the C that follows it, so like banjo5_gdgbd this
+        // is a non-monotonic target (handled by resolveTargetForFret's
+        // pitch-ordered walk). Note-parallel family hues: G/C/E/A reuse
+        // the banjo/cello/violin picks for the same note names. 12 frets —
+        // a soprano/concert neck.
+        strings: ['G4', 'C4', 'E4', 'A4'],
+        colors: ['#f18313', '#cc00aa', '#e61f26', '#ecd234'],
+        maxFret: 12,
+    },
+    {
+        id: 'baritone_uke_dgbe',
+        label: 'Baritone ukulele (DGBE)',
+        // Linear (non-reentrant) baritone uke (MIDI 50,55,59,64) — the
+        // top four strings of a standard guitar. Note-parallel hues:
+        // D/G/B follow the banjo picks, E the violin red. Real necks run
+        // ~18-19 frets; 20 is the closest selectable ceiling.
+        strings: ['D3', 'G3', 'B3', 'E4'],
+        colors: ['#3fc413', '#f18313', '#1096e6', '#e61f26'],
+        maxFret: 20,
+    },
+    {
         id: 'mandolin_ggddaaee',
         label: 'Mandolin (GGDDAAEE)',
         // Four paired courses, violin notes doubled (MIDI 55×2, 62×2,
@@ -244,23 +314,30 @@ export function arrangementClassFor(arrangementName) {
     return 'rhythm';
 }
 
-// Resolves an active-tuning id to { strings, colors, roles, maxFret }
-// against the built-in presets first (an unset id resolves to the
-// arrangement class's default — EADG for bass, EADGBE for rhythm/lead),
-// then a caller-supplied custom-tuning list, falling back to the
-// class-default preset for an id that matches neither — an unknown or
-// deleted one — so a stale id can never leave a caller without a usable
-// tuning. (Pre-guitar versions fell back to a hardcoded BEADG shape; the
-// class default is now both more predictable — it matches what a fresh
-// install shows — and right for guitar profiles.) `roles` is non-null
-// only for a preset that carries an explicit per-position role array
-// (EADGBE today); custom tunings always resolve roles: null since they
-// carry concrete colors. `maxFret` on a custom tuning falls back to
-// DEFAULT_MAX_FRET when missing/invalid — covers tunings saved before
-// per-tuning max fret existed, and any corrupted stored value. Pure: the
-// caller owns reading `id`/`customTunings` from wherever they're
-// persisted (screen.js: global settings storage; settings.html:
-// localStorage).
+// Resolves an active-tuning id to { id, strings, colors, roles, maxFret,
+// capo, octaveOffset } against the built-in presets first (an unset id
+// resolves to the arrangement class's default — EADG for bass, EADGBE
+// for rhythm/lead), then a caller-supplied custom-tuning list, falling
+// back to the class-default preset for an id that matches neither — an
+// unknown or deleted one — so a stale id can never leave a caller
+// without a usable tuning. (Pre-guitar versions fell back to a hardcoded
+// BEADG shape; the class default is now both more predictable — it
+// matches what a fresh install shows — and right for guitar profiles.)
+// `id` is the RESOLVED id (the fallback preset's own id when the input
+// id matched nothing) — screen.js keys its per-tuning capo/octave
+// overrides by it. `roles` is non-null only for a preset that carries an
+// explicit per-position role array (EADGBE today); custom tunings always
+// resolve roles: null since they carry concrete colors. `maxFret` on a
+// custom tuning falls back to DEFAULT_MAX_FRET when missing/invalid —
+// covers tunings saved before per-tuning max fret existed, and any
+// corrupted stored value. `capo`/`octaveOffset` (v0.4.0) default to 0
+// when missing/invalid — every built-in preset ships 0 for both, and
+// tunings saved before the fields existed read as 0; capo is validated
+// against the profile's OWN resolved maxFret, so shrinking a tuning's
+// max fret below a saved capo silently disables the capo rather than
+// leaving an impossible neck. Pure: the caller owns reading
+// `id`/`customTunings` from wherever they're persisted (screen.js:
+// global settings storage; settings.html: localStorage).
 export function resolveActiveTuning(id, customTunings, arrClass = 'bass') {
     const targetId = id || defaultTuningIdForClass(arrClass);
     // .slice() on preset strings/roles: they're shared module constants —
@@ -269,20 +346,27 @@ export function resolveActiveTuning(id, customTunings, arrClass = 'bass') {
     // already a fresh per-read copy from the caller (see screen.js's
     // _crReadCustomTunings), so it's returned as-is.
     const asResult = p => ({
+        id: p.id,
         strings: p.strings.slice(),
         colors: p.colors,
         roles: Array.isArray(p.roles) ? p.roles.slice() : null,
         maxFret: p.maxFret,
+        capo: resolveCapo(p.capo, p.maxFret),
+        octaveOffset: resolveOctaveOffset(p.octaveOffset),
     });
     const preset = BUILTIN_PRESET_TUNINGS.find(p => p.id === targetId);
     if (preset) return asResult(preset);
     const found = Array.isArray(customTunings) ? customTunings.find(p => p.id === targetId) : null;
     if (found) {
+        const maxFret = isValidMaxFret(found.maxFret) ? found.maxFret : DEFAULT_MAX_FRET;
         return {
+            id: found.id,
             strings: found.strings,
             colors: found.colors,
             roles: null,
-            maxFret: isValidMaxFret(found.maxFret) ? found.maxFret : DEFAULT_MAX_FRET,
+            maxFret,
+            capo: resolveCapo(found.capo, maxFret),
+            octaveOffset: resolveOctaveOffset(found.octaveOffset),
         };
     }
     return asResult(BUILTIN_PRESET_TUNINGS.find(p => p.id === defaultTuningIdForClass(arrClass)));

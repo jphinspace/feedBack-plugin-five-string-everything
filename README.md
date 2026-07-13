@@ -8,6 +8,14 @@ Notes outside a target instrument's range are dropped.
 
 Scope: bass, lead, and rhythm arrangements.
 
+> **Disclaimer:** the mapping is not perfect. A remapped chart may not
+> sound exactly like the original (notes can land in different octaves,
+> chords may be revoiced or simplified, and out-of-range notes are
+> dropped), and it may be more difficult to play than the original
+> arrangement. If you have suggestions for improving the mapping, feel
+> free to [submit an issue](https://github.com/jphinspace/feedBack-plugin-chart-retuner/issues)
+> with feedback.
+
 ## Target tunings
 
 Each arrangement class has its own tuning profile, configurable in the
@@ -24,18 +32,20 @@ All three profiles pick from the same pool of tunings — any pitches, 4 to
 another for lead, and nothing stops you from pointing a guitar profile at
 a bass tuning or vice versa:
 
-- **Bass EADG (4-string)** (default for bass)
-- **Bass BEADG (5-string)**
-- **Guitar EADGBE (6-string)** (default for lead/rhythm)
-- **Guitar BEADGBE (7-string)**
-- **Baritone Guitar (BEADF#B, 6-string)**
-- **Upright bass solo (F#BEA, 4-string)**
-- **Cello (CGDA, 4-string)**
-- **Viola (CGDA, 4-string)**
-- **Violin (GDAE, 4-string)**
+- **Bass (EADG)** (default for bass)
+- **Bass (BEADG)**
+- **Guitar (EADGBE)** (default for lead/rhythm)
+- **Guitar (BEADGBE)**
+- **Baritone Guitar (BEADF#B)**
+- **Upright bass solo (F#BEA)**
+- **Cello (CGDA)**
+- **Viola (CGDA)**
+- **Violin (GDAE)**
 - **Banjo 4-string (CGBD)**
 - **Banjo 5-string (gDGBD)**
-- **Mandolin (GGDDAAEE, 8-string)**
+- **Ukulele (gCEA)**
+- **Baritone ukulele (DGBE)**
+- **Mandolin (GGDDAAEE)**
 - **Your own saved custom profiles**
 
 Every saved tuning carries its own
@@ -45,6 +55,35 @@ or edit it, independent of the shared Highway String Colors setting.
 Every tuning also carries its own **max fret** (12, 14, 20, 21, 22, or 24)
 — the highest fret a chart is allowed to remap onto for that instrument.
 Set your own custom tunings' max fret when you create or edit them.
+
+## Capo & octave offset
+
+Two per-tuning adjustments on top of the string pitches themselves
+(both default to 0 on every built-in preset):
+
+- **Capo** — clamp a virtual capo on any fret from 1 to (max fret − 1).
+  One fret = one half-step up per string; the frets above
+  (max fret − capo) fall off the end of the neck, and the nut labels
+  show the capo'd pitches. Tune every string down a half-step and capo
+  fret 1 and you get the exact original chart back — the cumulative
+  offset is zero.
+- **Octave offset** — shift the whole chart up or down 1-2 octaves
+  before remapping, with no key change. **+1** plays an E-standard bass
+  chart on a standard guitar's lowest four strings note-for-note; **-1**
+  is the reverse. Save +1 on a cello profile and every bass chart plays
+  an octave up by default.
+
+Both live in two places:
+
+- **Player controls** — a *Capo* and an *Octave* slider in the player
+  chrome (the plugin controls that appear at the left edge of the
+  screen), for quick per-song changes. These apply live mid-song and
+  persist **per tuning**, so a capo you set while playing on EADGBE
+  doesn't follow you to the cello preset.
+- **The tuning editor** — saved with a custom tuning as its defaults
+  (for a capo you never take off). A later editor save clears any
+  player-controls override for that tuning so the saved values take
+  effect.
 
 ## Chords
 
@@ -91,6 +130,8 @@ has to be **manually re-synced** whenever the upstream file changes. See
 procedure, and [`PLANNING.md`](PLANNING.md) for the full design writeup —
 the algorithm, every patch point against `highway_3d`, and why each one
 exists.
+
+You can track this improvement in the main feedBack repository at https://github.com/got-feedBack/feedBack/issues/952
 
 ## Install
 

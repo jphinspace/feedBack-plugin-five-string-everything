@@ -1619,3 +1619,79 @@ and solvable once the ceiling widens, for both `solveVoicingSearch` and
 `solveChord`); `node --check` on screen.js + all src modules; the four
 inline `<script>` blocks in settings.html syntax-checked individually
 (not covered by `node --check` on an .html file).
+
+## Phase 16 — Capo & octave offset, ukulele presets (v0.4.0, 2026-07-13)
+
+Two per-tuning-profile adjustments layered ON TOP of the string pitches
+themselves, both engine-neutral by construction: the remap math is
+untouched, because both fold into the *effective* target the existing
+`createRetuner().apply(bundle, targetMidiTuning, maxFret)` parameters
+already accept. Both double as validation of the remap algorithms via
+exact-identity round trips.
+
+- **Capo** — a fret (0 = none, 1..maxFret-1; negative and at/past the max
+  fret invalid) the player clamps on: each open string sounds `capo`
+  half-steps higher and the frets above `maxFret - capo` fall off the
+  neck. Identity: tuning every string down k half-steps + capo k
+  reproduces the original chart exactly (cumulative offset 0).
+- **Octave offset** — shifts the whole chart ±1..2 octaves (slider
+  −2..+2) before remapping, no key change. Implemented as *lowering* the
+  effective target opens by 12·N (equivalent to raising the chart, with
+  no engine change). Identity: an E-standard bass chart with +1 lands on
+  a standard guitar's low four strings (E2 A2 D3 G3) note-for-note; −1
+  is the reverse.
+
+1. **`src/target-tuning.js`**: `isValidCapo`/`resolveCapo` (validated
+   against the profile's own maxFret), `MIN/MAX_OCTAVE_OFFSET` +
+   `isValidOctaveOffset`/`resolveOctaveOffset`, and the two effective-
+   value helpers `effectiveTargetMidiTuning(midi, capo, oct)`
+   (`m + capo − 12·oct`) and `effectiveMaxFret(maxFret, capo)`.
+   `resolveActiveTuning` now also returns the RESOLVED `id` (screen.js
+   keys quick overrides by it) plus validated `capo`/`octaveOffset`
+   (0 on every built-in preset and on anything missing/invalid; a saved
+   capo at/past a shrunken max fret silently disables). New presets:
+   **Ukulele (gCEA)** — reentrant high-G4, the second non-monotonic
+   target after banjo5 (exercises the same pitch-ordered walk), maxFret
+   12 — and **Baritone ukulele (DGBE)** — a standard guitar's top four
+   strings, maxFret 20. `src/pitch.js` adds `midiToPitchClassLabel`
+   (octave-less spelling for capo-shifted nut labels).
+2. **screen.js**: per-panel `_crCapo`/`_crOctave`/`_crRemapMidiTuning`,
+   refreshed in lockstep with `_activeTargetTuning` at both PATCH POINTs
+   and tracked as their own `_crAdjSig` (like maxFret, they never affect
+   strings/colors, so they must not trigger the palette branch).
+   `draw()` hands the retuner `_crRemapMidiTuning` +
+   `CR.effectiveMaxFret(_crMaxFret, _crCapo)`; `_activeTargetTuning`
+   stays the RAW tuning (geometry/string count), with only its `labels`
+   re-spelled for a capo (the sounding pitch at the capo — never for an
+   octave shift, which moves the chart, not the strings). Quick
+   overrides live in a new global-only `tuningAdjustOverrides` JSON blob
+   keyed by resolved tuning id ({ [id]: { capo, octave } }), merged over
+   the profile's saved defaults in `_crResolveActiveTuning`;
+   `cr3dSaveCustomTuning` persists per-tuning defaults and clears that
+   tuning's override (an editor save is the deliberate act), and
+   `cr3dDeleteCustomTuning` drops the override with the tuning.
+3. **Player controls** (the left-edge plugin controls): one session-
+   global widget with a Capo slider (0..maxFret-1, ceiling live-follows
+   the active profile) and an Octave slider (−2..+2), labeled with the
+   tuning it edits. Mounted per the v3 player-chrome contract
+   (`window.feedBack.ui.playerControlSlot()` when
+   `uiVersion === 'v3'`; appended to `#player-controls` in classic v2),
+   re-injection guarded against the actual container. Tracks the most
+   recently init'd/switched panel's arrangement class; edits apply live
+   mid-song via the settings change bus → `_bgLoadSettings` → retuner
+   targetSig cache miss, and persist per tuning.
+4. **settings.html**: Capo + Octave sliders in the custom-tuning editor
+   (capo ceiling follows the Max fret dropdown, clamping on shrink),
+   saved with the tuning; the manage list annotates nonzero
+   capo/octave. Mirrored ukulele presets + local capo/octave validators
+   (same mirror-debt tradeoff as the rest of this panel).
+
+**Verify:** `node test/retune-engine.test.mjs` (375 assertions — adds
+capo/octave validation bounds, the capo-cancellation identity for k=1..4
+end-to-end through `createRetuner` (notes + chord voicings byte-equal to
+the un-capo'd baseline), both octave identities (bass→guitar +1,
+guitar→bass −1), resolved-id/capo/octave fields on
+`resolveActiveTuning`, and reentrant-uke non-monotonic sanity) and
+`node test/chord-solver.test.mjs` (113, unchanged); `node --check` on
+screen.js; all four settings.html inline `<script>` blocks
+syntax-checked individually.

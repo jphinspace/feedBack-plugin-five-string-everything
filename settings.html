@@ -1,6 +1,6 @@
 <div class="p-4">
     <div class="fb-text font-semibold">Chart Retuner</div>
-    <div class="fb-textDim text-sm">v0.3.0</div>
+    <div class="fb-textDim text-sm">v0.4.0</div>
     <p class="fb-textDim text-xs mt-1">
         Controls below mirror 3D Highway's own settings — this plugin
         renders its own highway remapped onto your real instrument's
@@ -67,6 +67,33 @@
                 past fret 20 — raise it for extended-range instruments or the
                 occasional high transcribed solo, lower it for a
                 genuinely short-necked instrument.
+            </p>
+        </div>
+
+        <div class="mt-3">
+            <label for="cr3d-tuning-capo" class="text-xs font-medium text-gray-400 mb-1 block">
+                Capo fret: <span id="cr3d-tuning-capo-label">none</span>
+            </label>
+            <input type="range" id="cr3d-tuning-capo" min="0" max="19" step="1" value="0" class="w-full accent-accent">
+            <p class="text-[10px] text-gray-500 mt-1">
+                Clamp a capo on top of the string pitches below — one fret
+                = one half-step up per string, and the frets above (max
+                fret − capo) fall off the end of the neck. 0 = no capo.
+                Saved with the tuning (for a capo you never take off); the
+                player-screen sliders can still adjust it later.
+            </p>
+        </div>
+
+        <div class="mt-3">
+            <label for="cr3d-tuning-octave" class="text-xs font-medium text-gray-400 mb-1 block">
+                Octave offset: <span id="cr3d-tuning-octave-label">0</span>
+            </label>
+            <input type="range" id="cr3d-tuning-octave" min="-2" max="2" step="1" value="0" class="w-full accent-accent">
+            <p class="text-[10px] text-gray-500 mt-1">
+                Shift every chart up/down whole octaves before remapping —
+                no key change involved. +1 plays an E-standard bass chart
+                on guitar strings note-for-note; save +1 on a cello tuning
+                to play bass charts an octave up by default.
             </p>
         </div>
 
@@ -143,8 +170,17 @@
             { id: 'violin_gdae', label: 'Violin (GDAE)', strings: ['G3', 'D4', 'A4', 'E5'], colors: ['#f18313', '#3fc413', '#ecd234', '#e61f26'], maxFret: 14 },
             { id: 'banjo4_cgbd', label: 'Banjo 4-string (CGBD)', strings: ['C3', 'G3', 'B3', 'D4'], colors: ['#cc00aa', '#f18313', '#1096e6', '#3fc413'], maxFret: 24 },
             { id: 'banjo5_gdgbd', label: 'Banjo 5-string (gDGBD)', strings: ['G4', 'D3', 'G3', 'B3', 'D4'], colors: ['#f18313', '#3fc413', '#f18313', '#1096e6', '#3fc413'], maxFret: 24 },
+            { id: 'ukulele_gcea', label: 'Ukulele (gCEA)', strings: ['G4', 'C4', 'E4', 'A4'], colors: ['#f18313', '#cc00aa', '#e61f26', '#ecd234'], maxFret: 12 },
+            { id: 'baritone_uke_dgbe', label: 'Baritone ukulele (DGBE)', strings: ['D3', 'G3', 'B3', 'E4'], colors: ['#3fc413', '#f18313', '#1096e6', '#e61f26'], maxFret: 20 },
             { id: 'mandolin_ggddaaee', label: 'Mandolin (GGDDAAEE)', strings: ['G3', 'G3', 'D4', 'D4', 'A4', 'A4', 'E5', 'E5'], colors: ['#f18313', '#f18313', '#3fc413', '#3fc413', '#ecd234', '#ecd234', '#e61f26', '#e61f26'], maxFret: 14 },
         ];
+        // Mirrors CR.resolveCapo / CR.resolveOctaveOffset / the octave
+        // bounds (src/target-tuning.js) — capo lives in 0..maxFret-1
+        // (0 = no capo), octave offset in -2..+2 (0 = no shift).
+        const MIN_OCTAVE_OFFSET = -2;
+        const MAX_OCTAVE_OFFSET = 2;
+        function resolveCapoLocal(v, mf) { return (Number.isInteger(v) && v >= 0 && v < mf) ? v : 0; }
+        function resolveOctaveLocal(v) { return (Number.isInteger(v) && v >= MIN_OCTAVE_OFFSET && v <= MAX_OCTAVE_OFFSET) ? v : 0; }
         // Mirrors CR.MIN/MAX_TARGET_STRING_COUNT — just for immediate
         // button-disabling feedback; the real floor/ceiling is enforced in
         // window.cr3dSaveCustomTuning.
@@ -263,6 +299,10 @@
         const listEl = $('cr3d-tuning-list');
         const nameInput = $('cr3d-tuning-name');
         const maxFretSelect = $('cr3d-tuning-maxfret');
+        const capoSlider = $('cr3d-tuning-capo');
+        const capoLabel = $('cr3d-tuning-capo-label');
+        const octaveSlider = $('cr3d-tuning-octave');
+        const octaveLabel = $('cr3d-tuning-octave-label');
         const rowsEl = $('cr3d-tuning-rows');
         const addLowBtn = $('cr3d-tuning-add-low');
         const addHighBtn = $('cr3d-tuning-add-high');
@@ -275,6 +315,22 @@
         let editingId = null; // null = "add new"
         let rows = []; // [{ note, color }], low to high — the editor's working state
         let maxFret = DEFAULT_MAX_FRET; // the editor's working max-fret value
+        let capo = 0;   // the editor's working capo fret (0 = no capo)
+        let octave = 0; // the editor's working octave offset
+
+        // The capo slider's ceiling follows the working max fret (capo AT
+        // the last fret would leave no playable fret) — re-run whenever
+        // maxFret changes, clamping a now-out-of-range capo down.
+        function syncAdjustControls() {
+            if (capoSlider) {
+                capoSlider.max = String(maxFret - 1);
+                if (capo > maxFret - 1) capo = 0;
+                capoSlider.value = String(capo);
+            }
+            if (capoLabel) capoLabel.textContent = capo === 0 ? 'none' : ('fret ' + capo);
+            if (octaveSlider) octaveSlider.value = String(octave);
+            if (octaveLabel) octaveLabel.textContent = (octave > 0 ? '+' : '') + octave;
+        }
 
         function showError(msg) {
             if (!errorP) return;
@@ -328,7 +384,13 @@
                 const label = document.createElement('span');
                 label.className = 'text-gray-300 truncate';
                 const maxFret = isValidMaxFret(profile.maxFret) ? profile.maxFret : DEFAULT_MAX_FRET;
-                label.textContent = profile.name + ' — ' + profile.strings.join(' ') + ' (max fret ' + maxFret + ')';
+                const pCapo = resolveCapoLocal(profile.capo, maxFret);
+                const pOct = resolveOctaveLocal(profile.octaveOffset);
+                label.textContent = profile.name + ' — ' + profile.strings.join(' ')
+                    + ' (max fret ' + maxFret
+                    + (pCapo !== 0 ? ', capo ' + pCapo : '')
+                    + (pOct !== 0 ? ', ' + (pOct > 0 ? '+' : '') + pOct + ' oct' : '')
+                    + ')';
                 row.appendChild(label);
                 const btns = document.createElement('div');
                 btns.className = 'flex items-center gap-1 shrink-0';
@@ -416,6 +478,9 @@
             rows = profile.strings.map((note, i) => ({ note, color: resolveDisplayColor(profile.strings, profile.colors, i) }));
             maxFret = isValidMaxFret(profile.maxFret) ? profile.maxFret : DEFAULT_MAX_FRET;
             if (maxFretSelect) maxFretSelect.value = String(maxFret);
+            capo = resolveCapoLocal(profile.capo, maxFret);
+            octave = resolveOctaveLocal(profile.octaveOffset);
+            syncAdjustControls();
         }
         // Seeds a brand-new "Add a tuning" form from the built-in default
         // preset (BUILTIN_PRESETS[0] — EADG) rather than a hardcoded shape,
@@ -501,7 +566,9 @@
                 const strings = rows.map((r) => r.note);
                 const colors = rows.map((r) => r.color);
                 const savedMaxFret = isValidMaxFret(maxFret) ? maxFret : DEFAULT_MAX_FRET;
-                const profile = { name: name, strings: strings, colors: colors, maxFret: savedMaxFret };
+                const savedCapo = resolveCapoLocal(capo, savedMaxFret);
+                const savedOctave = resolveOctaveLocal(octave);
+                const profile = { name: name, strings: strings, colors: colors, maxFret: savedMaxFret, capo: savedCapo, octaveOffset: savedOctave };
                 if (editingId) profile.id = editingId;
                 let savedId = null;
                 if (window.cr3dSaveCustomTuning) {
@@ -509,7 +576,7 @@
                 } else {
                     const list = readCustom();
                     const id = editingId || ('custom_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8));
-                    const entry = { id: id, name: name, strings: strings, colors: colors, maxFret: savedMaxFret };
+                    const entry = { id: id, name: name, strings: strings, colors: colors, maxFret: savedMaxFret, capo: savedCapo, octaveOffset: savedOctave };
                     const idx = list.findIndex((p) => p.id === id);
                     if (idx >= 0) list[idx] = entry; else list.push(entry);
                     writeCustomFallback(list);
@@ -533,6 +600,24 @@
             maxFretSelect.addEventListener('change', () => {
                 const v = parseInt(maxFretSelect.value, 10);
                 maxFret = isValidMaxFret(v) ? v : DEFAULT_MAX_FRET;
+                // Keep the capo slider's ceiling on the new neck (and
+                // clamp a now-impossible working capo).
+                syncAdjustControls();
+            });
+        }
+
+        if (capoSlider) {
+            capoSlider.addEventListener('input', () => {
+                const v = parseInt(capoSlider.value, 10);
+                capo = resolveCapoLocal(v, maxFret);
+                syncAdjustControls();
+            });
+        }
+        if (octaveSlider) {
+            octaveSlider.addEventListener('input', () => {
+                const v = parseInt(octaveSlider.value, 10);
+                octave = resolveOctaveLocal(v);
+                syncAdjustControls();
             });
         }
 

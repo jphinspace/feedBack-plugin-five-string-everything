@@ -2299,7 +2299,7 @@ import { CR } from './src/chart-retune.js';
         return _bgBandsCache;
     }
 
-    const BG_DEFAULTS = { style: 'particles', intensity: 0.5, reactive: true, palette: 'default', bgTheme: 'default', hwTheme: 'default', showFretOnNote: true, fretNumberGhostScope: 'chords', cameraSmoothing: 0.5, zoomSmoothing: 0.5, tiltSmoothing: 0.5, cameraLockLow: false, cameraLockZoom: 0.5, cameraMode: 'lookahead', nutHeadstockVisible: true, tuningLabelsVisible: true, nutColor: '#f5f3f0', headstockColor: '#d4b48a', textSize: 0.5, vibrancy: 0.85, glow: 0.25, customImageDataUrl: '', customImageName: '', customVideoName: '', chordDiagramVisible: true, chordDiagramSize: 0.5, chordDiagramPosition: 'tl', fretColumnMarkerCadence: 1, projectionVisible: true, inlayLabelsVisible: false, sectionLabelsOnHighway: false, sectionHudVisible: false, sectionHudPosition: 'tr', sectionHudSize: 0.5, toneHudVisible: false, toneHudPosition: 'tl', toneHudSize: 0.5, fpsVisible: false, fretDividersVisible: true, slideArrowApproachVisible: true, slideArrowNeckVisible: true, slideArrowChainPreviewVisible: true, hitFx: 0.7, sparks: true, cinematic: true, verdictMarks: true, timingFx: true, streakFx: true, bloom: true, targetTuningIdBass: CR.DEFAULT_TUNING_ID, targetTuningIdRhythm: CR.DEFAULT_GUITAR_TUNING_ID, targetTuningIdLead: CR.DEFAULT_GUITAR_TUNING_ID, customTunings: '[]' };
+    const BG_DEFAULTS = { style: 'particles', intensity: 0.5, reactive: true, palette: 'default', bgTheme: 'default', hwTheme: 'default', showFretOnNote: true, fretNumberGhostScope: 'chords', cameraSmoothing: 0.5, zoomSmoothing: 0.5, tiltSmoothing: 0.5, cameraLockLow: false, cameraLockZoom: 0.5, cameraMode: 'lookahead', nutHeadstockVisible: true, tuningLabelsVisible: true, nutColor: '#f5f3f0', headstockColor: '#d4b48a', textSize: 0.5, vibrancy: 0.85, glow: 0.25, customImageDataUrl: '', customImageName: '', customVideoName: '', chordDiagramVisible: true, chordDiagramSize: 0.5, chordDiagramPosition: 'tl', fretColumnMarkerCadence: 1, projectionVisible: true, inlayLabelsVisible: false, sectionLabelsOnHighway: false, sectionHudVisible: false, sectionHudPosition: 'tr', sectionHudSize: 0.5, toneHudVisible: false, toneHudPosition: 'tl', toneHudSize: 0.5, fpsVisible: false, fretDividersVisible: true, slideArrowApproachVisible: true, slideArrowNeckVisible: true, slideArrowChainPreviewVisible: true, hitFx: 0.7, sparks: true, cinematic: true, verdictMarks: true, timingFx: true, streakFx: true, bloom: true, targetTuningIdBass: CR.DEFAULT_TUNING_ID, targetTuningIdRhythm: CR.DEFAULT_GUITAR_TUNING_ID, targetTuningIdLead: CR.DEFAULT_GUITAR_TUNING_ID, customTunings: '[]', tuningAdjustOverrides: '{}' };
     // User-selectable, persistable bg styles — must mirror settings.html's
     // VALID_STYLES. 'venue' is deliberately NOT here: it is an internal effective
     // style reached only via _venueSceneOverride (the viz-picker Venue flow), so
@@ -2692,7 +2692,8 @@ import { CR } from './src/chart-retune.js';
             // per-panel settings).
             if (key !== 'palette' && key !== 'customColors'
                 && _CR_PROFILE_KEYS.indexOf(key) === -1
-                && key !== 'customTunings') {
+                && key !== 'customTunings'
+                && key !== 'tuningAdjustOverrides') {
                 panelVal = localStorage.getItem('chart_retuner_bg_' + panelKey + '_' + key);
             }
             globalVal = localStorage.getItem('chart_retuner_bg_' + key);
@@ -2961,7 +2962,10 @@ import { CR } from './src/chart-retune.js';
             if (!Array.isArray(p.colors) || p.colors.length !== colors.length || p.colors.some((c, i) => c !== colors[i])) {
                 migrated = true;
             }
-            out.push({ id: p.id, name: p.name, strings: p.strings.slice(), colors, maxFret: p.maxFret });
+            // capo/octaveOffset (v0.4.0) pass through as-read like maxFret
+            // does — CR.resolveActiveTuning owns validating/defaulting them
+            // (missing on any tuning saved before the fields existed).
+            out.push({ id: p.id, name: p.name, strings: p.strings.slice(), colors, maxFret: p.maxFret, capo: p.capo, octaveOffset: p.octaveOffset });
         }
         if (migrated) {
             // Written without _bgWriteGlobal/_bgEmitChange so this lazy
@@ -3003,13 +3007,44 @@ import { CR } from './src/chart-retune.js';
             localStorage.setItem('chart_retuner_bg_targetTuningIdBass', legacy);
         } catch (_) { /* storage blocked — per-class defaults apply */ }
     })();
-    // Resolves a class's active tuning to { strings, colors, roles } — the
-    // branching (built-in presets, then custom tunings, then the class-
-    // default preset for anything unset/unknown/deleted) is pure logic
-    // living in CR.resolveActiveTuning (src/target-tuning.js); this just
-    // supplies the screen.js-owned reads it needs.
+    // Per-tuning capo/octave overrides (v0.4.0) — the player-controls
+    // sliders' quick adjustments, stored in one global JSON blob keyed by
+    // the RESOLVED tuning id: { [tuningId]: { capo, octave } }. An
+    // override REPLACES the profile's own saved capo/octaveOffset default
+    // (including overriding it back to 0), and keying by tuning id keeps
+    // one instrument's quick capo from leaking onto another (switching
+    // the cello preset in doesn't inherit the guitar's capo). Global-only
+    // (see _bgReadSetting) for the same reason tuning profiles are.
+    function _crReadTuningAdjustOverrides() {
+        const raw = _bgReadSetting(null, 'tuningAdjustOverrides');
+        let map;
+        try { map = JSON.parse(raw || '{}'); } catch (_) { map = null; }
+        return (map && typeof map === 'object' && !Array.isArray(map)) ? map : {};
+    }
+    function _crWriteTuningAdjustOverride(tuningId, capo, octave) {
+        if (typeof tuningId !== 'string' || !tuningId) return;
+        const map = _crReadTuningAdjustOverrides();
+        map[tuningId] = { capo, octave };
+        _bgWriteGlobal('tuningAdjustOverrides', JSON.stringify(map));
+    }
+    // Resolves a class's active tuning to { id, strings, colors, roles,
+    // maxFret, capo, octaveOffset } — the branching (built-in presets,
+    // then custom tunings, then the class-default preset for anything
+    // unset/unknown/deleted) is pure logic living in CR.resolveActiveTuning
+    // (src/target-tuning.js); this supplies the screen.js-owned reads it
+    // needs, then lays any player-controls override for the resolved
+    // tuning over the profile's own capo/octave defaults. Each override
+    // field applies only when valid (capo re-validated against the
+    // profile's own maxFret), so a corrupt blob degrades per-field to the
+    // profile default rather than zeroing both.
     function _crResolveActiveTuning(arrClass) {
-        return CR.resolveActiveTuning(_bgReadSetting(null, _crProfileKeyFor(arrClass)), _crReadCustomTunings(), arrClass);
+        const t = CR.resolveActiveTuning(_bgReadSetting(null, _crProfileKeyFor(arrClass)), _crReadCustomTunings(), arrClass);
+        const ov = _crReadTuningAdjustOverrides()[t.id];
+        if (ov && typeof ov === 'object') {
+            if (CR.isValidCapo(ov.capo, t.maxFret)) t.capo = ov.capo;
+            if (CR.isValidOctaveOffset(ov.octave)) t.octaveOffset = ov.octave;
+        }
+        return t;
     }
     // Signature change with guitar profiles: takes the arrangement class
     // first. settings.html is the only caller; the two ship together.
@@ -3032,18 +3067,40 @@ import { CR } from './src/chart-retune.js';
         const grayDefaults = profile.strings.map(() => CR.intToHex(CR.LIGHT_GRAY_COLOR));
         const colors = CR.resolveColorsArray(profile.colors, n, grayDefaults);
         const maxFret = CR.isValidMaxFret(profile.maxFret) ? profile.maxFret : CR.DEFAULT_MAX_FRET;
+        // capo/octaveOffset (v0.4.0): saved as the tuning's own defaults
+        // ("never remove the capo" / "this cello profile plays bass charts
+        // an octave up"). Invalid/missing values persist as 0 = no capo /
+        // no shift.
+        const capo = CR.resolveCapo(profile.capo, maxFret);
+        const octaveOffset = CR.resolveOctaveOffset(profile.octaveOffset);
         const list = _crReadCustomTunings();
         const id = (typeof profile.id === 'string' && profile.id)
             ? profile.id
             : 'custom_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-        const entry = { id, name: profile.name.trim(), strings: profile.strings.slice(0, n), colors, maxFret };
+        const entry = { id, name: profile.name.trim(), strings: profile.strings.slice(0, n), colors, maxFret, capo, octaveOffset };
         const idx = list.findIndex(p => p.id === id);
         if (idx >= 0) list[idx] = entry; else list.push(entry);
         _crWriteCustomTunings(list);
+        // An editor save is the deliberate act — drop any player-controls
+        // quick override for this tuning so the freshly saved capo/octave
+        // defaults actually take effect instead of staying masked.
+        const overrides = _crReadTuningAdjustOverrides();
+        if (overrides[id]) {
+            delete overrides[id];
+            _bgWriteGlobal('tuningAdjustOverrides', JSON.stringify(overrides));
+        }
         return id;
     };
     window.cr3dDeleteCustomTuning = (id) => {
         _crWriteCustomTunings(_crReadCustomTunings().filter(p => p.id !== id));
+        // Drop the deleted tuning's capo/octave quick override too — a
+        // later custom tuning must never inherit it via id reuse, and the
+        // blob shouldn't accrete orphaned entries.
+        const overrides = _crReadTuningAdjustOverrides();
+        if (overrides[id]) {
+            delete overrides[id];
+            _bgWriteGlobal('tuningAdjustOverrides', JSON.stringify(overrides));
+        }
         // Fall back to each class's built-in default for every profile
         // that pointed at the deleted tuning — otherwise the renderer
         // would keep the old tuning alive purely via a (now-orphaned)
@@ -3082,6 +3139,124 @@ import { CR } from './src/chart-retune.js';
         const parsed = Array.isArray(strings) && CR.parseTargetNote(strings[index]);
         return CR.intToHex(_crColorForRole(parsed ? CR.colorRoleForNote(parsed.midi) : 'gray'));
     };
+
+    /* ── Capo & octave quick controls (v0.4.0) ──────────────────────────
+     * Two sliders injected into the player chrome — v3's always-reachable
+     * plugin slot (window.feedBack.ui.playerControlSlot(), the left-rail
+     * "Plugins" popover) or, in classic v2, appended into
+     * #player-controls — so a player starting a specific song can clamp a
+     * capo on / shift the chart an octave without a settings round-trip.
+     * They edit the ACTIVE tuning profile's capo/octave via the
+     * per-tuning override blob (_crWriteTuningAdjustOverride), so the
+     * change applies live mid-song (the _bgListener 'tuningAdjustOverrides'
+     * case → _bgLoadSettings → the retuner's targetSig cache miss) and
+     * persists per tuning, not globally. One widget per session, shared
+     * module state like the tuner shortcut: it tracks the arrangement
+     * class of the most recently init'd/switched panel (under splitscreen
+     * the last-loaded arrangement wins — the readouts label which tuning
+     * is being edited, so this stays unambiguous).
+     */
+    let _crAdjRoot = null;
+    let _crAdjEls = null;
+    let _crAdjArrClass = 'bass';
+    function _crAdjProfileName(t) {
+        const preset = CR.BUILTIN_PRESET_TUNINGS.find(p => p.id === t.id);
+        if (preset) return preset.label;
+        const custom = _crReadCustomTunings().find(p => p.id === t.id);
+        return custom ? custom.name : t.strings.join(' ');
+    }
+    function _crAdjRefresh() {
+        if (!_crAdjEls) return;
+        const t = _crResolveActiveTuning(_crAdjArrClass);
+        _crAdjEls.name.textContent = 'Retuner · ' + _crAdjProfileName(t);
+        // Capo slider ceiling follows the active profile's own neck:
+        // 0..maxFret-1 (capo AT the last fret would leave no playable
+        // fret). Set max before value so a long-neck capo isn't clamped
+        // by a stale shorter max.
+        _crAdjEls.capoSlider.max = String(t.maxFret - 1);
+        _crAdjEls.capoSlider.value = String(t.capo);
+        _crAdjEls.capoVal.textContent = t.capo === 0 ? 'off' : String(t.capo);
+        _crAdjEls.octSlider.value = String(t.octaveOffset);
+        _crAdjEls.octVal.textContent = (t.octaveOffset > 0 ? '+' : '') + t.octaveOffset;
+    }
+    function _crAdjNoteArrClass(cls) {
+        if (cls === _crAdjArrClass) return;
+        _crAdjArrClass = cls;
+        _crAdjRefresh();
+    }
+    function _crAdjCommit() {
+        if (!_crAdjEls) return;
+        const t = _crResolveActiveTuning(_crAdjArrClass);
+        const capo = Math.max(0, Math.min(t.maxFret - 1, parseInt(_crAdjEls.capoSlider.value, 10) || 0));
+        const oct = Math.max(CR.MIN_OCTAVE_OFFSET, Math.min(CR.MAX_OCTAVE_OFFSET, parseInt(_crAdjEls.octSlider.value, 10) || 0));
+        // _bgWriteGlobal (inside) emits the change: the module listener
+        // below re-syncs the readouts and every panel re-remaps on its
+        // next draw().
+        _crWriteTuningAdjustOverride(t.id, capo, oct);
+    }
+    function _crBuildAdjustControls() {
+        const root = document.createElement('div');
+        root.id = 'cr3d-adjust-controls';
+        root.style.cssText = 'display:flex;gap:4px 10px;align-items:center;flex-wrap:wrap;padding:4px 8px;font-size:11px;line-height:1.2;';
+        const name = document.createElement('div');
+        name.style.cssText = 'font-weight:600;opacity:0.8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px;flex-basis:100%;';
+        name.title = 'Chart Retuner — the active target tuning these sliders adjust';
+        root.appendChild(name);
+        function row(labelText, min, max, title) {
+            const wrap = document.createElement('label');
+            wrap.style.cssText = 'display:flex;align-items:center;gap:6px;white-space:nowrap;cursor:pointer;';
+            wrap.title = title;
+            const text = document.createElement('span');
+            text.textContent = labelText;
+            const slider = document.createElement('input');
+            slider.type = 'range';
+            slider.min = String(min);
+            slider.max = String(max);
+            slider.step = '1';
+            slider.style.cssText = 'width:110px;';
+            const val = document.createElement('span');
+            val.style.cssText = 'min-width:2.2em;text-align:right;font-variant-numeric:tabular-nums;';
+            wrap.appendChild(text);
+            wrap.appendChild(slider);
+            wrap.appendChild(val);
+            root.appendChild(wrap);
+            return { slider, val };
+        }
+        const capo = row('Capo', 0, CR.DEFAULT_MAX_FRET - 1,
+            'Capo fret for the active target tuning (0 = none). One fret = one half-step up per string; frets above (max fret − capo) fall off the neck. Applies live; persists per tuning.');
+        const oct = row('Octave', CR.MIN_OCTAVE_OFFSET, CR.MAX_OCTAVE_OFFSET,
+            'Shift the whole chart up/down whole octaves — +1 plays an E-standard bass chart on guitar strings note-for-note. Applies live; persists per tuning.');
+        capo.slider.addEventListener('input', _crAdjCommit);
+        oct.slider.addEventListener('input', _crAdjCommit);
+        _crAdjRoot = root;
+        _crAdjEls = { name, capoSlider: capo.slider, capoVal: capo.val, octSlider: oct.slider, octVal: oct.val };
+    }
+    function _crMountAdjustControls() {
+        if (typeof document === 'undefined') return;
+        const fb = window.feedBack;
+        // v3: mount into the stable plugin slot (never #player-controls —
+        // its legacy anchors are gone and the transport auto-hides; see
+        // CLAUDE.md "player-chrome contract"). v2: append to the classic
+        // always-visible controls bar.
+        const isV3 = !!(fb && fb.uiVersion === 'v3');
+        const slot = (isV3 && fb.ui && typeof fb.ui.playerControlSlot === 'function')
+            ? fb.ui.playerControlSlot()
+            : document.getElementById('player-controls');
+        if (!slot) return;
+        // Re-injection guard against the ACTUAL container, not a
+        // hard-coded id (the host shim may re-home nodes).
+        if (_crAdjRoot && slot.contains(_crAdjRoot)) { _crAdjRefresh(); return; }
+        if (!_crAdjRoot) _crBuildAdjustControls();
+        slot.appendChild(_crAdjRoot);
+        _crAdjRefresh();
+    }
+    // Keep the readouts live: another panel/session edit of the profiles,
+    // a settings-editor save (which also clears this tuning's override),
+    // or our own commit all round-trip through the change bus.
+    _bgSubscribe((key) => {
+        if (key === 'tuningAdjustOverrides' || key === 'customTunings'
+            || _CR_PROFILE_KEYS.indexOf(key) !== -1) _crAdjRefresh();
+    });
 
     // Custom image asset for the 'image' bg style (#19). Composite setter:
     // writes both the data URL (the bytes that drive the texture) and the
@@ -4458,10 +4633,43 @@ import { CR } from './src/chart-retune.js';
         // Refreshed in lockstep with _activeTargetTuning wherever that is
         // (both PATCH POINTs: _primeActiveTargetTuningForInit, _bgLoadSettings).
         let _crMaxFret = CR.DEFAULT_MAX_FRET;
+        // PATCH POINT (capo & octave, v0.4.0): the active profile's capo
+        // fret + chart octave shift (profile defaults laid under any
+        // player-controls override — see _crResolveActiveTuning), and the
+        // EFFECTIVE open-string MIDI array the retuner matches against
+        // (base + capo − 12·octave, CR.effectiveTargetMidiTuning). The
+        // remap engine itself is untouched: draw() hands it
+        // _crRemapMidiTuning plus the capo-shortened neck
+        // (CR.effectiveMaxFret) instead of the raw profile values.
+        // _activeTargetTuning stays the RAW tuning — its midiTuning drives
+        // string count / geometry, and its labels are only re-spelled for
+        // a capo (the sounding pitch at the capo, which the highway's
+        // fret 0 now represents), never for an octave shift (the octave
+        // moves the CHART, not the instrument's strings — and the labels
+        // are octave-less pitch classes anyway).
+        let _crCapo = 0;
+        let _crOctave = 0;
+        let _crRemapMidiTuning = _activeTargetTuning.midiTuning;
+        function _crApplyCapoLabels() {
+            if (_crCapo > 0) {
+                _activeTargetTuning.labels = _activeTargetTuning.midiTuning.map(
+                    m => CR.midiToPitchClassLabel(m + _crCapo));
+            }
+        }
+        function _crRefreshEffectiveTuning() {
+            _crRemapMidiTuning = (_crCapo === 0 && _crOctave === 0)
+                ? _activeTargetTuning.midiTuning
+                : CR.effectiveTargetMidiTuning(_activeTargetTuning.midiTuning, _crCapo, _crOctave);
+        }
         // Signature format matches _bgLoadSettings's tuningSig: strings
         // joined, '#', then colors joined (empty for a live-tracked tuning,
         // whose colors always resolve live — see isLiveTracked there).
         let _crTuningSig = CR.DEFAULT_TARGET_TUNING.join('|') + '#';
+        // capo/octave tracked as their own signature (like maxFret is
+        // tracked separately) — they affect the remap + nut labels but
+        // never strings/colors, so an adjust-only change must not force
+        // the palette-recompute branch tuningSig gates.
+        let _crAdjSig = '0/0';
         // PATCH POINT (guitar profiles): this panel's arrangement class
         // ('bass' | 'rhythm' | 'lead'), selecting WHICH of the three
         // global tuning profiles _bgLoadSettings resolves. Per-panel state
@@ -4484,10 +4692,15 @@ import { CR } from './src/chart-retune.js';
             // Leave _crTuningSig stale so _bgLoadSettings still performs its
             // first palette/tuning sync before buildBoard(). Resolves the
             // profile for this panel's arrangement class — init() seeds
-            // _crArrClass from songInfo before this runs.
+            // _crArrClass from songInfo before this runs. (_crAdjSig is
+            // left stale for the same reason.)
             const activeTuning = _crResolveActiveTuning(_crArrClass);
             _activeTargetTuning = CR.resolveTargetTuning(activeTuning.strings);
             _crMaxFret = activeTuning.maxFret;
+            _crCapo = activeTuning.capo;
+            _crOctave = activeTuning.octaveOffset;
+            _crApplyCapoLabels();
+            _crRefreshEffectiveTuning();
         }
         // Fret digits on the board ghost (hollow preview at Z=0), not on
         // flying note bodies — see fretNumberGhostScope for chord-hand vs all.
@@ -8105,16 +8318,18 @@ import { CR } from './src/chart-retune.js';
                     if (_tuningLabelSprites.length) _disposeOpenStringPitchSprites();
                     return;
                 }
-                if (_CR_PROFILE_KEYS.indexOf(changedKey) !== -1 || changedKey === 'customTunings') {
+                if (_CR_PROFILE_KEYS.indexOf(changedKey) !== -1 || changedKey === 'customTunings'
+                    || changedKey === 'tuningAdjustOverrides') {
                     // A tuning profile changed (or a saved custom
-                    // profile's own notes were edited). _bgLoadSettings
-                    // re-resolves _activeTargetTuning and, on an actual
-                    // change, already disposes the nut label sprites itself
-                    // (see the tuningSig check inside it) — nothing further
-                    // to do here: the chart remap picks up the new
-                    // _activeTargetTuning.midiTuning on the very next draw()
+                    // profile's own notes were edited, or a capo/octave
+                    // quick override moved). _bgLoadSettings re-resolves
+                    // _activeTargetTuning + _crRemapMidiTuning and, on an
+                    // actual change, already disposes the nut label sprites
+                    // itself (see the tuningSig/adjSig check inside it) —
+                    // nothing further to do here: the chart remap picks up
+                    // the new _crRemapMidiTuning on the very next draw()
                     // call. A change to a profile this panel's arrangement
-                    // class doesn't use resolves to the same tuningSig and
+                    // class doesn't use resolves to the same signatures and
                     // no-ops.
                     _bgLoadSettings();
                     return;
@@ -8497,16 +8712,29 @@ import { CR } from './src/chart-retune.js';
                 }
                 _applyPaletteToMaterials();
             }
-            if (tuningSig !== _crTuningSig) {
+            // PATCH POINT (capo & octave, v0.4.0): tracked alongside
+            // tuningSig, same live-mid-song semantics — the retuner's own
+            // targetSig cache check picks up the new _crRemapMidiTuning /
+            // effective max fret on the very next draw() call.
+            const adjSig = activeTuning.capo + '/' + activeTuning.octaveOffset;
+            if (tuningSig !== _crTuningSig || adjSig !== _crAdjSig) {
+                // Nut labels only depend on strings + capo, not octave —
+                // dispose the sprite pool just for those (mirrors the
+                // tuningLabelsVisible listener case below; the cheap-key
+                // fast path in _syncOpenStringPitchLabels doesn't itself
+                // notice a tuning change, only a disposed pool does).
+                const labelsChanged = tuningSig !== _crTuningSig || activeTuning.capo !== _crCapo;
                 _activeTargetTuning = CR.resolveTargetTuning(tuningStrings);
+                _crCapo = activeTuning.capo;
+                _crOctave = activeTuning.octaveOffset;
+                _crApplyCapoLabels();
+                _crRefreshEffectiveTuning();
                 _crTuningSig = tuningSig;
-                // Force the nut open-string-name sprites to rebuild next
-                // frame — the cheap-key fast path in _syncOpenStringPitchLabels
-                // doesn't itself notice a tuning change, only a disposed
-                // sprite pool does (mirrors the tuningLabelsVisible listener
-                // case below).
-                _lastOpenStringLblSig = '';
-                if (_tuningLabelSprites.length) _disposeOpenStringPitchSprites();
+                _crAdjSig = adjSig;
+                if (labelsChanged) {
+                    _lastOpenStringLblSig = '';
+                    if (_tuningLabelSprites.length) _disposeOpenStringPitchSprites();
+                }
             }
             bgThemeId = _bgReadSetting(panelKey, 'bgTheme');
             // Highway axis. ONE-TIME BACKWARD-COMPAT BACKFILL: the first time we
@@ -15703,6 +15931,11 @@ import { CR } from './src/chart-retune.js';
                 // board if the class flip changed the string count.
                 _crArrSeen = bundle && bundle.songInfo ? bundle.songInfo.arrangement : undefined;
                 _crArrClass = CR.arrangementClassFor(_crArrSeen);
+                // PATCH POINT (capo & octave, v0.4.0): point the shared
+                // quick-controls widget at this panel's class and (re)mount
+                // it — idempotent, guarded against the actual container.
+                _crAdjNoteArrClass(_crArrClass);
+                _crMountAdjustControls();
                 // Per-render background opt-out. A plugin borrowing the highway as
                 // a visualization can set bundle.bgReactive === false to suppress
                 // the audio-reactive background for THIS instance only — without
@@ -15803,10 +16036,19 @@ import { CR } from './src/chart-retune.js';
                     if (_arr !== _crArrSeen) {
                         _crArrSeen = _arr;
                         const _cls = CR.arrangementClassFor(_arr);
-                        if (_cls !== _crArrClass) { _crArrClass = _cls; _bgLoadSettings(); }
+                        if (_cls !== _crArrClass) {
+                            _crArrClass = _cls;
+                            _bgLoadSettings();
+                            _crAdjNoteArrClass(_cls);
+                        }
                     }
                 }
-                _crRetuner.apply(bundle, _activeTargetTuning.midiTuning, _crMaxFret); // PATCH POINT (five-string retune) — before anything else reads bundle.notes/chords
+                // PATCH POINT (five-string retune) — before anything else
+                // reads bundle.notes/chords. PATCH POINT (capo & octave,
+                // v0.4.0): the engine matches against the capo/octave-
+                // adjusted open pitches and the capo-shortened neck; the
+                // raw _activeTargetTuning still drives geometry/labels.
+                _crRetuner.apply(bundle, _crRemapMidiTuning, CR.effectiveMaxFret(_crMaxFret, _crCapo));
                 if (!_chartPrewarmed) {
                     _chartPrewarmed = true;
                     _prewarmChart(bundle);
