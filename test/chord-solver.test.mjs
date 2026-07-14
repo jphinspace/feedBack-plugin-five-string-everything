@@ -556,4 +556,44 @@ const sf = ns => ns.map(({ s, f }) => ({ s, f })).sort((a, b) => a.s - b.s);
         computeChordFingers([3, 3, 3, 2, 1, 1]), [3, 3, 3, 2, 1, 1]);
 }
 
+// Node budget (MAX_SEARCH_NODES / opts.budget) — the pathological-chart
+// safety valve: the search must terminate under a tiny budget, report
+// the abort, and behave identically to before when the budget is ample.
+{
+    const { MAX_SEARCH_NODES } = CR;
+    assert.ok(Number.isInteger(MAX_SEARCH_NODES) && MAX_SEARCH_NODES > 0, 'MAX_SEARCH_NODES sane'); passed++;
+
+    // A deliberately heavy search: 8-string wide-open target, an 8-note
+    // source chord of 8 distinct pitch classes spanning 20 frets — the
+    // huge span widens allowedSpan to the whole neck, and every string
+    // offers many qualifying frets per pc, defeating the usual pruning.
+    const WIDE8 = [28, 33, 38, 43, 48, 53, 58, 63];
+    const heavyNotes = v([[0, 0], [1, 2], [2, 4], [3, 6], [4, 9], [5, 13], [6, 17], [7, 20]]);
+    const heavySpec = chordSpecFromNotes(WIDE8, heavyNotes, null);
+
+    const tiny = { nodes: 50, aborted: false };
+    const t0 = Date.now();
+    solveChord(heavySpec, WIDE8, null, 24, { budget: tiny });
+    const elapsed = Date.now() - t0;
+    check('node budget: tiny budget reports the abort', tiny.aborted, true);
+    assert.ok(tiny.nodes <= 0, 'tiny budget consumed'); passed++;
+    assert.ok(elapsed < 1000, `tiny-budget solve returned promptly (${elapsed}ms)`); passed++;
+
+    // One shared budget across the whole solveChord call: after a heavy
+    // solve, later ladder rungs draw from whatever is left — never a
+    // fresh budget per rung.
+    const shared = { nodes: 200, aborted: false };
+    solveChord(heavySpec, WIDE8, null, 24, { budget: shared });
+    assert.ok(shared.nodes <= 0 && shared.aborted, 'shared budget spans the rung ladder'); passed++;
+
+    // An ample explicit budget must not change the result vs. the
+    // default path (same chord solved with and without opts).
+    const spec = chordSpecFromNotes(E_STD, v([[0, 0], [1, 2], [2, 2], [3, 1], [4, 0], [5, 0]]), 'E');
+    const ample = { nodes: MAX_SEARCH_NODES, aborted: false };
+    check('node budget: ample budget is behavior-neutral',
+        solveChord(spec, DROP_D, null, 20, { budget: ample }),
+        solveChord(spec, DROP_D, null, 20));
+    check('node budget: ample budget does not abort', ample.aborted, false);
+}
+
 console.log(`OK - ${passed} assertions passed`);

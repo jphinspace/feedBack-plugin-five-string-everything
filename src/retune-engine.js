@@ -10,9 +10,38 @@
 // solver) blocks in createRetuner below.
 
 import { DEFAULT_MAX_FRET, DEFAULT_TARGET_MIDI_TUNING, computeOpenStringMidiByString, computeArrangementShift } from './target-tuning.js';
-import { chordSpecFromNotes, solveChord, computeChordFingers } from './chord-solver.js';
+import { chordSpecFromNotes, solveChord, computeChordFingers, MAX_SEARCH_NODES } from './chord-solver.js';
 
 const _clampFret = (f, maxFret) => Math.max(0, Math.min(maxFret, f));
+
+// ---- Pathological-chart safety valves (createRetuner) ----------------
+// A remap must never be able to stall the render thread, no matter what
+// a chart file contains. Three independent bounds, all overridable per
+// retuner via createRetuner(opts):
+//
+// MAX_SOLVER_GROUP_SIZE — a simultaneous-note group larger than this
+// (no real instrument: buckets this size are data corruption, e.g. a
+// broken GP export stacking a whole bar on one timestamp) skips the
+// solver entirely and takes the bounded per-note path.
+export const MAX_SOLVER_GROUP_SIZE = 12;
+// FRAME_BUDGET_MS — cold-remap work per apply() call. A remap that
+// doesn't finish inside the budget continues on subsequent calls
+// (frames); until it completes, apply() publishes EMPTY arrays — never a
+// partially remapped chart, and never the previous chart's data. The
+// check runs between work units (one template / note bucket / chord), so
+// a slice can overshoot by at most one unit — itself bounded by the
+// solver node budget. Typical charts (~4 ms cold) still finish in the
+// first call, exactly as before.
+export const FRAME_BUDGET_MS = 5;
+// MAX_TOTAL_SOLVE_MS — accumulated cold-remap work across all slices of
+// one remap job. Past it the solver is disabled for the job's REMAINING
+// groups (per-note path instead), so even a chart with thousands of
+// distinct expensive shapes reaches the screen in bounded total work.
+export const MAX_TOTAL_SOLVE_MS = 2000;
+
+const _now = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+    ? () => performance.now()
+    : () => Date.now();
 
 // Pitch-order tables per target-tuning array, cached by array identity
 // (target arrays are treated as immutable — resolveTargetTuning always
@@ -150,20 +179,40 @@ export function resolveChordCollisions(sourceOpenMidiByString, naturalTargetBySt
     return Array.from(bySlot.values()).map(c => ({ entry: c.entry, note: c.note }));
 }
 
+// How far past an anchor's time (in seconds) remapAnchors looks for an
+// exact-remap (tier-0) donor before settling for a revoiced one.
+export const ANCHOR_DONOR_WINDOW_S = 2;
+
 // Remaps hand-position anchors ({ time, fret, width }, no string of their
 // own) by borrowing the adjustment of the nearest already-remapped note
 // at/after the anchor's time. Open-string notes are skipped as donors.
 // Both arrays must be time-sorted.
+//
+// Donor preference: a REVOICED donor (`_crTier` >= 2 — an octave-shifted
+// chord-solver placement) can carry a huge adjustment that lurches the
+// hand-position band to a nonsense fret for the passage, so when the
+// nearest donor is revoiced, the anchor looks ahead up to
+// ANCHOR_DONOR_WINDOW_S for the first tier-0 donor (exact per-note remap
+// — `_crTier` 0, or untagged notes from direct API use) and prefers it.
+// No tier-0 donor nearby -> the revoiced adjustment is still the best
+// available signal, same as before.
 export function remapAnchors(anchors, remappedNotes, maxFret = DEFAULT_MAX_FRET) {
     if (!Array.isArray(anchors) || anchors.length === 0) return anchors || [];
     if (!Array.isArray(remappedNotes) || remappedNotes.length === 0) return anchors.slice();
     const fretted = remappedNotes.filter(n => n._origNote.f > 0);
     const donors = fretted.length ? fretted : remappedNotes;
+    const tierOf = n => n._crTier || 0;
     const out = [];
     let ptr = 0;
     for (const a of anchors) {
         while (ptr < donors.length - 1 && donors[ptr].t < a.time) ptr++;
-        const note = donors[ptr];
+        let note = donors[ptr];
+        if (tierOf(note) !== 0) {
+            const limit = a.time + ANCHOR_DONOR_WINDOW_S;
+            for (let k = ptr + 1; k < donors.length && donors[k].t <= limit; k++) {
+                if (tierOf(donors[k]) === 0) { note = donors[k]; break; }
+            }
+        }
         const adjustment = note.f - note._origNote.f;
         const fret = Math.max(0, Math.min(maxFret, a.fret + adjustment));
         out.push({ time: a.time, fret, width: a.width });
@@ -228,7 +277,13 @@ function _exactCandidateFor(sourceOpenMidiByString, naturalTargetByString, notes
 // Tier-0 placements carry the engine `entry` (with its own remapped
 // slide endpoints); revoiced placements re-apply the source note's slide
 // delta to the solved fret instead, clamped like remapSlide does.
-function _materializePlacements(notes, placements, maxFret) {
+//
+// `tier` (optional): the group's solve tier, tagged onto each copy as
+// `_crTier` for remapAnchors' donor preference. Only bundle.notes
+// entries can donate to anchors, so the chord paths omit it — an
+// untagged note reads as tier 0 there, which is also the right default
+// for direct API users building remappedNotes by hand.
+function _materializePlacements(notes, placements, maxFret, tier) {
     const out = [];
     for (const pl of placements) {
         const src = notes[pl.srcIndex];
@@ -240,9 +295,28 @@ function _materializePlacements(notes, placements, maxFret) {
             else if (Number.isInteger(src.slu) && src.slu >= 0) copy.slu = _clampFret(pl.f + (src.slu - src.f), maxFret);
         }
         copy._origNote = src;
+        if (tier !== undefined) copy._crTier = tier;
         out.push(copy);
     }
     return out;
+}
+
+// Safety fallback for a group the solver can't take (oversized, node
+// budget exhausted with nothing found, or solver disabled by the
+// whole-job work valve): the pre-solver per-note path — exact remap +
+// lower-pitch-wins collision resolution. Placements carry the engine
+// `entry`, so they materialize byte-identically to the per-note path
+// (including remapped slide endpoints). `degraded: true` marks the
+// voicing as a fallback, informational only.
+function _collisionPlacements(sourceOpenMidiByString, naturalTargetByString, notes, targetMidiTuning, maxFret) {
+    const survivors = resolveChordCollisions(sourceOpenMidiByString, naturalTargetByString, notes, targetMidiTuning, maxFret);
+    if (survivors.length === 0) return null;
+    return {
+        placements: survivors.map(({ entry, note }) => ({ srcIndex: notes.indexOf(note), s: entry.s, f: entry.f, entry })),
+        tier: 0,
+        rung: 0,
+        degraded: true,
+    };
 }
 
 // Solves one simultaneous-note group (a Chord's notes, a chord
@@ -254,15 +328,32 @@ function _materializePlacements(notes, placements, maxFret) {
 // combination — see createRetuner's cache keys), keyed by the group's
 // ordered (s,f,sl,slu) shape + template name so every recurrence of the
 // same chord resolves to the same voicing at zero cost.
-function _solveGroup(cache, sourceOpenMidiByString, naturalTargetByString, notes, targetMidiTuning, templateName, maxFret) {
+//
+// `jobCtl` ({ solverDisabled, maxSearchNodes, stats }) is createRetuner's
+// safety-valve state: oversized groups and solver-disabled jobs route to
+// _collisionPlacements, and a node-budget abort that found nothing falls
+// back there too — "solver gave up" must degrade the voicing, never drop
+// a group the per-note path could still place.
+function _solveGroup(cache, sourceOpenMidiByString, naturalTargetByString, notes, targetMidiTuning, templateName, maxFret, jobCtl) {
     let key = (templateName || '') + '#';
     for (const n of notes) key += n.s + ',' + n.f + ',' + (n.sl ?? '') + ',' + (n.slu ?? '') + '|';
     if (cache.has(key)) return cache.get(key);
     let solved = null;
     const spec = chordSpecFromNotes(sourceOpenMidiByString, notes, templateName);
     if (spec) {
-        const exact = _exactCandidateFor(sourceOpenMidiByString, naturalTargetByString, notes, targetMidiTuning, maxFret);
-        solved = solveChord(spec, targetMidiTuning, exact, maxFret);
+        const oversize = notes.length > MAX_SOLVER_GROUP_SIZE;
+        if (oversize || (jobCtl && jobCtl.solverDisabled)) {
+            if (oversize && jobCtl) jobCtl.stats.oversizeGroups += 1;
+            solved = _collisionPlacements(sourceOpenMidiByString, naturalTargetByString, notes, targetMidiTuning, maxFret);
+        } else {
+            const budget = { nodes: (jobCtl && jobCtl.maxSearchNodes) || MAX_SEARCH_NODES, aborted: false };
+            const exact = _exactCandidateFor(sourceOpenMidiByString, naturalTargetByString, notes, targetMidiTuning, maxFret);
+            solved = solveChord(spec, targetMidiTuning, exact, maxFret, { budget });
+            if (budget.aborted) {
+                if (jobCtl) jobCtl.stats.searchAborts += 1;
+                if (!solved) solved = _collisionPlacements(sourceOpenMidiByString, naturalTargetByString, notes, targetMidiTuning, maxFret);
+            }
+        }
     }
     cache.set(key, solved);
     return solved;
@@ -270,14 +361,230 @@ function _solveGroup(cache, sourceOpenMidiByString, naturalTargetByString, notes
 
 // Remaps bundle.notes/.chords/.anchors/.chordTemplates to the active
 // target tuning in place, cached per song/tuning. Returns a fresh
-// { apply(bundle, targetMidiTuning, maxFret) } per call so each
-// splitscreen panel gets its own cache. `maxFret` is the active tuning
-// profile's own ceiling (CR.resolveActiveTuning's maxFret) — defaults to
-// DEFAULT_MAX_FRET (the historical hardcoded 20) when omitted.
-export function createRetuner() {
+// { apply(bundle, targetMidiTuning, maxFret), getStats() } per call so
+// each splitscreen panel gets its own cache. `maxFret` is the active
+// tuning profile's own ceiling (CR.resolveActiveTuning's maxFret) —
+// defaults to DEFAULT_MAX_FRET (the historical hardcoded 20) when
+// omitted.
+//
+// The cold remap runs as a generator job time-sliced across apply()
+// calls (see FRAME_BUDGET_MS above): until the job completes, apply()
+// publishes empty arrays. Callers need no awareness of this — they call
+// apply() per frame with the raw bundle exactly as before, and the
+// remapped chart appears when ready (first call for typical charts).
+//
+// opts (all optional, defaults are the exported valve constants):
+//   frameBudgetMs   — per-apply() work budget; Infinity = synchronous.
+//   maxTotalSolveMs — whole-job work cap before the solver is disabled.
+//   maxSearchNodes  — per-group solver node budget (MAX_SEARCH_NODES).
+//
+// getStats() (diagnostics + tests): { slices, workMs, searchAborts,
+// oversizeGroups, solverDisabled, inProgress } for the most recent job.
+export function createRetuner(opts) {
+    const frameBudgetMs = opts && opts.frameBudgetMs !== undefined ? opts.frameBudgetMs : FRAME_BUDGET_MS;
+    const maxTotalSolveMs = opts && opts.maxTotalSolveMs !== undefined ? opts.maxTotalSolveMs : MAX_TOTAL_SOLVE_MS;
+    const maxSearchNodes = opts && opts.maxSearchNodes !== undefined ? opts.maxSearchNodes : MAX_SEARCH_NODES;
+
     let cacheNotesRef = null, cacheChordsRef = null, cacheAnchorsRef = null, cacheTemplatesRef = null;
     let cacheTuningRef = null, cacheCapo = null, cacheStringCount = null, cacheTargetSig = null;
     let remappedNotes = [], remappedChords = [], remappedAnchors = [], remappedTemplates = [];
+    let job = null;     // in-progress cold-remap generator, null when idle
+    let jobCtl = null;  // its safety-valve state (shared with _solveGroup)
+    const stats = { slices: 0, workMs: 0, searchAborts: 0, oversizeGroups: 0, solverDisabled: false };
+
+    // The whole cold remap as a generator: one yield per work unit (one
+    // template / one same-onset note bucket / one chord), so the driver
+    // in apply() can stop between units when the frame budget runs out.
+    // Results land in the remapped* closure vars only at the very end —
+    // a partially remapped chart is never observable.
+    function* _remapJob(rawNotes, rawChords, rawAnchors, rawTemplates, tuning, capo, sc, target, maxFret, ctl) {
+        const sourceOpenMidiByString = computeOpenStringMidiByString(sc, tuning, capo);
+        const shiftK = computeArrangementShift(sc, tuning, capo, sourceOpenMidiByString, target);
+        const naturalTargetByString = [];
+        for (let s = 0; s < sc; s++) {
+            naturalTargetByString.push(s + shiftK);
+        }
+
+        // PATCH POINT (chord solver): one solve cache per remap
+        // run; identical chord shapes (by ordered s/f/slide
+        // signature + template name) solve once per song/tuning.
+        const groupCache = new Map();
+
+        // Templates FIRST, so chord instances and the hand-shape-
+        // synthesized chords screen.js builds straight from
+        // bundle.chordTemplates follow the SAME solved voicing by
+        // construction (same array index/order — chordTemplates is
+        // indexed by chord id).
+        const templateSolutions = new Map(); // template index -> Map<sourceString, {s,f}>
+        const remapOneTemplate = (template, ti) => {
+            if (!template || !Array.isArray(template.frets)) return template;
+            const tNotes = [];
+            for (let si = 0; si < template.frets.length; si++) {
+                if (template.frets[si] >= 0) tNotes.push({ s: si, f: template.frets[si] });
+            }
+            // Single-note / empty templates keep the per-note
+            // path (identical to the pre-solver behavior).
+            if (tNotes.length < 2) {
+                return remapChordTemplate(sourceOpenMidiByString, naturalTargetByString, template, target, maxFret);
+            }
+            const solved = _solveGroup(groupCache, sourceOpenMidiByString, naturalTargetByString, tNotes, target, template.displayName || template.name, maxFret, ctl);
+            const frets = new Array(target.length).fill(-1);
+            if (!solved) {
+                // Nothing soundable (all strings null-midi) —
+                // an all-unused template, same net effect as
+                // the per-note path dropping every note. A
+                // non-array fingers field passes through
+                // untouched, like remapChordTemplate does.
+                return Object.assign({}, template, {
+                    frets,
+                    fingers: Array.isArray(template.fingers) ? frets.slice() : template.fingers,
+                });
+            }
+            const byString = new Map();
+            for (const pl of solved.placements) {
+                byString.set(tNotes[pl.srcIndex].s, { s: pl.s, f: pl.f });
+                frets[pl.s] = pl.f;
+            }
+            templateSolutions.set(ti, byString);
+            // Fingers. A chart that omitted finger data
+            // entirely (non-array — distinct from GP imports'
+            // all--1 arrays) keeps that omission, matching the
+            // pre-solver engine: no fabricated digits on the
+            // chord ghost. Otherwise: Tier 0 kept the source
+            // pitches note-for-note, so carry the chart's own
+            // fingering per string (what the pre-solver path
+            // did) — UNLESS the remap moved a note across the
+            // open/fretted boundary (an open source string
+            // landing on a fret, e.g. an open E shape onto a
+            // Drop-D target), where a carried finger 0 is
+            // nonsense. A revoiced shape (tier > 0) always
+            // invalidates chart fingerings. Both of those
+            // derive plausible ones instead.
+            let fingers;
+            if (!Array.isArray(template.fingers)) {
+                fingers = template.fingers;
+            } else {
+                let carried = null;
+                if (solved.tier === 0) {
+                    carried = new Array(target.length).fill(-1);
+                    for (const pl of solved.placements) {
+                        const c = template.fingers[tNotes[pl.srcIndex].s] ?? -1;
+                        if (c >= 0 && (c === 0) !== (pl.f === 0)) { carried = null; break; }
+                        carried[pl.s] = c;
+                    }
+                }
+                fingers = carried || computeChordFingers(frets);
+            }
+            return Object.assign({}, template, { frets, fingers });
+        };
+        let newTemplates;
+        if (Array.isArray(rawTemplates)) {
+            newTemplates = [];
+            for (let ti = 0; ti < rawTemplates.length; ti++) {
+                newTemplates.push(remapOneTemplate(rawTemplates[ti], ti));
+                yield;
+            }
+        } else {
+            newTemplates = rawTemplates || [];
+        }
+
+        // Group by onset time first (a bass double-stop is often two
+        // flat Notes sharing a time rather than a Chord object), so
+        // simultaneous notes on different source strings still
+        // resolve as one chord. PATCH POINT (chord solver): groups
+        // of >= 2 route through the solver — Tier 0 reproduces the
+        // per-note remap whenever it is drop/collision-free and
+        // playable, so single notes and clean groups behave exactly
+        // as before; only groups the per-note path would break
+        // (drops, collisions, unplayable stretches) get revoiced.
+        const newNotes = [];
+        if (Array.isArray(rawNotes)) {
+            const byTime = new Map();
+            for (const n of rawNotes) {
+                let bucket = byTime.get(n.t);
+                if (!bucket) byTime.set(n.t, bucket = []);
+                bucket.push(n);
+            }
+            for (const bucket of byTime.values()) {
+                if (bucket.length >= 2) {
+                    const solved = _solveGroup(groupCache, sourceOpenMidiByString, naturalTargetByString, bucket, target, null, maxFret, ctl);
+                    if (solved) newNotes.push(..._materializePlacements(bucket, solved.placements, maxFret, solved.tier));
+                } else {
+                    const survivors = resolveChordCollisions(sourceOpenMidiByString, naturalTargetByString, bucket, target, maxFret);
+                    for (const { entry, note } of survivors) {
+                        const copy = Object.assign({}, note, entry);
+                        copy._origNote = note; // keyed by the note-state provider
+                        copy._crTier = 0; // exact per-note remap — always a preferred anchor donor
+                        newNotes.push(copy);
+                    }
+                }
+                yield;
+            }
+            newNotes.sort((a, b) => a.t - b.t);
+        }
+        const newChords = [];
+        if (Array.isArray(rawChords)) {
+            for (const ch of rawChords) {
+                const chNotes = ch.notes || [];
+                let placements = null;
+                // Template-first: an instance whose notes match its
+                // template's frets — including a difficulty-filtered
+                // SUBSET of them — takes the template's solved
+                // voicing per source string, so instances at every
+                // difficulty level agree with each other and with
+                // the chord diagram. Instances that reference a
+                // string the template solve dropped (or that
+                // diverge from their template) solve ad-hoc below.
+                // A null/absent id means "no template" — guarded
+                // BEFORE Number() coercion, which would turn null
+                // into 0 and alias template index 0 (same guard the
+                // chord-ghost helpers in screen.js apply).
+                const cid = ch.id == null ? null
+                    : (typeof ch.id === 'number' ? ch.id : Number(ch.id));
+                const byString = cid !== null ? templateSolutions.get(cid) : undefined;
+                const tmpl = cid !== null && Array.isArray(rawTemplates) ? (rawTemplates[cid] || null) : null;
+                // Sliding chords skip the template shortcut: the
+                // template solution was solved from PLAIN frets, so
+                // it can't reproduce remapSlide's lower-endpoint
+                // anchoring — the ad-hoc path's Tier 0 goes through
+                // remapNoteEntry/remapSlide and keeps slides exact.
+                const hasSlide = chNotes.some(n => (Number.isInteger(n.sl) && n.sl >= 0)
+                    || (Number.isInteger(n.slu) && n.slu >= 0));
+                if (!hasSlide && byString && tmpl && chNotes.length > 0
+                    && chNotes.every(n => tmpl.frets[n.s] === n.f && byString.has(n.s))) {
+                    // One note per source string: a malformed chart
+                    // can double up a string within one chord — the
+                    // first note wins, matching the one-note-per-
+                    // target-slot invariant every other path keeps.
+                    const seen = new Set();
+                    placements = [];
+                    for (let i = 0; i < chNotes.length; i++) {
+                        const n = chNotes[i];
+                        if (seen.has(n.s)) continue;
+                        seen.add(n.s);
+                        const t = byString.get(n.s);
+                        placements.push({ srcIndex: i, s: t.s, f: t.f });
+                    }
+                } else if (chNotes.length >= 2) {
+                    const solved = _solveGroup(groupCache, sourceOpenMidiByString, naturalTargetByString, chNotes, target,
+                        tmpl ? (tmpl.displayName || tmpl.name) : null, maxFret, ctl);
+                    placements = solved ? solved.placements : null;
+                } else {
+                    const survivors = resolveChordCollisions(sourceOpenMidiByString, naturalTargetByString, chNotes, target, maxFret);
+                    placements = survivors.map(({ entry, note }) => ({ srcIndex: chNotes.indexOf(note), s: entry.s, f: entry.f, entry }));
+                }
+                if (placements && placements.length > 0) {
+                    newChords.push(Object.assign({}, ch, { notes: _materializePlacements(chNotes, placements, maxFret) }));
+                }
+                yield;
+            }
+        }
+        // Publish atomically — the in-progress state was never visible.
+        remappedNotes = newNotes;
+        remappedChords = newChords;
+        remappedAnchors = remapAnchors(rawAnchors, newNotes, maxFret);
+        remappedTemplates = newTemplates;
+    }
 
     function apply(bundle, targetMidiTuning, maxFret = DEFAULT_MAX_FRET) {
         const target = (Array.isArray(targetMidiTuning) && targetMidiTuning.length >= 1)
@@ -302,6 +609,15 @@ export function createRetuner() {
             cacheCapo = capo;
             cacheStringCount = sc;
             cacheTargetSig = targetSig;
+            // A chart/tuning change mid-job discards the stale job
+            // outright — its raw inputs no longer describe this chart.
+            job = null;
+            jobCtl = null;
+            stats.slices = 0;
+            stats.workMs = 0;
+            stats.searchAborts = 0;
+            stats.oversizeGroups = 0;
+            stats.solverDisabled = false;
 
             if (!Number.isFinite(sc) || sc < 1 || !Array.isArray(tuning)) {
                 // Fail-safe: pass the chart through unremapped.
@@ -310,180 +626,35 @@ export function createRetuner() {
                 remappedAnchors = Array.isArray(rawAnchors) ? rawAnchors : [];
                 remappedTemplates = Array.isArray(rawTemplates) ? rawTemplates : [];
             } else {
-                const sourceOpenMidiByString = computeOpenStringMidiByString(sc, tuning, capo);
-                const shiftK = computeArrangementShift(sc, tuning, capo, sourceOpenMidiByString, target);
-                const naturalTargetByString = [];
-                for (let s = 0; s < sc; s++) {
-                    naturalTargetByString.push(s + shiftK);
-                }
+                // Empty until the job publishes — never a partially
+                // remapped chart, and never the previous chart's data.
+                remappedNotes = [];
+                remappedChords = [];
+                remappedAnchors = [];
+                remappedTemplates = [];
+                jobCtl = { solverDisabled: false, maxSearchNodes, stats };
+                job = _remapJob(rawNotes, rawChords, rawAnchors, rawTemplates, tuning, capo, sc, target, maxFret, jobCtl);
+            }
+        }
 
-                // PATCH POINT (chord solver): one solve cache per remap
-                // run; identical chord shapes (by ordered s/f/slide
-                // signature + template name) solve once per song/tuning.
-                const groupCache = new Map();
-
-                // Templates FIRST, so chord instances and the hand-shape-
-                // synthesized chords screen.js builds straight from
-                // bundle.chordTemplates follow the SAME solved voicing by
-                // construction (same array index/order — chordTemplates is
-                // indexed by chord id).
-                const templateSolutions = new Map(); // template index -> Map<sourceString, {s,f}>
-                if (Array.isArray(rawTemplates)) {
-                    remappedTemplates = rawTemplates.map((template, ti) => {
-                        if (!template || !Array.isArray(template.frets)) return template;
-                        const tNotes = [];
-                        for (let si = 0; si < template.frets.length; si++) {
-                            if (template.frets[si] >= 0) tNotes.push({ s: si, f: template.frets[si] });
-                        }
-                        // Single-note / empty templates keep the per-note
-                        // path (identical to the pre-solver behavior).
-                        if (tNotes.length < 2) {
-                            return remapChordTemplate(sourceOpenMidiByString, naturalTargetByString, template, target, maxFret);
-                        }
-                        const solved = _solveGroup(groupCache, sourceOpenMidiByString, naturalTargetByString, tNotes, target, template.displayName || template.name, maxFret);
-                        const frets = new Array(target.length).fill(-1);
-                        if (!solved) {
-                            // Nothing soundable (all strings null-midi) —
-                            // an all-unused template, same net effect as
-                            // the per-note path dropping every note. A
-                            // non-array fingers field passes through
-                            // untouched, like remapChordTemplate does.
-                            return Object.assign({}, template, {
-                                frets,
-                                fingers: Array.isArray(template.fingers) ? frets.slice() : template.fingers,
-                            });
-                        }
-                        const byString = new Map();
-                        for (const pl of solved.placements) {
-                            byString.set(tNotes[pl.srcIndex].s, { s: pl.s, f: pl.f });
-                            frets[pl.s] = pl.f;
-                        }
-                        templateSolutions.set(ti, byString);
-                        // Fingers. A chart that omitted finger data
-                        // entirely (non-array — distinct from GP imports'
-                        // all--1 arrays) keeps that omission, matching the
-                        // pre-solver engine: no fabricated digits on the
-                        // chord ghost. Otherwise: Tier 0 kept the source
-                        // pitches note-for-note, so carry the chart's own
-                        // fingering per string (what the pre-solver path
-                        // did) — UNLESS the remap moved a note across the
-                        // open/fretted boundary (an open source string
-                        // landing on a fret, e.g. an open E shape onto a
-                        // Drop-D target), where a carried finger 0 is
-                        // nonsense. A revoiced shape (tier > 0) always
-                        // invalidates chart fingerings. Both of those
-                        // derive plausible ones instead.
-                        let fingers;
-                        if (!Array.isArray(template.fingers)) {
-                            fingers = template.fingers;
-                        } else {
-                            let carried = null;
-                            if (solved.tier === 0) {
-                                carried = new Array(target.length).fill(-1);
-                                for (const pl of solved.placements) {
-                                    const c = template.fingers[tNotes[pl.srcIndex].s] ?? -1;
-                                    if (c >= 0 && (c === 0) !== (pl.f === 0)) { carried = null; break; }
-                                    carried[pl.s] = c;
-                                }
-                            }
-                            fingers = carried || computeChordFingers(frets);
-                        }
-                        return Object.assign({}, template, { frets, fingers });
-                    });
-                } else {
-                    remappedTemplates = rawTemplates || [];
-                }
-
-                // Group by onset time first (a bass double-stop is often two
-                // flat Notes sharing a time rather than a Chord object), so
-                // simultaneous notes on different source strings still
-                // resolve as one chord. PATCH POINT (chord solver): groups
-                // of >= 2 route through the solver — Tier 0 reproduces the
-                // per-note remap whenever it is drop/collision-free and
-                // playable, so single notes and clean groups behave exactly
-                // as before; only groups the per-note path would break
-                // (drops, collisions, unplayable stretches) get revoiced.
-                const newNotes = [];
-                if (Array.isArray(rawNotes)) {
-                    const byTime = new Map();
-                    for (const n of rawNotes) {
-                        let bucket = byTime.get(n.t);
-                        if (!bucket) byTime.set(n.t, bucket = []);
-                        bucket.push(n);
-                    }
-                    for (const bucket of byTime.values()) {
-                        if (bucket.length >= 2) {
-                            const solved = _solveGroup(groupCache, sourceOpenMidiByString, naturalTargetByString, bucket, target, null, maxFret);
-                            if (solved) newNotes.push(..._materializePlacements(bucket, solved.placements, maxFret));
-                            continue;
-                        }
-                        const survivors = resolveChordCollisions(sourceOpenMidiByString, naturalTargetByString, bucket, target, maxFret);
-                        for (const { entry, note } of survivors) {
-                            const copy = Object.assign({}, note, entry);
-                            copy._origNote = note; // keyed by the note-state provider
-                            newNotes.push(copy);
-                        }
-                    }
-                    newNotes.sort((a, b) => a.t - b.t);
-                }
-                const newChords = [];
-                if (Array.isArray(rawChords)) {
-                    for (const ch of rawChords) {
-                        const chNotes = ch.notes || [];
-                        let placements = null;
-                        // Template-first: an instance whose notes match its
-                        // template's frets — including a difficulty-filtered
-                        // SUBSET of them — takes the template's solved
-                        // voicing per source string, so instances at every
-                        // difficulty level agree with each other and with
-                        // the chord diagram. Instances that reference a
-                        // string the template solve dropped (or that
-                        // diverge from their template) solve ad-hoc below.
-                        // A null/absent id means "no template" — guarded
-                        // BEFORE Number() coercion, which would turn null
-                        // into 0 and alias template index 0 (same guard the
-                        // chord-ghost helpers in screen.js apply).
-                        const cid = ch.id == null ? null
-                            : (typeof ch.id === 'number' ? ch.id : Number(ch.id));
-                        const byString = cid !== null ? templateSolutions.get(cid) : undefined;
-                        const tmpl = cid !== null && Array.isArray(rawTemplates) ? (rawTemplates[cid] || null) : null;
-                        // Sliding chords skip the template shortcut: the
-                        // template solution was solved from PLAIN frets, so
-                        // it can't reproduce remapSlide's lower-endpoint
-                        // anchoring — the ad-hoc path's Tier 0 goes through
-                        // remapNoteEntry/remapSlide and keeps slides exact.
-                        const hasSlide = chNotes.some(n => (Number.isInteger(n.sl) && n.sl >= 0)
-                            || (Number.isInteger(n.slu) && n.slu >= 0));
-                        if (!hasSlide && byString && tmpl && chNotes.length > 0
-                            && chNotes.every(n => tmpl.frets[n.s] === n.f && byString.has(n.s))) {
-                            // One note per source string: a malformed chart
-                            // can double up a string within one chord — the
-                            // first note wins, matching the one-note-per-
-                            // target-slot invariant every other path keeps.
-                            const seen = new Set();
-                            placements = [];
-                            for (let i = 0; i < chNotes.length; i++) {
-                                const n = chNotes[i];
-                                if (seen.has(n.s)) continue;
-                                seen.add(n.s);
-                                const t = byString.get(n.s);
-                                placements.push({ srcIndex: i, s: t.s, f: t.f });
-                            }
-                        } else if (chNotes.length >= 2) {
-                            const solved = _solveGroup(groupCache, sourceOpenMidiByString, naturalTargetByString, chNotes, target,
-                                tmpl ? (tmpl.displayName || tmpl.name) : null, maxFret);
-                            placements = solved ? solved.placements : null;
-                        } else {
-                            const survivors = resolveChordCollisions(sourceOpenMidiByString, naturalTargetByString, chNotes, target, maxFret);
-                            placements = survivors.map(({ entry, note }) => ({ srcIndex: chNotes.indexOf(note), s: entry.s, f: entry.f, entry }));
-                        }
-                        if (!placements || placements.length === 0) continue;
-                        newChords.push(Object.assign({}, ch, { notes: _materializePlacements(chNotes, placements, maxFret) }));
-                    }
-                }
-                remappedNotes = newNotes;
-                remappedChords = newChords;
-                remappedAnchors = remapAnchors(rawAnchors, newNotes, maxFret);
+        if (job) {
+            // Drive the job for up to frameBudgetMs of work. At least one
+            // unit always runs, so completion needs at most one apply()
+            // call per work unit regardless of what the clock reports;
+            // a unit itself is bounded by the solver node budget.
+            const sliceStart = _now();
+            for (;;) {
+                if (job.next().done) { job = null; break; }
+                if (_now() - sliceStart >= frameBudgetMs) break;
+            }
+            stats.workMs += _now() - sliceStart;
+            stats.slices += 1;
+            // Whole-job valve: past the total work budget, every
+            // remaining group takes the bounded per-note path instead of
+            // the solver (see _solveGroup), so the job's tail is cheap.
+            if (job && !jobCtl.solverDisabled && stats.workMs > maxTotalSolveMs) {
+                jobCtl.solverDisabled = true;
+                stats.solverDisabled = true;
             }
         }
 
@@ -493,5 +664,16 @@ export function createRetuner() {
         bundle.chordTemplates = remappedTemplates;
     }
 
-    return { apply };
+    function getStats() {
+        return {
+            slices: stats.slices,
+            workMs: stats.workMs,
+            searchAborts: stats.searchAborts,
+            oversizeGroups: stats.oversizeGroups,
+            solverDisabled: stats.solverDisabled,
+            inProgress: job !== null,
+        };
+    }
+
+    return { apply, getStats };
 }

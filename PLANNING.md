@@ -125,32 +125,7 @@ default because it guesses wrong for e.g. a high-tuned guitar; an explicit
 per-preset value with a sane fallback is more predictable. Could be revisited
 as the *default* the editor pre-fills.
 
-### 2. Anchor-donor refinement after revoicing
-
-**Problem.** `remapAnchors` (`src/retune-engine.js:157`) gives each anchor
-the fret adjustment (`note.f − note._origNote.f`) of the nearest fretted
-remapped note at/after its time. A tier ≥ 2 revoiced donor (octave-shifted
-placement) can carry a huge adjustment, lurching the hand-position highlight
-band to a nonsense fret for that passage. Cosmetic — gems are unaffected.
-
-**Design.**
-- In `createRetuner`, tag every materialized note copy with its solve tier
-  (`copy._crTier = solved.tier`, and `0` on the single-note/per-note path) —
-  the tier is already in hand at both materialization sites (template branch
-  and ad-hoc `solveChord` result, `src/retune-engine.js` around `:373–:423`).
-- In `remapAnchors`, when scanning for a donor, prefer the nearest
-  **tier-0** fretted note within a small forward window (a few notes or
-  ~2 s) before falling back to the current nearest-note rule. Keep the
-  existing single forward-scanning-pointer shape — one extra lookahead loop
-  bounded by the window, still O(notes) per song, computed once per remap,
-  never per frame.
-
-**Verify.** A synthetic chart where the first note after an anchor is a
-revoiced chord note (+12 adjustment) and a tier-0 note follows shortly:
-anchor takes the tier-0 donor's adjustment. Existing anchor tests unchanged
-(all-tier-0 charts behave identically).
-
-### 3. Degraded-chord label marker
+### 2. Degraded-chord label marker
 
 **Problem.** When the degradation ladder simplifies a chord (rung > 0), the
 diagram still shows the chart's original name — "Am7" over a power chord.
@@ -172,7 +147,7 @@ Decisions to make at build time:
 name carries the marker and whose Tier-0 twin doesn't. Manual: play a chart
 known to degrade (Eb-standard chart on a narrow-ceiling target).
 
-### 4. Per-string fret floor (banjo drone, short strings)
+### 3. Per-string fret floor (banjo drone, short strings)
 
 **Problem.** A 5-string banjo's drone string physically starts at the 5th
 fret and is never barred; the solver and per-note walk have no per-string
@@ -204,7 +179,7 @@ rendering impossible positions.
 **Priority note:** wait for evidence banjo targets see real use — the field
 touches every remap layer.
 
-### 5. Judgment translation for revoiced chords
+### 4. Judgment translation for revoiced chords
 
 **Problem.** Scoring (note_detect) keys judgments off the ORIGINAL chart
 positions via `_origNote` — correct pitches for Tier-0 output, but a
@@ -221,35 +196,3 @@ hook a viz can register, or pitch-class-tolerant judging. Track alongside
 the upstream conversation (feedBack#952). What the plugin *could* do today:
 contribute a diagnostics payload counting revoiced/degraded chords per song
 so the size of the problem is measurable in the field.
-
-### 6. Handle nonzero `cent_offset`
-
-**Problem.** RS2014's global `cent_offset` is ignored (MVP guardrail, noted
-in HISTORY.md) — nothing in `src/` or `screen.js` reads it. A chart whose
-recording is offset by a semitone or more (some A=432 / half-step-down
-masters encode this rather than adjusting `tuning[]`) remaps every note off
-by the rounded semitone amount.
-
-**Design sketch.** First, measure: check how `lib/song.py` exposes it
-(`songInfo.centOffset` is already in the bundle — Phase 16 saw it in the
-`matchesArrangement` songInfo shape) and whether real charts in the wild
-carry |offset| ≥ 50 cents. If yes: fold
-`Math.round(centOffset / 100)` into the source side of the offset math
-(`sourceOpenStringOffset` in `src/retune-engine.js`) and into the retuner's
-chart-identity cache key. Sub-semitone offsets stay ignored — the engine is
-integer-semitone arithmetic and the player's real instrument is presumably
-in tune with itself.
-
-**Verify.** A synthetic chart with `cent_offset: -100` remaps identically to
-the same chart with `tuning[]` lowered one semitone; ±50-cent inputs change
-nothing.
-
-### 7. Chunk the cold solve across frames
-
-**Contingency only — do not build without a real report.** Cold remap of a
-60-template / 2000-note synthetic chart measured ≈ 4 ms (once per song or
-tuning switch, inside the whole-remap cache); per-frame apply is ≈ 0.1 µs.
-If a pathological chart (thousands of distinct simultaneous-note shapes)
-ever visibly hitches on load, split `createRetuner`'s template-solve loop
-across rAF ticks behind the existing cache. The bucket-signature cache makes
-this scenario unlikely.

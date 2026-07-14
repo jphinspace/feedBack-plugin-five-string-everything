@@ -201,6 +201,37 @@ editor save clears that tuning's override). New presets: Ukulele gCEA
 (reentrant — second non-monotonic target after banjo5) and Baritone ukulele
 DGBE.
 
+**Phase 17 — Cold-solve chunking + pathological-chart safety (v0.4.1,
+2026-07-13).** A remap can no longer stall the render thread regardless of
+chart contents. Three independent, per-retuner-overridable valves
+(`createRetuner(opts)`), all default-invisible on normal charts:
+`MAX_SEARCH_NODES` (20 000) bounds each chord solve — one `{ nodes,
+aborted }` budget shared across the degradation-ladder rungs; on
+exhaustion the search keeps its best-so-far, and a gave-up null **falls
+back to the per-note collision path instead of dropping the group**.
+`MAX_SOLVER_GROUP_SIZE` (12) routes corrupt same-onset stacks straight to
+that path. `FRAME_BUDGET_MS` (5) time-slices the cold remap as a generator
+job across `apply()` calls — empty arrays are published until the job
+completes (never a partial or stale chart), typical charts still finish in
+the first call, and a mid-job chart/tuning switch discards the stale job.
+`MAX_TOTAL_SOLVE_MS` (2 000) of accumulated work disables the solver for a
+job's remaining groups. `getStats()` exposes `{ slices, workMs,
+searchAborts, oversizeGroups, solverDisabled, inProgress }`. Measured: a
+typical 2 000-note chart is unchanged (≈4.6 ms, one slice, zero aborts); an
+adversarial 500-heavy-chord chart completes in 4 slices, max 6.2 ms each.
+Suites: 417 + 120 assertions.
+
+**Phase 18 — Anchor-donor refinement after revoicing (v0.4.2,
+2026-07-13).** A revoiced (tier ≥ 2) donor note can carry an octave-sized
+fret adjustment that lurched the hand-position highlight band to a nonsense
+fret. `createRetuner` now tags each materialized `bundle.notes` copy with
+its solve tier (`_crTier`; chord copies stay untagged — they never donate),
+and `remapAnchors` prefers the first tier-0 (exact-remap) fretted donor
+within `ANCHOR_DONOR_WINDOW_S` (2 s) past the anchor before settling for
+the revoiced adjustment. Untagged notes read as tier 0, so direct API use
+and all-tier-0 charts behave byte-identically to before. Cosmetic — gems
+were never affected. Suites: 426 + 120 assertions.
+
 ## Upstream sync log
 
 Procedure: see PLANNING.md ("Syncing from upstream"). Each entry notes what

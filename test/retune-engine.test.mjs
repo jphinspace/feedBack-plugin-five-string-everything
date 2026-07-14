@@ -1021,4 +1021,271 @@ const SPOT_FRETS = [0, 10, 20];
         remapNote(60, 1, 0, ukeTarget.midiTuning, 12), { s: 1, f: 0 });
 }
 
+// ---- Pathological-chart safety + cold-solve chunking (createRetuner) --
+// The cold remap runs as a time-sliced job: until it completes, apply()
+// publishes empty arrays; callers just keep calling apply() per frame
+// with the raw bundle, as core does. These tests force chunking with
+// frameBudgetMs: -1 (exactly one work unit per apply call) and assert
+// the chunked result is identical to the synchronous one.
+
+// Helper: a fresh bundle over shared raw arrays, and a driver that
+// re-supplies the raw refs before each apply (what core does per frame).
+function mkBundle(raw) {
+    return {
+        notes: raw.notes, chords: raw.chords, anchors: raw.anchors,
+        chordTemplates: raw.templates,
+        tuning: raw.tuning, capo: raw.capo | 0, stringCount: raw.sc,
+    };
+}
+function applyRaw(retuner, bundle, raw, targetMidiTuning, maxFret) {
+    bundle.notes = raw.notes;
+    bundle.chords = raw.chords;
+    bundle.anchors = raw.anchors;
+    bundle.chordTemplates = raw.templates;
+    retuner.apply(bundle, targetMidiTuning, maxFret);
+}
+function driveToCompletion(retuner, bundle, raw, targetMidiTuning, maxFret) {
+    let guard = 0;
+    while (retuner.getStats().inProgress) {
+        assert.ok(++guard < 10000, 'chunked remap terminates');
+        applyRaw(retuner, bundle, raw, targetMidiTuning, maxFret);
+    }
+}
+
+// Chunked apply produces byte-identical output to the synchronous path,
+// publishes only empty arrays while in progress, and reports progress
+// via getStats().
+{
+    const { createRetuner } = CR;
+    // 40 distinct two-note buckets (distinct frets -> distinct solve-cache
+    // keys) + a chord + templates + anchors: >40 work units.
+    const notes = [];
+    for (let i = 0; i < 40; i++) {
+        notes.push({ t: i, s: 0, f: (i % 12) + 1 }, { t: i, s: 1, f: (i % 12) + 3 });
+    }
+    const raw = {
+        notes,
+        chords: [{ t: 100, id: 0, notes: [{ t: 100, s: 0, f: 6 }, { t: 100, s: 1, f: 7 }] }],
+        anchors: [{ time: 0, fret: 3, width: 4 }],
+        templates: [{ name: 'X', frets: [6, 7, -1, -1], fingers: [1, 2, -1, -1] }],
+        tuning: [0, 0, 0, 0], capo: 0, sc: 4,
+    };
+
+    const syncRetuner = createRetuner(); // default budget: finishes in one call
+    const syncBundle = mkBundle(raw);
+    syncRetuner.apply(syncBundle);
+    check('chunking: default budget finishes a normal chart on the first apply',
+        syncRetuner.getStats().inProgress, false);
+    check('chunking: default budget takes one slice', syncRetuner.getStats().slices, 1);
+
+    const chunked = createRetuner({ frameBudgetMs: -1 }); // one unit per apply
+    const chunkedBundle = mkBundle(raw);
+    chunked.apply(chunkedBundle);
+    check('chunking: in progress after the first slice', chunked.getStats().inProgress, true);
+    check('chunking: empty notes while in progress', chunkedBundle.notes, []);
+    check('chunking: empty chords while in progress', chunkedBundle.chords, []);
+    check('chunking: empty anchors while in progress', chunkedBundle.anchors, []);
+    check('chunking: empty templates while in progress', chunkedBundle.chordTemplates, []);
+    driveToCompletion(chunked, chunkedBundle, raw);
+    assert.ok(chunked.getStats().slices > 1, 'forced chunking took multiple slices'); passed++;
+    check('chunking: chunked notes identical to synchronous', chunkedBundle.notes, syncBundle.notes);
+    check('chunking: chunked chords identical to synchronous', chunkedBundle.chords, syncBundle.chords);
+    check('chunking: chunked anchors identical to synchronous', chunkedBundle.anchors, syncBundle.anchors);
+    check('chunking: chunked templates identical to synchronous', chunkedBundle.chordTemplates, syncBundle.chordTemplates);
+
+    // A cache hit after completion must not restart the job.
+    applyRaw(chunked, chunkedBundle, raw);
+    check('chunking: cache hit after completion keeps the result', chunkedBundle.notes, syncBundle.notes);
+    check('chunking: cache hit does not restart the job', chunked.getStats().inProgress, false);
+
+    // An empty chart completes on the first call even when chunked.
+    const emptyRaw = { notes: [], chords: [], anchors: [], templates: [], tuning: [0, 0, 0, 0], capo: 0, sc: 4 };
+    const emptyRetuner = createRetuner({ frameBudgetMs: -1 });
+    emptyRetuner.apply(mkBundle(emptyRaw));
+    check('chunking: an empty chart completes in one slice', emptyRetuner.getStats().inProgress, false);
+}
+
+// A chart/tuning switch mid-job discards the stale job and remaps the
+// new chart cleanly — no contamination from the abandoned remap.
+{
+    const { createRetuner } = CR;
+    const rawA = {
+        notes: [{ t: 0, s: 0, f: 1 }, { t: 0, s: 1, f: 2 }, { t: 1, s: 0, f: 5 }, { t: 1, s: 1, f: 6 }],
+        chords: [], anchors: [], templates: [], tuning: [0, 0, 0, 0], capo: 0, sc: 4,
+    };
+    const rawB = {
+        notes: [{ t: 0, s: 0, f: 3 }, { t: 0, s: 1, f: 4 }, { t: 2, s: 2, f: 7 }, { t: 2, s: 3, f: 8 }],
+        chords: [], anchors: [], templates: [], tuning: [0, 0, 0, 0], capo: 0, sc: 4,
+    };
+    const retuner = createRetuner({ frameBudgetMs: -1 });
+    const bundle = mkBundle(rawA);
+    retuner.apply(bundle); // job A started, not finished
+    check('mid-job switch: job A in progress', retuner.getStats().inProgress, true);
+    applyRaw(retuner, bundle, rawB); // switch charts mid-job
+    driveToCompletion(retuner, bundle, rawB);
+
+    const solo = createRetuner();
+    const soloBundle = mkBundle(rawB);
+    solo.apply(soloBundle);
+    check('mid-job switch: result matches a fresh remap of chart B', bundle.notes, soloBundle.notes);
+}
+
+// Solver node-budget abort inside createRetuner: the group degrades to
+// the per-note path (notes still render) instead of dropping, and the
+// abort is counted. Default budget: same chart, no aborts.
+{
+    const { createRetuner } = CR;
+    // Eb-standard open-heavy chord onto EADG: the exact per-note remap
+    // drops the low open Eb (below the target's range), so the solver
+    // search must run — then a 10-node budget aborts it immediately.
+    const raw = {
+        notes: [
+            { t: 0, s: 0, f: 0 }, { t: 0, s: 1, f: 0 }, { t: 0, s: 2, f: 1 }, { t: 0, s: 3, f: 3 },
+        ],
+        chords: [], anchors: [], templates: [], tuning: [-1, -1, -1, -1], capo: 0, sc: 4,
+    };
+    const eadg = DEFAULT_TARGET_MIDI_TUNING.slice(1); // E1 A1 D2 G2
+
+    const capped = createRetuner({ maxSearchNodes: 10 });
+    const cappedBundle = mkBundle(raw);
+    capped.apply(cappedBundle, eadg);
+    driveToCompletion(capped, cappedBundle, raw, eadg);
+    assert.ok(capped.getStats().searchAborts >= 1, 'node cap aborted the search'); passed++;
+    assert.ok(cappedBundle.notes.length >= 1,
+        'aborted group degrades to the per-note path instead of dropping'); passed++;
+    // The per-note fallback keeps exact pitches: every survivor sounds
+    // its source pitch (open midi + fret identical across the remap).
+    for (const n of cappedBundle.notes) {
+        const srcMidi = raw.tuning[n._origNote.s] + [28, 33, 38, 43][n._origNote.s] + n._origNote.f;
+        check('aborted-group fallback preserves pitch', eadg[n.s] + n.f, srcMidi);
+    }
+
+    const uncapped = createRetuner();
+    const uncappedBundle = mkBundle(raw);
+    uncapped.apply(uncappedBundle, eadg);
+    check('default node budget: no aborts on the same chart', uncapped.getStats().searchAborts, 0);
+    assert.ok(uncappedBundle.notes.length >= cappedBundle.notes.length,
+        'unbounded solve places at least as many notes'); passed++;
+}
+
+// Oversized simultaneous-note groups (data corruption, e.g. a broken GP
+// export stacking a bar on one timestamp) skip the solver entirely.
+{
+    const { createRetuner, MAX_SOLVER_GROUP_SIZE } = CR;
+    check('MAX_SOLVER_GROUP_SIZE is sane', MAX_SOLVER_GROUP_SIZE >= 8, true);
+    const notes = [];
+    for (let i = 0; i < MAX_SOLVER_GROUP_SIZE + 3; i++) {
+        notes.push({ t: 0, s: i % 4, f: i });
+    }
+    const raw = { notes, chords: [], anchors: [], templates: [], tuning: [0, 0, 0, 0], capo: 0, sc: 4 };
+    const retuner = createRetuner();
+    const bundle = mkBundle(raw);
+    retuner.apply(bundle);
+    check('oversize group: counted', retuner.getStats().oversizeGroups, 1);
+    assert.ok(bundle.notes.length >= 1 && bundle.notes.length <= 5,
+        'oversize group resolves via per-note collision path'); passed++;
+    check('oversize group: no solver aborts (solver never ran)', retuner.getStats().searchAborts, 0);
+}
+
+// Whole-job work valve: past maxTotalSolveMs of accumulated work, the
+// solver is disabled for the job's remaining groups — the job still
+// completes and every group still materializes.
+{
+    const { createRetuner } = CR;
+    const notes = [];
+    for (let i = 0; i < 6; i++) {
+        notes.push({ t: i, s: 0, f: i + 1 }, { t: i, s: 1, f: i + 2 });
+    }
+    const raw = { notes, chords: [], anchors: [], templates: [], tuning: [0, 0, 0, 0], capo: 0, sc: 4 };
+    // maxTotalSolveMs: -1 disables the solver after the FIRST slice;
+    // frameBudgetMs: -1 makes that slice a single work unit.
+    const retuner = createRetuner({ frameBudgetMs: -1, maxTotalSolveMs: -1 });
+    const bundle = mkBundle(raw);
+    retuner.apply(bundle);
+    driveToCompletion(retuner, bundle, raw);
+    check('work valve: solver disabled past the total budget', retuner.getStats().solverDisabled, true);
+    check('work valve: every bucket still materialized', bundle.notes.length, notes.length);
+    // Identity chart on the default target: the per-note fallback maps
+    // EADG onto BEADG's top four strings — same frets, string + 1 — so
+    // the degraded output is still exactly right here.
+    for (let i = 0; i < notes.length; i++) {
+        check('work valve: fallback output correct', { s: bundle.notes[i].s, f: bundle.notes[i].f },
+            { s: notes[i].s + 1, f: notes[i].f });
+    }
+}
+
+// ---- Anchor-donor refinement after revoicing (PLANNING #2) ------------
+// A revoiced donor (solve tier >= 2) can carry an octave-sized fret
+// adjustment; remapAnchors now prefers the first tier-0 donor within
+// ANCHOR_DONOR_WINDOW_S past the anchor, falling back to the revoiced
+// adjustment only when no exact donor is nearby.
+{
+    const { remapAnchors, ANCHOR_DONOR_WINDOW_S } = CR;
+    assert.ok(ANCHOR_DONOR_WINDOW_S > 0, 'donor window sane'); passed++;
+    const mk = (t, origF, newF, tier) => {
+        const n = { t, s: 0, f: newF, _origNote: { t, s: 0, f: origF } };
+        if (tier !== undefined) n._crTier = tier;
+        return n;
+    };
+    // Revoiced (+12) donor right at the anchor, tier-0 (-2) donor 1s later.
+    check('anchor donor: nearby tier-0 donor beats the revoiced one',
+        remapAnchors([{ time: 0.9, fret: 5, width: 4 }], [mk(1.0, 5, 17, 2), mk(2.0, 5, 3, 0)]),
+        [{ time: 0.9, fret: 3, width: 4 }]);
+    // Tier-0 donor beyond the window: the revoiced adjustment still wins
+    // (it is the only signal for that passage).
+    check('anchor donor: no tier-0 within the window -> revoiced fallback',
+        remapAnchors([{ time: 0.9, fret: 5, width: 4 }],
+            [mk(1.0, 5, 17, 2), mk(0.9 + ANCHOR_DONOR_WINDOW_S + 1, 5, 3, 0)]),
+        [{ time: 0.9, fret: 17, width: 4 }]);
+    // Untagged donors (direct API use) are trusted as tier 0 — the
+    // pre-refinement behavior, byte-identical.
+    check('anchor donor: untagged donors behave as before',
+        remapAnchors([{ time: 0.9, fret: 5, width: 4 }], [mk(1.0, 5, 17), mk(2.0, 5, 3)]),
+        [{ time: 0.9, fret: 17, width: 4 }]);
+}
+
+// End-to-end through createRetuner: a same-onset bucket whose low D1
+// drops under the exact remap (below EADG's range) gets revoiced
+// (tier 2) — its notes are tagged, and the anchor skips past them to
+// the exact (tier 0) single note that follows.
+{
+    const { createRetuner } = CR;
+    const eadg = DEFAULT_TARGET_MIDI_TUNING.slice(1); // E1 A1 D2 G2
+    const mkRaw = (singleT) => ({
+        // tuning [-3,-3,0,0]: s0 open C#1(25), s1 open F#1(30).
+        // Bucket t=0: (s0,f1)=D1(26) — below EADG, exact remap drops it ->
+        // solver revoices the pair; (s1,f1... ) see below.
+        notes: [
+            { t: 0, s: 0, f: 1 }, { t: 0, s: 1, f: 1 },
+            { t: singleT, s: 2, f: 4 }, // (s2,f4)=D2+4 — exact, tier 0, adjustment 0
+        ],
+        chords: [], anchors: [{ time: 0, fret: 1, width: 4 }], templates: [],
+        tuning: [-3, -3, 0, 0], capo: 0, sc: 4,
+    });
+
+    // Tier tags + the preferred-donor path (single note inside the window).
+    const near = createRetuner();
+    const nearRaw = mkRaw(0.6);
+    const nearBundle = mkBundle(nearRaw);
+    near.apply(nearBundle, eadg);
+    const bucketNotes = nearBundle.notes.filter(n => n.t === 0);
+    assert.ok(bucketNotes.length >= 1 && bucketNotes.every(n => n._crTier >= 2),
+        'revoiced bucket notes carry their solve tier'); passed++;
+    check('exact single note is tagged tier 0', nearBundle.notes.find(n => n.t === 0.6)._crTier, 0);
+    check('anchor takes the nearby tier-0 donor adjustment (0), not the revoiced one',
+        nearBundle.anchors, [{ time: 0, fret: 1, width: 4 }]);
+
+    // Same chart with the exact note pushed past the window: the anchor
+    // falls back to the first revoiced donor's own adjustment.
+    const far = createRetuner();
+    const farRaw = mkRaw(30);
+    const farBundle = mkBundle(farRaw);
+    far.apply(farBundle, eadg);
+    const donor = farBundle.notes[0]; // first (time-sorted) fretted note at t=0
+    const expected = Math.max(0, Math.min(20, 1 + donor.f - donor._origNote.f));
+    check('anchor falls back to the revoiced donor when no tier-0 is nearby',
+        farBundle.anchors, [{ time: 0, fret: expected, width: 4 }]);
+    assert.ok(expected !== 1, 'fallback case actually differs from the tier-0 adjustment'); passed++;
+}
+
 console.log(`OK - ${passed} assertions passed`);
