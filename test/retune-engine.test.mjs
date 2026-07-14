@@ -18,6 +18,8 @@ const {
     effectiveMaxFret,
     MAX_TARGET_STRING_COUNT,
     MIN_TARGET_STRING_COUNT,
+    MIN_TARGET_MIDI,
+    MAX_TARGET_MIDI,
     DEFAULT_TARGET_MIDI_TUNING,
     DEFAULT_TARGET_TUNING,
     EXTENDED_DEFAULT_TARGET_TUNING,
@@ -630,7 +632,7 @@ const SPOT_FRETS = [0, 10, 20];
         BEADG_COLOR_ROLES, ['lowB', 'e', 'a', 'd', 'g']);
 }
 
-// isValidTuningStringsArray: bounds + parse-validity check.
+// isValidTuningStringsArray: string-count, MIDI-range, and parse-validity checks.
 {
     check('isValidTuningStringsArray: BEADG (5) is valid', isValidTuningStringsArray(DEFAULT_TARGET_TUNING), true);
     check('isValidTuningStringsArray: MIN_TARGET_STRING_COUNT (4) is valid',
@@ -641,6 +643,14 @@ const SPOT_FRETS = [0, 10, 20];
         isValidTuningStringsArray(['A1', 'D2', 'G2']), false);
     check('isValidTuningStringsArray: above the ceiling (9) is invalid',
         isValidTuningStringsArray(['C#0', 'F#0', 'B0', 'E1', 'A1', 'D2', 'G2', 'B2', 'E3']), false);
+    check('isValidTuningStringsArray: C-1 and E5 range boundaries are valid',
+        isValidTuningStringsArray(['C-1', 'E1', 'A1', 'D2', 'E5']), true);
+    check('isValidTuningStringsArray: below MIDI range is invalid',
+        isValidTuningStringsArray(['C-2', 'E1', 'A1', 'D2']), false);
+    check('isValidTuningStringsArray: above MIDI range is invalid',
+        isValidTuningStringsArray(['E1', 'A1', 'D2', 'F5']), false);
+    check('isValidTuningStringsArray: exported MIDI bounds match C-1..E5',
+        [MIN_TARGET_MIDI, MAX_TARGET_MIDI], [0, 76]);
     check('isValidTuningStringsArray: a malformed entry anywhere invalidates the whole array',
         isValidTuningStringsArray(['B0', 'E1', 'garbage', 'D2', 'G2']), false);
     check('isValidTuningStringsArray: non-array input is invalid', isValidTuningStringsArray(null), false);

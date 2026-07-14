@@ -78,6 +78,11 @@ export function effectiveMaxFret(maxFret, capo) {
 // only sized that far). 4 matches highway_3d's own floor.
 export const MAX_TARGET_STRING_COUNT = 8;
 export const MIN_TARGET_STRING_COUNT = 4;
+// The editor's supported scientific-pitch range is inclusive: C-1 (MIDI 0)
+// through E5 (MIDI 76). parseTargetNote intentionally remains general for
+// other chart/pitch uses; this boundary belongs to custom tuning validation.
+export const MIN_TARGET_MIDI = 0;
+export const MAX_TARGET_MIDI = 76;
 export const DEFAULT_TARGET_TUNING = ['B0', 'E1', 'A1', 'D2', 'G2'];
 // Fallback chain for resolveTargetTuning (entries past index 4) and the
 // note->color-role table in string-colors.js. EXTENDED_CORE_INDEX is the
@@ -372,11 +377,15 @@ export function resolveActiveTuning(id, customTunings, arrClass = 'bass') {
     return asResult(BUILTIN_PRESET_TUNINGS.find(p => p.id === defaultTuningIdForClass(arrClass)));
 }
 
-// Length in [MIN,MAX] and every entry parses. Shared by
+// Length in [MIN,MAX], every entry parses, and every pitch is in the
+// supported C-1..E5 range. Shared by
 // window.cr3dSaveCustomTuning and the storage-read filter in screen.js.
 export function isValidTuningStringsArray(strings) {
     if (!Array.isArray(strings) || strings.length < MIN_TARGET_STRING_COUNT || strings.length > MAX_TARGET_STRING_COUNT) return false;
-    return strings.every(s => !!parseTargetNote(s));
+    return strings.every(s => {
+        const parsed = parseTargetNote(s);
+        return parsed !== null && parsed.midi >= MIN_TARGET_MIDI && parsed.midi <= MAX_TARGET_MIDI;
+    });
 }
 
 // Resolves a note-spec array (length 4-8) into { midiTuning, labels } of
