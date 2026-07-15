@@ -16,28 +16,27 @@ const _clampFret = (f, maxFret) => Math.max(0, Math.min(maxFret, f));
 
 // ---- Pathological-chart safety valves (createRetuner) ----------------
 // A remap must never be able to stall the render thread, no matter what
-// a chart file contains. Three independent bounds, all overridable per
-// retuner via createRetuner(opts):
+// a chart file contains. Three independent bounds — chord-solver.js's
+// MAX_SEARCH_NODES plus the two below — all overridable per retuner via
+// createRetuner(opts):
 //
 // MAX_SOLVER_GROUP_SIZE — a simultaneous-note group larger than this
 // (no real instrument: buckets this size are data corruption, e.g. a
 // broken GP export stacking a whole bar on one timestamp) skips the
 // solver entirely and takes the bounded per-note path.
 export const MAX_SOLVER_GROUP_SIZE = 12;
-// FRAME_BUDGET_MS — cold-remap work per apply() call. A remap that
-// doesn't finish inside the budget continues on subsequent calls
-// (frames); until it completes, apply() publishes EMPTY arrays — never a
-// partially remapped chart, and never the previous chart's data. The
-// check runs between work units (one template / note bucket / chord), so
-// a slice can overshoot by at most one unit — itself bounded by the
-// solver node budget. Typical charts (~4 ms cold) still finish in the
-// first call, exactly as before.
-export const FRAME_BUDGET_MS = 5;
-// MAX_TOTAL_SOLVE_MS — accumulated cold-remap work across all slices of
-// one remap job. Past it the solver is disabled for the job's REMAINING
-// groups (per-note path instead), so even a chart with thousands of
-// distinct expensive shapes reaches the screen in bounded total work.
-export const MAX_TOTAL_SOLVE_MS = 2000;
+// MAX_TOTAL_SOLVE_MS — deadline for one whole cold remap, checked
+// between work units (one template / note bucket / chord). Past it the
+// REMAINING groups take the per-note path instead of the solver, so the
+// worst-case apply() stall is ~this deadline plus one node-capped group.
+// Only a pathological chart can hit it, and it lands where it doesn't
+// hurt: on song load the first frame hasn't been drawn yet, and on a
+// mid-song tuning switch it's a couple of dropped frames. (An earlier
+// iteration time-sliced the remap across frames with a generator job
+// instead; deliberately simplified away — the solver node budget
+// already bounds any single group, so a plain deadline gives the same
+// guarantee without the job-lifecycle machinery.)
+export const MAX_TOTAL_SOLVE_MS = 40;
 
 const _now = (typeof performance !== 'undefined' && typeof performance.now === 'function')
     ? () => performance.now()
@@ -367,37 +366,34 @@ function _solveGroup(cache, sourceOpenMidiByString, naturalTargetByString, notes
 // defaults to DEFAULT_MAX_FRET (the historical hardcoded 20) when
 // omitted.
 //
-// The cold remap runs as a generator job time-sliced across apply()
-// calls (see FRAME_BUDGET_MS above): until the job completes, apply()
-// publishes empty arrays. Callers need no awareness of this — they call
-// apply() per frame with the raw bundle exactly as before, and the
-// remapped chart appears when ready (first call for typical charts).
-//
 // opts (all optional, defaults are the exported valve constants):
-//   frameBudgetMs   — per-apply() work budget; Infinity = synchronous.
-//   maxTotalSolveMs — whole-job work cap before the solver is disabled.
+//   maxTotalSolveMs — cold-remap deadline (MAX_TOTAL_SOLVE_MS).
 //   maxSearchNodes  — per-group solver node budget (MAX_SEARCH_NODES).
 //
-// getStats() (diagnostics + tests): { slices, workMs, searchAborts,
-// oversizeGroups, solverDisabled, inProgress } for the most recent job.
+// getStats() (diagnostics + tests): { workMs, searchAborts,
+// oversizeGroups, solverDisabled } for the most recent cold remap.
 export function createRetuner(opts) {
-    const frameBudgetMs = opts && opts.frameBudgetMs !== undefined ? opts.frameBudgetMs : FRAME_BUDGET_MS;
     const maxTotalSolveMs = opts && opts.maxTotalSolveMs !== undefined ? opts.maxTotalSolveMs : MAX_TOTAL_SOLVE_MS;
     const maxSearchNodes = opts && opts.maxSearchNodes !== undefined ? opts.maxSearchNodes : MAX_SEARCH_NODES;
 
     let cacheNotesRef = null, cacheChordsRef = null, cacheAnchorsRef = null, cacheTemplatesRef = null;
     let cacheTuningRef = null, cacheCapo = null, cacheStringCount = null, cacheTargetSig = null;
     let remappedNotes = [], remappedChords = [], remappedAnchors = [], remappedTemplates = [];
-    let job = null;     // in-progress cold-remap generator, null when idle
-    let jobCtl = null;  // its safety-valve state (shared with _solveGroup)
-    const stats = { slices: 0, workMs: 0, searchAborts: 0, oversizeGroups: 0, solverDisabled: false };
+    const stats = { workMs: 0, searchAborts: 0, oversizeGroups: 0, solverDisabled: false };
 
-    // The whole cold remap as a generator: one yield per work unit (one
-    // template / one same-onset note bucket / one chord), so the driver
-    // in apply() can stop between units when the frame budget runs out.
-    // Results land in the remapped* closure vars only at the very end —
-    // a partially remapped chart is never observable.
-    function* _remapJob(rawNotes, rawChords, rawAnchors, rawTemplates, tuning, capo, sc, target, maxFret, ctl) {
+    // The whole cold remap, synchronous. checkDeadline runs between work
+    // units (one template / one same-onset note bucket / one chord) and
+    // flips the remaining groups onto the per-note path once the
+    // deadline passes — see MAX_TOTAL_SOLVE_MS above.
+    function _remap(rawNotes, rawChords, rawAnchors, rawTemplates, tuning, capo, sc, target, maxFret) {
+        const t0 = _now();
+        const ctl = { solverDisabled: false, maxSearchNodes, stats };
+        const checkDeadline = () => {
+            if (!ctl.solverDisabled && _now() - t0 > maxTotalSolveMs) {
+                ctl.solverDisabled = true;
+                stats.solverDisabled = true;
+            }
+        };
         const sourceOpenMidiByString = computeOpenStringMidiByString(sc, tuning, capo);
         const shiftK = computeArrangementShift(sc, tuning, capo, sourceOpenMidiByString, target);
         const naturalTargetByString = [];
@@ -481,8 +477,8 @@ export function createRetuner(opts) {
         if (Array.isArray(rawTemplates)) {
             newTemplates = [];
             for (let ti = 0; ti < rawTemplates.length; ti++) {
+                checkDeadline();
                 newTemplates.push(remapOneTemplate(rawTemplates[ti], ti));
-                yield;
             }
         } else {
             newTemplates = rawTemplates || [];
@@ -506,6 +502,7 @@ export function createRetuner(opts) {
                 bucket.push(n);
             }
             for (const bucket of byTime.values()) {
+                checkDeadline();
                 if (bucket.length >= 2) {
                     const solved = _solveGroup(groupCache, sourceOpenMidiByString, naturalTargetByString, bucket, target, null, maxFret, ctl);
                     if (solved) newNotes.push(..._materializePlacements(bucket, solved.placements, maxFret, solved.tier));
@@ -518,13 +515,13 @@ export function createRetuner(opts) {
                         newNotes.push(copy);
                     }
                 }
-                yield;
             }
             newNotes.sort((a, b) => a.t - b.t);
         }
         const newChords = [];
         if (Array.isArray(rawChords)) {
             for (const ch of rawChords) {
+                checkDeadline();
                 const chNotes = ch.notes || [];
                 let placements = null;
                 // Template-first: an instance whose notes match its
@@ -576,14 +573,13 @@ export function createRetuner(opts) {
                 if (placements && placements.length > 0) {
                     newChords.push(Object.assign({}, ch, { notes: _materializePlacements(chNotes, placements, maxFret) }));
                 }
-                yield;
             }
         }
-        // Publish atomically — the in-progress state was never visible.
         remappedNotes = newNotes;
         remappedChords = newChords;
         remappedAnchors = remapAnchors(rawAnchors, newNotes, maxFret);
         remappedTemplates = newTemplates;
+        stats.workMs = _now() - t0;
     }
 
     function apply(bundle, targetMidiTuning, maxFret = DEFAULT_MAX_FRET) {
@@ -609,11 +605,6 @@ export function createRetuner(opts) {
             cacheCapo = capo;
             cacheStringCount = sc;
             cacheTargetSig = targetSig;
-            // A chart/tuning change mid-job discards the stale job
-            // outright — its raw inputs no longer describe this chart.
-            job = null;
-            jobCtl = null;
-            stats.slices = 0;
             stats.workMs = 0;
             stats.searchAborts = 0;
             stats.oversizeGroups = 0;
@@ -626,35 +617,7 @@ export function createRetuner(opts) {
                 remappedAnchors = Array.isArray(rawAnchors) ? rawAnchors : [];
                 remappedTemplates = Array.isArray(rawTemplates) ? rawTemplates : [];
             } else {
-                // Empty until the job publishes — never a partially
-                // remapped chart, and never the previous chart's data.
-                remappedNotes = [];
-                remappedChords = [];
-                remappedAnchors = [];
-                remappedTemplates = [];
-                jobCtl = { solverDisabled: false, maxSearchNodes, stats };
-                job = _remapJob(rawNotes, rawChords, rawAnchors, rawTemplates, tuning, capo, sc, target, maxFret, jobCtl);
-            }
-        }
-
-        if (job) {
-            // Drive the job for up to frameBudgetMs of work. At least one
-            // unit always runs, so completion needs at most one apply()
-            // call per work unit regardless of what the clock reports;
-            // a unit itself is bounded by the solver node budget.
-            const sliceStart = _now();
-            for (;;) {
-                if (job.next().done) { job = null; break; }
-                if (_now() - sliceStart >= frameBudgetMs) break;
-            }
-            stats.workMs += _now() - sliceStart;
-            stats.slices += 1;
-            // Whole-job valve: past the total work budget, every
-            // remaining group takes the bounded per-note path instead of
-            // the solver (see _solveGroup), so the job's tail is cheap.
-            if (job && !jobCtl.solverDisabled && stats.workMs > maxTotalSolveMs) {
-                jobCtl.solverDisabled = true;
-                stats.solverDisabled = true;
+                _remap(rawNotes, rawChords, rawAnchors, rawTemplates, tuning, capo, sc, target, maxFret);
             }
         }
 
@@ -666,12 +629,10 @@ export function createRetuner(opts) {
 
     function getStats() {
         return {
-            slices: stats.slices,
             workMs: stats.workMs,
             searchAborts: stats.searchAborts,
             oversizeGroups: stats.oversizeGroups,
             solverDisabled: stats.solverDisabled,
-            inProgress: job !== null,
         };
     }
 

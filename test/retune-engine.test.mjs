@@ -1031,113 +1031,19 @@ const SPOT_FRETS = [0, 10, 20];
         remapNote(60, 1, 0, ukeTarget.midiTuning, 12), { s: 1, f: 0 });
 }
 
-// ---- Pathological-chart safety + cold-solve chunking (createRetuner) --
-// The cold remap runs as a time-sliced job: until it completes, apply()
-// publishes empty arrays; callers just keep calling apply() per frame
-// with the raw bundle, as core does. These tests force chunking with
-// frameBudgetMs: -1 (exactly one work unit per apply call) and assert
-// the chunked result is identical to the synchronous one.
+// ---- Pathological-chart safety valves (createRetuner) -----------------
+// The cold remap is synchronous and bounded: a per-group solver node
+// budget (maxSearchNodes), an oversize-group cutoff
+// (MAX_SOLVER_GROUP_SIZE), and a whole-remap deadline (maxTotalSolveMs)
+// past which the remaining groups take the per-note path.
 
-// Helper: a fresh bundle over shared raw arrays, and a driver that
-// re-supplies the raw refs before each apply (what core does per frame).
+// Helper: a fresh bundle over shared raw arrays.
 function mkBundle(raw) {
     return {
         notes: raw.notes, chords: raw.chords, anchors: raw.anchors,
         chordTemplates: raw.templates,
         tuning: raw.tuning, capo: raw.capo | 0, stringCount: raw.sc,
     };
-}
-function applyRaw(retuner, bundle, raw, targetMidiTuning, maxFret) {
-    bundle.notes = raw.notes;
-    bundle.chords = raw.chords;
-    bundle.anchors = raw.anchors;
-    bundle.chordTemplates = raw.templates;
-    retuner.apply(bundle, targetMidiTuning, maxFret);
-}
-function driveToCompletion(retuner, bundle, raw, targetMidiTuning, maxFret) {
-    let guard = 0;
-    while (retuner.getStats().inProgress) {
-        assert.ok(++guard < 10000, 'chunked remap terminates');
-        applyRaw(retuner, bundle, raw, targetMidiTuning, maxFret);
-    }
-}
-
-// Chunked apply produces byte-identical output to the synchronous path,
-// publishes only empty arrays while in progress, and reports progress
-// via getStats().
-{
-    const { createRetuner } = CR;
-    // 40 distinct two-note buckets (distinct frets -> distinct solve-cache
-    // keys) + a chord + templates + anchors: >40 work units.
-    const notes = [];
-    for (let i = 0; i < 40; i++) {
-        notes.push({ t: i, s: 0, f: (i % 12) + 1 }, { t: i, s: 1, f: (i % 12) + 3 });
-    }
-    const raw = {
-        notes,
-        chords: [{ t: 100, id: 0, notes: [{ t: 100, s: 0, f: 6 }, { t: 100, s: 1, f: 7 }] }],
-        anchors: [{ time: 0, fret: 3, width: 4 }],
-        templates: [{ name: 'X', frets: [6, 7, -1, -1], fingers: [1, 2, -1, -1] }],
-        tuning: [0, 0, 0, 0], capo: 0, sc: 4,
-    };
-
-    const syncRetuner = createRetuner(); // default budget: finishes in one call
-    const syncBundle = mkBundle(raw);
-    syncRetuner.apply(syncBundle);
-    check('chunking: default budget finishes a normal chart on the first apply',
-        syncRetuner.getStats().inProgress, false);
-    check('chunking: default budget takes one slice', syncRetuner.getStats().slices, 1);
-
-    const chunked = createRetuner({ frameBudgetMs: -1 }); // one unit per apply
-    const chunkedBundle = mkBundle(raw);
-    chunked.apply(chunkedBundle);
-    check('chunking: in progress after the first slice', chunked.getStats().inProgress, true);
-    check('chunking: empty notes while in progress', chunkedBundle.notes, []);
-    check('chunking: empty chords while in progress', chunkedBundle.chords, []);
-    check('chunking: empty anchors while in progress', chunkedBundle.anchors, []);
-    check('chunking: empty templates while in progress', chunkedBundle.chordTemplates, []);
-    driveToCompletion(chunked, chunkedBundle, raw);
-    assert.ok(chunked.getStats().slices > 1, 'forced chunking took multiple slices'); passed++;
-    check('chunking: chunked notes identical to synchronous', chunkedBundle.notes, syncBundle.notes);
-    check('chunking: chunked chords identical to synchronous', chunkedBundle.chords, syncBundle.chords);
-    check('chunking: chunked anchors identical to synchronous', chunkedBundle.anchors, syncBundle.anchors);
-    check('chunking: chunked templates identical to synchronous', chunkedBundle.chordTemplates, syncBundle.chordTemplates);
-
-    // A cache hit after completion must not restart the job.
-    applyRaw(chunked, chunkedBundle, raw);
-    check('chunking: cache hit after completion keeps the result', chunkedBundle.notes, syncBundle.notes);
-    check('chunking: cache hit does not restart the job', chunked.getStats().inProgress, false);
-
-    // An empty chart completes on the first call even when chunked.
-    const emptyRaw = { notes: [], chords: [], anchors: [], templates: [], tuning: [0, 0, 0, 0], capo: 0, sc: 4 };
-    const emptyRetuner = createRetuner({ frameBudgetMs: -1 });
-    emptyRetuner.apply(mkBundle(emptyRaw));
-    check('chunking: an empty chart completes in one slice', emptyRetuner.getStats().inProgress, false);
-}
-
-// A chart/tuning switch mid-job discards the stale job and remaps the
-// new chart cleanly — no contamination from the abandoned remap.
-{
-    const { createRetuner } = CR;
-    const rawA = {
-        notes: [{ t: 0, s: 0, f: 1 }, { t: 0, s: 1, f: 2 }, { t: 1, s: 0, f: 5 }, { t: 1, s: 1, f: 6 }],
-        chords: [], anchors: [], templates: [], tuning: [0, 0, 0, 0], capo: 0, sc: 4,
-    };
-    const rawB = {
-        notes: [{ t: 0, s: 0, f: 3 }, { t: 0, s: 1, f: 4 }, { t: 2, s: 2, f: 7 }, { t: 2, s: 3, f: 8 }],
-        chords: [], anchors: [], templates: [], tuning: [0, 0, 0, 0], capo: 0, sc: 4,
-    };
-    const retuner = createRetuner({ frameBudgetMs: -1 });
-    const bundle = mkBundle(rawA);
-    retuner.apply(bundle); // job A started, not finished
-    check('mid-job switch: job A in progress', retuner.getStats().inProgress, true);
-    applyRaw(retuner, bundle, rawB); // switch charts mid-job
-    driveToCompletion(retuner, bundle, rawB);
-
-    const solo = createRetuner();
-    const soloBundle = mkBundle(rawB);
-    solo.apply(soloBundle);
-    check('mid-job switch: result matches a fresh remap of chart B', bundle.notes, soloBundle.notes);
 }
 
 // Solver node-budget abort inside createRetuner: the group degrades to
@@ -1159,7 +1065,6 @@ function driveToCompletion(retuner, bundle, raw, targetMidiTuning, maxFret) {
     const capped = createRetuner({ maxSearchNodes: 10 });
     const cappedBundle = mkBundle(raw);
     capped.apply(cappedBundle, eadg);
-    driveToCompletion(capped, cappedBundle, raw, eadg);
     assert.ok(capped.getStats().searchAborts >= 1, 'node cap aborted the search'); passed++;
     assert.ok(cappedBundle.notes.length >= 1,
         'aborted group degrades to the per-note path instead of dropping'); passed++;
@@ -1197,9 +1102,9 @@ function driveToCompletion(retuner, bundle, raw, targetMidiTuning, maxFret) {
     check('oversize group: no solver aborts (solver never ran)', retuner.getStats().searchAborts, 0);
 }
 
-// Whole-job work valve: past maxTotalSolveMs of accumulated work, the
-// solver is disabled for the job's remaining groups — the job still
-// completes and every group still materializes.
+// Whole-remap deadline: past maxTotalSolveMs of work, the solver is
+// disabled for the remaining groups — the remap still completes in the
+// same apply() call and every group still materializes.
 {
     const { createRetuner } = CR;
     const notes = [];
@@ -1207,19 +1112,20 @@ function driveToCompletion(retuner, bundle, raw, targetMidiTuning, maxFret) {
         notes.push({ t: i, s: 0, f: i + 1 }, { t: i, s: 1, f: i + 2 });
     }
     const raw = { notes, chords: [], anchors: [], templates: [], tuning: [0, 0, 0, 0], capo: 0, sc: 4 };
-    // maxTotalSolveMs: -1 disables the solver after the FIRST slice;
-    // frameBudgetMs: -1 makes that slice a single work unit.
-    const retuner = createRetuner({ frameBudgetMs: -1, maxTotalSolveMs: -1 });
+    // maxTotalSolveMs: -1 -> the deadline is already past at the first
+    // between-groups check, so every group takes the per-note path.
+    const retuner = createRetuner({ maxTotalSolveMs: -1 });
     const bundle = mkBundle(raw);
     retuner.apply(bundle);
-    driveToCompletion(retuner, bundle, raw);
-    check('work valve: solver disabled past the total budget', retuner.getStats().solverDisabled, true);
-    check('work valve: every bucket still materialized', bundle.notes.length, notes.length);
+    check('deadline valve: solver disabled past the deadline', retuner.getStats().solverDisabled, true);
+    check('deadline valve: every bucket still materialized', bundle.notes.length, notes.length);
+    check('deadline valve: getStats shape', Object.keys(retuner.getStats()).sort(),
+        ['oversizeGroups', 'searchAborts', 'solverDisabled', 'workMs']);
     // Identity chart on the default target: the per-note fallback maps
     // EADG onto BEADG's top four strings — same frets, string + 1 — so
     // the degraded output is still exactly right here.
     for (let i = 0; i < notes.length; i++) {
-        check('work valve: fallback output correct', { s: bundle.notes[i].s, f: bundle.notes[i].f },
+        check('deadline valve: fallback output correct', { s: bundle.notes[i].s, f: bundle.notes[i].f },
             { s: notes[i].s + 1, f: notes[i].f });
     }
 }

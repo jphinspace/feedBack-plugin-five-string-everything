@@ -201,25 +201,30 @@ editor save clears that tuning's override). New presets: Ukulele gCEA
 (reentrant — second non-monotonic target after banjo5) and Baritone ukulele
 DGBE.
 
-**Phase 17 — Cold-solve chunking + pathological-chart safety (v0.4.1,
-2026-07-13).** A remap can no longer stall the render thread regardless of
-chart contents. Three independent, per-retuner-overridable valves
-(`createRetuner(opts)`), all default-invisible on normal charts:
-`MAX_SEARCH_NODES` (20 000) bounds each chord solve — one `{ nodes,
-aborted }` budget shared across the degradation-ladder rungs; on
-exhaustion the search keeps its best-so-far, and a gave-up null **falls
-back to the per-note collision path instead of dropping the group**.
-`MAX_SOLVER_GROUP_SIZE` (12) routes corrupt same-onset stacks straight to
-that path. `FRAME_BUDGET_MS` (5) time-slices the cold remap as a generator
-job across `apply()` calls — empty arrays are published until the job
-completes (never a partial or stale chart), typical charts still finish in
-the first call, and a mid-job chart/tuning switch discards the stale job.
-`MAX_TOTAL_SOLVE_MS` (2 000) of accumulated work disables the solver for a
-job's remaining groups. `getStats()` exposes `{ slices, workMs,
-searchAborts, oversizeGroups, solverDisabled, inProgress }`. Measured: a
-typical 2 000-note chart is unchanged (≈4.6 ms, one slice, zero aborts); an
-adversarial 500-heavy-chord chart completes in 4 slices, max 6.2 ms each.
-Suites: 417 + 120 assertions.
+**Phase 17 — Pathological-chart safety valves (v0.4.1, 2026-07-13).** A
+remap can no longer stall the render thread regardless of chart contents.
+Three independent, per-retuner-overridable bounds (`createRetuner(opts)`),
+all default-invisible on normal charts: `MAX_SEARCH_NODES` (20 000) bounds
+each chord solve — one `{ nodes, aborted }` budget shared across the
+degradation-ladder rungs; on exhaustion the search keeps its best-so-far,
+and a gave-up null **falls back to the per-note collision path instead of
+dropping the group**. `MAX_SOLVER_GROUP_SIZE` (12) routes corrupt
+same-onset stacks straight to that path. `MAX_TOTAL_SOLVE_MS` (40) is a
+synchronous deadline checked between work units (template / note bucket /
+chord): past it the remaining groups take the per-note path, bounding the
+worst-case `apply()` stall to ~deadline + one node-capped group — and that
+stall lands where it doesn't hurt (song load precedes the first drawn
+frame; a mid-song tuning switch on a corrupt chart drops 2–3 frames).
+`getStats()` exposes `{ workMs, searchAborts, oversizeGroups,
+solverDisabled }`. Measured: a typical 2 000-note chart is unchanged
+(≈3.5 ms, zero aborts); 441 distinct adversarial 8-note shapes complete in
+42.6 ms vs 154.6 ms without the deadline. **Correction (2026-07-15):** as
+first built, this phase also time-sliced the cold remap across frames as a
+generator job (`FRAME_BUDGET_MS`, empty-publish until done, mid-job
+restart, `slices`/`inProgress` stats). Deliberately simplified away — the
+node cap already bounds any single group, so the plain deadline gives the
+same no-stall guarantee without the job-lifecycle machinery, at the cost
+of one brief (≤ ~42 ms) hitch on charts that are corrupt anyway.
 
 **Phase 18 — Anchor-donor refinement after revoicing (v0.4.2,
 2026-07-13).** A revoiced (tier ≥ 2) donor note can carry an octave-sized
