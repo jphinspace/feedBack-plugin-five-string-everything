@@ -18,6 +18,8 @@ const {
     effectiveMaxFret,
     MAX_TARGET_STRING_COUNT,
     MIN_TARGET_STRING_COUNT,
+    MIN_TARGET_MIDI,
+    MAX_TARGET_MIDI,
     DEFAULT_TARGET_MIDI_TUNING,
     DEFAULT_TARGET_TUNING,
     EXTENDED_DEFAULT_TARGET_TUNING,
@@ -630,7 +632,7 @@ const SPOT_FRETS = [0, 10, 20];
         BEADG_COLOR_ROLES, ['lowB', 'e', 'a', 'd', 'g']);
 }
 
-// isValidTuningStringsArray: bounds + parse-validity check.
+// isValidTuningStringsArray: string-count, MIDI-range, and parse-validity checks.
 {
     check('isValidTuningStringsArray: BEADG (5) is valid', isValidTuningStringsArray(DEFAULT_TARGET_TUNING), true);
     check('isValidTuningStringsArray: MIN_TARGET_STRING_COUNT (4) is valid',
@@ -641,6 +643,14 @@ const SPOT_FRETS = [0, 10, 20];
         isValidTuningStringsArray(['A1', 'D2', 'G2']), false);
     check('isValidTuningStringsArray: above the ceiling (9) is invalid',
         isValidTuningStringsArray(['C#0', 'F#0', 'B0', 'E1', 'A1', 'D2', 'G2', 'B2', 'E3']), false);
+    check('isValidTuningStringsArray: C-1 and E5 range boundaries are valid',
+        isValidTuningStringsArray(['C-1', 'E1', 'A1', 'D2', 'E5']), true);
+    check('isValidTuningStringsArray: below MIDI range is invalid',
+        isValidTuningStringsArray(['C-2', 'E1', 'A1', 'D2']), false);
+    check('isValidTuningStringsArray: above MIDI range is invalid',
+        isValidTuningStringsArray(['E1', 'A1', 'D2', 'F5']), false);
+    check('isValidTuningStringsArray: exported MIDI bounds match C-1..E5',
+        [MIN_TARGET_MIDI, MAX_TARGET_MIDI], [0, 76]);
     check('isValidTuningStringsArray: a malformed entry anywhere invalidates the whole array',
         isValidTuningStringsArray(['B0', 'E1', 'garbage', 'D2', 'G2']), false);
     check('isValidTuningStringsArray: non-array input is invalid', isValidTuningStringsArray(null), false);
@@ -1019,6 +1029,191 @@ const SPOT_FRETS = [0, 10, 20];
         remapNote(59, 1, 0, ukeTarget.midiTuning, 12), null);
     check('reentrant uke: open C4 stays on its own string',
         remapNote(60, 1, 0, ukeTarget.midiTuning, 12), { s: 1, f: 0 });
+}
+
+// ---- Pathological-chart safety valves (createRetuner) -----------------
+// The cold remap is synchronous and bounded: a per-group solver node
+// budget (maxSearchNodes), an oversize-group cutoff
+// (MAX_SOLVER_GROUP_SIZE), and a whole-remap deadline (maxTotalSolveMs)
+// past which the remaining groups take the per-note path.
+
+// Helper: a fresh bundle over shared raw arrays.
+function mkBundle(raw) {
+    return {
+        notes: raw.notes, chords: raw.chords, anchors: raw.anchors,
+        chordTemplates: raw.templates,
+        tuning: raw.tuning, capo: raw.capo | 0, stringCount: raw.sc,
+    };
+}
+
+// Solver node-budget abort inside createRetuner: the group degrades to
+// the per-note path (notes still render) instead of dropping, and the
+// abort is counted. Default budget: same chart, no aborts.
+{
+    const { createRetuner } = CR;
+    // Eb-standard open-heavy chord onto EADG: the exact per-note remap
+    // drops the low open Eb (below the target's range), so the solver
+    // search must run — then a 10-node budget aborts it immediately.
+    const raw = {
+        notes: [
+            { t: 0, s: 0, f: 0 }, { t: 0, s: 1, f: 0 }, { t: 0, s: 2, f: 1 }, { t: 0, s: 3, f: 3 },
+        ],
+        chords: [], anchors: [], templates: [], tuning: [-1, -1, -1, -1], capo: 0, sc: 4,
+    };
+    const eadg = DEFAULT_TARGET_MIDI_TUNING.slice(1); // E1 A1 D2 G2
+
+    const capped = createRetuner({ maxSearchNodes: 10 });
+    const cappedBundle = mkBundle(raw);
+    capped.apply(cappedBundle, eadg);
+    assert.ok(capped.getStats().searchAborts >= 1, 'node cap aborted the search'); passed++;
+    assert.ok(cappedBundle.notes.length >= 1,
+        'aborted group degrades to the per-note path instead of dropping'); passed++;
+    // The per-note fallback keeps exact pitches: every survivor sounds
+    // its source pitch (open midi + fret identical across the remap).
+    for (const n of cappedBundle.notes) {
+        const srcMidi = raw.tuning[n._origNote.s] + [28, 33, 38, 43][n._origNote.s] + n._origNote.f;
+        check('aborted-group fallback preserves pitch', eadg[n.s] + n.f, srcMidi);
+    }
+
+    const uncapped = createRetuner();
+    const uncappedBundle = mkBundle(raw);
+    uncapped.apply(uncappedBundle, eadg);
+    check('default node budget: no aborts on the same chart', uncapped.getStats().searchAborts, 0);
+    assert.ok(uncappedBundle.notes.length >= cappedBundle.notes.length,
+        'unbounded solve places at least as many notes'); passed++;
+
+    // maxSearchNodes: 0 is a valid, explicit "never search" configuration
+    // (immediate abort -> per-note fallback for every group) — it must
+    // not be treated as "unset" and silently fall back to the default
+    // budget (a `|| MAX_SEARCH_NODES` on the node count would do exactly
+    // that, since 0 is falsy).
+    const zeroBudget = createRetuner({ maxSearchNodes: 0 });
+    const zeroBundle = mkBundle(raw);
+    zeroBudget.apply(zeroBundle, eadg);
+    check('maxSearchNodes: 0 aborts immediately (not treated as unset)', zeroBudget.getStats().searchAborts, 1);
+    check('maxSearchNodes: 0 still degrades via the per-note fallback, matching a tiny explicit budget',
+        zeroBundle.notes, cappedBundle.notes);
+}
+
+// Oversized simultaneous-note groups (data corruption, e.g. a broken GP
+// export stacking a bar on one timestamp) skip the solver entirely.
+{
+    const { createRetuner, MAX_SOLVER_GROUP_SIZE } = CR;
+    check('MAX_SOLVER_GROUP_SIZE is sane', MAX_SOLVER_GROUP_SIZE >= 8, true);
+    const notes = [];
+    for (let i = 0; i < MAX_SOLVER_GROUP_SIZE + 3; i++) {
+        notes.push({ t: 0, s: i % 4, f: i });
+    }
+    const raw = { notes, chords: [], anchors: [], templates: [], tuning: [0, 0, 0, 0], capo: 0, sc: 4 };
+    const retuner = createRetuner();
+    const bundle = mkBundle(raw);
+    retuner.apply(bundle);
+    check('oversize group: counted', retuner.getStats().oversizeGroups, 1);
+    assert.ok(bundle.notes.length >= 1 && bundle.notes.length <= 5,
+        'oversize group resolves via per-note collision path'); passed++;
+    check('oversize group: no solver aborts (solver never ran)', retuner.getStats().searchAborts, 0);
+}
+
+// Whole-remap deadline: past maxTotalSolveMs of work, the solver is
+// disabled for the remaining groups — the remap still completes in the
+// same apply() call and every group still materializes.
+{
+    const { createRetuner } = CR;
+    const notes = [];
+    for (let i = 0; i < 6; i++) {
+        notes.push({ t: i, s: 0, f: i + 1 }, { t: i, s: 1, f: i + 2 });
+    }
+    const raw = { notes, chords: [], anchors: [], templates: [], tuning: [0, 0, 0, 0], capo: 0, sc: 4 };
+    // maxTotalSolveMs: -1 -> the deadline is already past at the first
+    // between-groups check, so every group takes the per-note path.
+    const retuner = createRetuner({ maxTotalSolveMs: -1 });
+    const bundle = mkBundle(raw);
+    retuner.apply(bundle);
+    check('deadline valve: solver disabled past the deadline', retuner.getStats().solverDisabled, true);
+    check('deadline valve: every bucket still materialized', bundle.notes.length, notes.length);
+    check('deadline valve: getStats shape', Object.keys(retuner.getStats()).sort(),
+        ['oversizeGroups', 'searchAborts', 'solverDisabled', 'workMs']);
+    // Identity chart on the default target: the per-note fallback maps
+    // EADG onto BEADG's top four strings — same frets, string + 1 — so
+    // the degraded output is still exactly right here.
+    for (let i = 0; i < notes.length; i++) {
+        check('deadline valve: fallback output correct', { s: bundle.notes[i].s, f: bundle.notes[i].f },
+            { s: notes[i].s + 1, f: notes[i].f });
+    }
+}
+
+// ---- Anchor-donor refinement after revoicing (PLANNING #2) ------------
+// A revoiced donor (solve tier >= 2) can carry an octave-sized fret
+// adjustment; remapAnchors now prefers the first tier-0 donor within
+// ANCHOR_DONOR_WINDOW_S past the anchor, falling back to the revoiced
+// adjustment only when no exact donor is nearby.
+{
+    const { remapAnchors, ANCHOR_DONOR_WINDOW_S } = CR;
+    assert.ok(ANCHOR_DONOR_WINDOW_S > 0, 'donor window sane'); passed++;
+    const mk = (t, origF, newF, tier) => {
+        const n = { t, s: 0, f: newF, _origNote: { t, s: 0, f: origF } };
+        if (tier !== undefined) n._crTier = tier;
+        return n;
+    };
+    // Revoiced (+12) donor right at the anchor, tier-0 (-2) donor 1s later.
+    check('anchor donor: nearby tier-0 donor beats the revoiced one',
+        remapAnchors([{ time: 0.9, fret: 5, width: 4 }], [mk(1.0, 5, 17, 2), mk(2.0, 5, 3, 0)]),
+        [{ time: 0.9, fret: 3, width: 4 }]);
+    // Tier-0 donor beyond the window: the revoiced adjustment still wins
+    // (it is the only signal for that passage).
+    check('anchor donor: no tier-0 within the window -> revoiced fallback',
+        remapAnchors([{ time: 0.9, fret: 5, width: 4 }],
+            [mk(1.0, 5, 17, 2), mk(0.9 + ANCHOR_DONOR_WINDOW_S + 1, 5, 3, 0)]),
+        [{ time: 0.9, fret: 17, width: 4 }]);
+    // Untagged donors (direct API use) are trusted as tier 0 — the
+    // pre-refinement behavior, byte-identical.
+    check('anchor donor: untagged donors behave as before',
+        remapAnchors([{ time: 0.9, fret: 5, width: 4 }], [mk(1.0, 5, 17), mk(2.0, 5, 3)]),
+        [{ time: 0.9, fret: 17, width: 4 }]);
+}
+
+// End-to-end through createRetuner: a same-onset bucket whose low D1
+// drops under the exact remap (below EADG's range) gets revoiced
+// (tier 2) — its notes are tagged, and the anchor skips past them to
+// the exact (tier 0) single note that follows.
+{
+    const { createRetuner } = CR;
+    const eadg = DEFAULT_TARGET_MIDI_TUNING.slice(1); // E1 A1 D2 G2
+    const mkRaw = (singleT) => ({
+        // tuning [-3,-3,0,0]: s0 open C#1(25), s1 open F#1(30).
+        // Bucket t=0: (s0,f1)=D1(26) — below EADG, exact remap drops it ->
+        // solver revoices the pair; (s1,f1... ) see below.
+        notes: [
+            { t: 0, s: 0, f: 1 }, { t: 0, s: 1, f: 1 },
+            { t: singleT, s: 2, f: 4 }, // (s2,f4)=D2+4 — exact, tier 0, adjustment 0
+        ],
+        chords: [], anchors: [{ time: 0, fret: 1, width: 4 }], templates: [],
+        tuning: [-3, -3, 0, 0], capo: 0, sc: 4,
+    });
+
+    // Tier tags + the preferred-donor path (single note inside the window).
+    const near = createRetuner();
+    const nearRaw = mkRaw(0.6);
+    const nearBundle = mkBundle(nearRaw);
+    near.apply(nearBundle, eadg);
+    const bucketNotes = nearBundle.notes.filter(n => n.t === 0);
+    assert.ok(bucketNotes.length >= 1 && bucketNotes.every(n => n._crTier >= 2),
+        'revoiced bucket notes carry their solve tier'); passed++;
+    check('exact single note is tagged tier 0', nearBundle.notes.find(n => n.t === 0.6)._crTier, 0);
+    check('anchor takes the nearby tier-0 donor adjustment (0), not the revoiced one',
+        nearBundle.anchors, [{ time: 0, fret: 1, width: 4 }]);
+
+    // Same chart with the exact note pushed past the window: the anchor
+    // falls back to the first revoiced donor's own adjustment.
+    const far = createRetuner();
+    const farRaw = mkRaw(30);
+    const farBundle = mkBundle(farRaw);
+    far.apply(farBundle, eadg);
+    const donor = farBundle.notes[0]; // first (time-sorted) fretted note at t=0
+    const expected = Math.max(0, Math.min(20, 1 + donor.f - donor._origNote.f));
+    check('anchor falls back to the revoiced donor when no tier-0 is nearby',
+        farBundle.anchors, [{ time: 0, fret: expected, width: 4 }]);
+    assert.ok(expected !== 1, 'fallback case actually differs from the tier-0 adjustment'); passed++;
 }
 
 console.log(`OK - ${passed} assertions passed`);

@@ -48,6 +48,16 @@ import { DEFAULT_MAX_FRET } from './target-tuning.js';
 export const MAX_CHORD_SPAN = 3;
 export const MAX_FRETTING_FINGERS = 4;
 
+// Safety valve: max DFS nodes per solveChord call (shared across its
+// degradation-ladder rungs). Real chart chords need hundreds to a few
+// thousand nodes; the cap only bites on pathological data (a huge-span
+// many-pitch-class group on a wide target defeats branch-and-bound
+// pruning and can otherwise burn seconds on the render thread). On
+// exhaustion the search stops and returns the best voicing found so far
+// — possibly null, which callers treat as "solver gave up", NOT
+// "unsoundable" (createRetuner falls back to the per-note path).
+export const MAX_SEARCH_NODES = 20000;
+
 // Additive cost weights, lower = better. Starting points, tuned by the
 // test suite — the invariants that matter: playability is a hard
 // constraint (not a weight); the shape terms (EXACT_PITCH_MISS on every
@@ -291,10 +301,17 @@ export function scoreVoicing(spec, voicing) {
 // count (opts.maxNotes) — the solver never emits more notes than the
 // chart had, which keeps _origNote/scoring semantics sane downstream.
 // Returns { voicing: [{ s, f, midi, pc }], cost } or null.
+//
+// opts.budget (optional): a shared { nodes, aborted } object — each DFS
+// node decrements `nodes`; at 0 the search stops (keeping best-so-far)
+// and sets `aborted`. Pass the same object to successive searches (the
+// ladder rungs in solveChord) to bound a whole chord's work. Omitted ->
+// a fresh MAX_SEARCH_NODES budget per call.
 export function solveVoicingSearch(spec, requiredPcs, targetMidiTuning, opts, maxFret = DEFAULT_MAX_FRET) {
     const target = targetMidiTuning;
     if (!Array.isArray(target) || target.length === 0) return null;
     const nStr = target.length;
+    const budget = (opts && opts.budget) || { nodes: MAX_SEARCH_NODES, aborted: false };
     const maxNotes = Math.min((opts && opts.maxNotes) || spec.noteCount, nStr);
     if (maxNotes < requiredPcs.size) return null;
     // Clamped so the position loop below always has at least p=1 (a
@@ -314,6 +331,7 @@ export function solveVoicingSearch(spec, requiredPcs, targetMidiTuning, opts, ma
     let best = null;
     const chosen = [];
     for (const p of positions) {
+        if (budget.nodes <= 0) { budget.aborted = true; break; }
         // Per-string candidates at this position: mute (null), the open
         // string when its pc qualifies, and every window fret whose pc
         // qualifies. Window frets start at the position itself — fret 0
@@ -332,6 +350,7 @@ export function solveVoicingSearch(spec, requiredPcs, targetMidiTuning, opts, ma
             cands.push(list);
         }
         (function dfs(j, mask, partial) {
+            if (budget.nodes-- <= 0) { budget.aborted = true; return; }
             if (best && partial >= best.cost) return;
             if (j === nStr) {
                 if (mask !== fullMask || chosen.length === 0) return;
@@ -346,8 +365,8 @@ export function solveVoicingSearch(spec, requiredPcs, targetMidiTuning, opts, ma
             const missing = fullMask & ~mask;
             let missingCount = 0;
             for (let m = missing; m; m >>= 1) missingCount += m & 1;
-            const budget = Math.min(maxNotes - chosen.length, nStr - j);
-            if (missingCount > budget) return;
+            const noteBudget = Math.min(maxNotes - chosen.length, nStr - j);
+            if (missingCount > noteBudget) return;
             for (const c of cands[j]) {
                 if (c === null) { dfs(j + 1, mask, partial); continue; }
                 if (chosen.length >= maxNotes) continue;
@@ -411,7 +430,13 @@ export function matchVoicingToSource(voicing, spec) {
 // { placements: [{ srcIndex, s, f }], tier: 0|2|3, rung } or null (drop
 // the chord). `maxFret` is the active tuning profile's own ceiling
 // (defaults to DEFAULT_MAX_FRET, the historical hardcoded 20).
-export function solveChord(spec, targetMidiTuning, exactCandidate, maxFret = DEFAULT_MAX_FRET) {
+//
+// opts.budget (optional): one { nodes, aborted } object shared by every
+// ladder rung's search, so a pathological chord is bounded as a WHOLE
+// (see MAX_SEARCH_NODES). The caller reads `aborted` afterwards to tell
+// "gave up" (fall back to the per-note path) from a genuine "nothing
+// soundable" null.
+export function solveChord(spec, targetMidiTuning, exactCandidate, maxFret = DEFAULT_MAX_FRET, opts) {
     if (!spec || spec.notes.length === 0) return null;
     if (Array.isArray(exactCandidate) && exactCandidate.length === spec.notes.length) {
         const byIdx = new Map(spec.notes.map(n => [n.idx, n]));
@@ -425,10 +450,12 @@ export function solveChord(spec, targetMidiTuning, exactCandidate, maxFret = DEF
         }
     }
     const W = SOLVER_WEIGHTS;
+    const budget = (opts && opts.budget) || { nodes: MAX_SEARCH_NODES, aborted: false };
     const rungs = degradationLadder(spec);
     let best = null;
     for (let r = 0; r < rungs.length; r++) {
-        const found = solveVoicingSearch(spec, rungs[r], targetMidiTuning, { maxNotes: spec.noteCount }, maxFret);
+        if (budget.nodes <= 0) { budget.aborted = true; break; }
+        const found = solveVoicingSearch(spec, rungs[r], targetMidiTuning, { maxNotes: spec.noteCount, budget }, maxFret);
         if (found) {
             const total = found.cost + r * W.DEGRADE_RUNG;
             if (!best || total < best.total) {

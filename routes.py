@@ -22,11 +22,25 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.datastructures import UploadFile
+from starlette.formparsers import MultiPartException
 
 PLUGIN_ID = "chart_retuner"
 ALLOWED_VIDEO_EXTS = {"mp4", "webm"}
 ALLOWED_VIDEO_MIMES = {"video/mp4", "video/webm"}
 MAX_VIDEO_BYTES = 50 * 1024 * 1024  # 50 MB raw
+# The multipart envelope contains the file headers, field name, and boundary.
+# Keep that allowance small and explicit: it is only for the request-level
+# guard, while _do_upload still enforces MAX_VIDEO_BYTES on the raw file.
+MAX_MULTIPART_OVERHEAD_BYTES = 64 * 1024
+MAX_REQUEST_BYTES = MAX_VIDEO_BYTES + MAX_MULTIPART_OVERHEAD_BYTES
+_UPLOAD_BODY_TOO_LARGE_DETAIL = "Upload request body exceeds the size limit."
+
+
+class _UploadBodyTooLarge(MultiPartException):
+    """Abort multipart parsing after the bounded ASGI body cap is crossed."""
+
+    def __init__(self):
+        super().__init__(_UPLOAD_BODY_TOO_LARGE_DETAIL)
 
 # Filenames the GET endpoint accepts. Tightened to the exact slot
 # pattern this plugin produces — anything else (leftover upload-*.part
@@ -61,9 +75,9 @@ def setup(app: FastAPI, context: dict) -> None:
         # upload is too large, we return 413 immediately — python-multipart
         # never buffers a byte to disk.
         #
-        # Clients that omit or forge Content-Length fall through to the
-        # streaming chunk-count cap in _do_upload, which remains as a
-        # defence-in-depth fallback.
+        # Clients that omit or forge Content-Length are handled by the
+        # bounded receive wrapper below, before request.form() can let
+        # python-multipart spool an unbounded file part to disk.
         cl = request.headers.get("content-length")
         if cl is not None:
             try:
@@ -72,14 +86,52 @@ def setup(app: FastAPI, context: dict) -> None:
                 raise HTTPException(400, "Invalid Content-Length header.")
             if cl_int < 0:
                 raise HTTPException(400, "Invalid Content-Length header.")
-            if cl_int > MAX_VIDEO_BYTES:
+            if cl_int > MAX_REQUEST_BYTES:
                 raise HTTPException(
                     413,
                     f"Upload exceeds {MAX_VIDEO_BYTES // (1024 * 1024)} MB limit.",
                 )
 
-        # Body is only consumed here, after the Content-Length pre-check.
-        form = await request.form()
+        # Starlette's multipart parser may spool file parts to a temporary
+        # file before returning from request.form(). A Content-Length check
+        # alone is bypassable with chunked or forged requests, so cap the
+        # ASGI receive stream as well. Raising MultiPartException lets the
+        # parser close any partial SpooledTemporaryFile before the route
+        # converts the parser's 400 into the intended 413.
+        original_receive = request._receive
+        request_bytes = 0
+
+        async def receive_bounded():
+            nonlocal request_bytes
+            message = await original_receive()
+            if message.get("type") == "http.request":
+                body = message.get("body") or b""
+                request_bytes += len(body)
+                if request_bytes > MAX_REQUEST_BYTES:
+                    raise _UploadBodyTooLarge()
+            return message
+
+        request._receive = receive_bounded
+        try:
+            try:
+                form = await request.form()
+            except _UploadBodyTooLarge as exc:
+                raise HTTPException(
+                    413,
+                    f"Upload exceeds {MAX_VIDEO_BYTES // (1024 * 1024)} MB limit.",
+                ) from None
+            except HTTPException as exc:
+                # Request._get_form converts MultiPartException to HTTP 400
+                # when running under FastAPI. Preserve normal malformed-form
+                # errors, but translate only our sentinel exception.
+                if exc.status_code == 400 and exc.detail == _UPLOAD_BODY_TOO_LARGE_DETAIL:
+                    raise HTTPException(
+                        413,
+                        f"Upload exceeds {MAX_VIDEO_BYTES // (1024 * 1024)} MB limit.",
+                    ) from exc
+                raise
+        finally:
+            request._receive = original_receive
         try:
             file = form.get("file")
             if not isinstance(file, UploadFile):
