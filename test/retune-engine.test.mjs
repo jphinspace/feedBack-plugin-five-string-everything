@@ -1081,6 +1081,18 @@ function mkBundle(raw) {
     check('default node budget: no aborts on the same chart', uncapped.getStats().searchAborts, 0);
     assert.ok(uncappedBundle.notes.length >= cappedBundle.notes.length,
         'unbounded solve places at least as many notes'); passed++;
+
+    // maxSearchNodes: 0 is a valid, explicit "never search" configuration
+    // (immediate abort -> per-note fallback for every group) — it must
+    // not be treated as "unset" and silently fall back to the default
+    // budget (a `|| MAX_SEARCH_NODES` on the node count would do exactly
+    // that, since 0 is falsy).
+    const zeroBudget = createRetuner({ maxSearchNodes: 0 });
+    const zeroBundle = mkBundle(raw);
+    zeroBudget.apply(zeroBundle, eadg);
+    check('maxSearchNodes: 0 aborts immediately (not treated as unset)', zeroBudget.getStats().searchAborts, 1);
+    check('maxSearchNodes: 0 still degrades via the per-note fallback, matching a tiny explicit budget',
+        zeroBundle.notes, cappedBundle.notes);
 }
 
 // Oversized simultaneous-note groups (data corruption, e.g. a broken GP

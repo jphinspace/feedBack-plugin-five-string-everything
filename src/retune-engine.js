@@ -345,7 +345,8 @@ function _solveGroup(cache, sourceOpenMidiByString, naturalTargetByString, notes
             if (oversize && jobCtl) jobCtl.stats.oversizeGroups += 1;
             solved = _collisionPlacements(sourceOpenMidiByString, naturalTargetByString, notes, targetMidiTuning, maxFret);
         } else {
-            const budget = { nodes: (jobCtl && jobCtl.maxSearchNodes) || MAX_SEARCH_NODES, aborted: false };
+            const nodeCap = jobCtl && jobCtl.maxSearchNodes != null ? jobCtl.maxSearchNodes : MAX_SEARCH_NODES;
+            const budget = { nodes: nodeCap, aborted: false };
             const exact = _exactCandidateFor(sourceOpenMidiByString, naturalTargetByString, notes, targetMidiTuning, maxFret);
             solved = solveChord(spec, targetMidiTuning, exact, maxFret, { budget });
             if (budget.aborted) {

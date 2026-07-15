@@ -115,11 +115,11 @@ def setup(app: FastAPI, context: dict) -> None:
         try:
             try:
                 form = await request.form()
-            except _UploadBodyTooLarge:
+            except _UploadBodyTooLarge as exc:
                 raise HTTPException(
                     413,
                     f"Upload exceeds {MAX_VIDEO_BYTES // (1024 * 1024)} MB limit.",
-                )
+                ) from None
             except HTTPException as exc:
                 # Request._get_form converts MultiPartException to HTTP 400
                 # when running under FastAPI. Preserve normal malformed-form
@@ -128,7 +128,7 @@ def setup(app: FastAPI, context: dict) -> None:
                     raise HTTPException(
                         413,
                         f"Upload exceeds {MAX_VIDEO_BYTES // (1024 * 1024)} MB limit.",
-                    )
+                    ) from exc
                 raise
         finally:
             request._receive = original_receive
