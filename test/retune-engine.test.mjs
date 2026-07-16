@@ -540,6 +540,103 @@ const SPOT_FRETS = [0, 10, 20];
     check('createRetuner: switching maxFret back down re-invalidates the cache and re-drops the note', bundle.notes.length, 0);
 }
 
+// displayFretOffset: physical-fret display shift (capo marker follow-up).
+// The remap stays capo-relative internally; the offset relabels FRETTED
+// outputs (notes, slide endpoints, chord notes, template frets, anchors)
+// to physical frets while opens stay 0. Invariant exercised throughout:
+// remapping a same-tuning source against its own capo-shifted pitches
+// (effective = open + capo, ceiling = maxFret − capo, offset = capo)
+// must return every playable note at its ORIGINAL physical fret.
+{
+    const { createRetuner } = CR;
+    const capo = 3;
+    // sc=1 source open is 40 (same base the maxFret block above relies on).
+    const effective = [40 + capo];
+    const relCeiling = 20 - capo;
+
+    const retuner = createRetuner();
+    const rawNotes = [
+        { t: 0, s: 0, f: 5 },        // sounds 45 → relative 2 → physical 5
+        { t: 1, s: 0, f: capo },     // sounds at the capo → relative 0: OPEN, stays 0
+        { t: 2, s: 0, f: 2 },        // sounds below the capo → unplayable, drops
+        { t: 3, s: 0, f: 7, sl: 9 }, // slide: both endpoints back to physical
+    ];
+    const rawAnchors = [{ time: 0, fret: 5, width: 4 }];
+    const bundle = {
+        notes: rawNotes, chords: [], anchors: rawAnchors, chordTemplates: [],
+        tuning: [0], capo: 0, stringCount: 1,
+    };
+    retuner.apply(bundle, effective, relCeiling, capo);
+    check('displayFretOffset: fretted note comes back at its physical fret',
+        bundle.notes.map(n => n.f), [5, 0, 7]);
+    check('displayFretOffset: the below-capo note drops (physical frets start above the capo)',
+        bundle.notes.some(n => n._origNote.f === 2), false);
+    check('displayFretOffset: slide endpoint shifts with its note',
+        bundle.notes[2].sl, 9);
+    check('displayFretOffset: anchors shift to the physical zone',
+        bundle.anchors, [{ time: 0, fret: 5, width: 4 }]);
+    assert.notStrictEqual(bundle.anchors[0], rawAnchors[0],
+        'shifted anchors must be fresh objects — the raw chart anchor must never be mutated'); passed++;
+    check('displayFretOffset: raw anchor object is untouched',
+        rawAnchors[0], { time: 0, fret: 5, width: 4 });
+
+    // Cache invalidation: offset folds into targetSig — dropping it back
+    // to 0 with everything else identical must re-derive capo-RELATIVE
+    // frets from raw, then restoring it re-derives physical again.
+    bundle.notes = rawNotes; bundle.anchors = rawAnchors;
+    retuner.apply(bundle, effective, relCeiling, 0);
+    check('displayFretOffset: offset change re-invalidates the cache (relative frets again)',
+        bundle.notes.map(n => n.f), [2, 0, 4]);
+    bundle.notes = rawNotes; bundle.anchors = rawAnchors;
+    retuner.apply(bundle, effective, relCeiling, capo);
+    check('displayFretOffset: restoring the offset re-derives physical frets',
+        bundle.notes.map(n => n.f), [5, 0, 7]);
+
+    // Bogus offsets sanitize to 0 rather than shifting by garbage.
+    bundle.notes = rawNotes; bundle.anchors = rawAnchors;
+    retuner.apply(bundle, effective, relCeiling, 2.5);
+    check('displayFretOffset: a non-integer offset is ignored',
+        bundle.notes.map(n => n.f), [2, 0, 4]);
+}
+
+// displayFretOffset across chords and templates: template frets shift
+// where > 0 (-1 unused and 0 open preserved), fingers untouched, and
+// chord instances follow their template's solved voicing into the same
+// physical frets.
+{
+    const { createRetuner } = CR;
+    const capo = 3;
+    // sc=2 source opens are [40, 45]; capo'd effective target below.
+    const effective = [43, 48];
+    const relCeiling = 20 - capo;
+
+    const retuner = createRetuner();
+    const rawTemplates = [
+        { name: 'X', frets: [5, 7], fingers: [1, 3] },   // → relative [2, 4]
+        { name: 'Open-ish', frets: [3, -1], fingers: [0, -1] }, // string 0 AT the capo → open
+    ];
+    const rawChords = [{ t: 0, id: 0, notes: [{ s: 0, f: 5 }, { s: 1, f: 7 }] }];
+    const rawNotes = [];
+    const bundle = {
+        notes: rawNotes, chords: rawChords, anchors: [], chordTemplates: rawTemplates,
+        tuning: [0, 0], capo: 0, stringCount: 2,
+    };
+    retuner.apply(bundle, effective, relCeiling, capo);
+    check('displayFretOffset: template frets come back physical',
+        bundle.chordTemplates[0].frets, [5, 7]);
+    // Fingers are whatever the RELATIVE solve produced (for this adjusted
+    // remap the engine re-derives them: [1, 2]) — the display shift must
+    // never rewrite them, only the frets.
+    check('displayFretOffset: template fingers are untouched by the shift',
+        bundle.chordTemplates[0].fingers, [1, 2]);
+    check('displayFretOffset: an at-the-capo template note stays open (0), unused stays -1',
+        bundle.chordTemplates[1].frets, [0, -1]);
+    check('displayFretOffset: chord instance notes land on the template\'s physical frets',
+        bundle.chords[0].notes.map(n => ({ s: n.s, f: n.f })), [{ s: 0, f: 5 }, { s: 1, f: 7 }]);
+    check('displayFretOffset: raw template object is untouched',
+        rawTemplates[0].frets, [5, 7]);
+}
+
 // Duplicate note+octave across strings is allowed — no uniqueness
 // constraint anywhere in the engine.
 {

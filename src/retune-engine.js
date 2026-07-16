@@ -361,11 +361,13 @@ function _solveGroup(cache, sourceOpenMidiByString, naturalTargetByString, notes
 
 // Remaps bundle.notes/.chords/.anchors/.chordTemplates to the active
 // target tuning in place, cached per song/tuning. Returns a fresh
-// { apply(bundle, targetMidiTuning, maxFret), getStats() } per call so
-// each splitscreen panel gets its own cache. `maxFret` is the active
-// tuning profile's own ceiling (CR.resolveActiveTuning's maxFret) —
-// defaults to DEFAULT_MAX_FRET (the historical hardcoded 20) when
-// omitted.
+// { apply(bundle, targetMidiTuning, maxFret, displayFretOffset),
+// getStats() } per call so each splitscreen panel gets its own cache.
+// `maxFret` is the active tuning profile's own ceiling
+// (CR.resolveActiveTuning's maxFret) — defaults to DEFAULT_MAX_FRET
+// (the historical hardcoded 20) when omitted. `displayFretOffset`
+// (default 0) is the target capo for physical-fret display — see the
+// shift block at the end of _remap.
 //
 // opts (all optional, defaults are the exported valve constants):
 //   maxTotalSolveMs — cold-remap deadline (MAX_TOTAL_SOLVE_MS).
@@ -386,7 +388,7 @@ export function createRetuner(opts) {
     // units (one template / one same-onset note bucket / one chord) and
     // flips the remaining groups onto the per-note path once the
     // deadline passes — see MAX_TOTAL_SOLVE_MS above.
-    function _remap(rawNotes, rawChords, rawAnchors, rawTemplates, tuning, capo, sc, target, maxFret) {
+    function _remap(rawNotes, rawChords, rawAnchors, rawTemplates, tuning, capo, sc, target, maxFret, displayFretOffset) {
         const t0 = _now();
         const ctl = { solverDisabled: false, maxSearchNodes, stats };
         const checkDeadline = () => {
@@ -580,18 +582,64 @@ export function createRetuner(opts) {
         remappedChords = newChords;
         remappedAnchors = remapAnchors(rawAnchors, newNotes, maxFret);
         remappedTemplates = newTemplates;
+
+        // Physical-fret display shift (target capo). The remap above is
+        // capo-RELATIVE: it matches sounding pitches against the
+        // capo-shifted open pitches, so fret r means "r above the capo".
+        // A renderer that numbers its board physically (capo 6 + relative
+        // fret 1 = you're playing fret 7) passes the target capo as
+        // displayFretOffset and every FRETTED output fret becomes
+        // physical: r + capo. This is pure relabeling, not remapping —
+        // base + physical == (base + capo) + relative, so the sounding
+        // pitch math is untouched.
+        //
+        // Opens (fret 0) deliberately stay 0: with a capo they are held
+        // by the bar, not fingered, and renderers key open-note treatment
+        // (wide lane bars, camera exclusion) on f === 0. Slide endpoints
+        // shift under the same rule. Anchors are hand POSITIONS, not
+        // opens — they always shift (rebuilt as fresh objects: on the
+        // no-donor path remapAnchors returns the RAW chart anchor objects,
+        // which must never be mutated). Template frets shift where > 0
+        // (-1 unused / 0 open preserved); fingers are untouched (0 =
+        // "no finger" still holds under a capo).
+        if (displayFretOffset > 0) {
+            const off = displayFretOffset;
+            const shiftNote = (n) => {
+                if (n.f > 0) n.f += off;
+                if (Number.isInteger(n.sl) && n.sl > 0) n.sl += off;
+                if (Number.isInteger(n.slu) && n.slu > 0) n.slu += off;
+            };
+            for (const n of remappedNotes) shiftNote(n);
+            for (const ch of remappedChords) {
+                for (const n of ch.notes) shiftNote(n);
+            }
+            remappedAnchors = remappedAnchors.map(
+                a => ({ time: a.time, fret: a.fret + off, width: a.width }));
+            remappedTemplates = Array.isArray(remappedTemplates)
+                ? remappedTemplates.map(t => (t && Array.isArray(t.frets))
+                    ? Object.assign({}, t, { frets: t.frets.map(f => (f > 0 ? f + off : f)) })
+                    : t)
+                : remappedTemplates;
+        }
         stats.workMs = _now() - t0;
     }
 
-    function apply(bundle, targetMidiTuning, maxFret = DEFAULT_MAX_FRET) {
+    function apply(bundle, targetMidiTuning, maxFret = DEFAULT_MAX_FRET, displayFretOffset = 0) {
         const target = (Array.isArray(targetMidiTuning) && targetMidiTuning.length >= 1)
             ? targetMidiTuning : DEFAULT_TARGET_MIDI_TUNING;
         const rawNotes = bundle.notes, rawChords = bundle.chords, rawAnchors = bundle.anchors;
         const rawTemplates = bundle.chordTemplates;
         const tuning = bundle.tuning, capo = bundle.capo | 0, sc = bundle.stringCount;
+        // Physical-fret display shift (see _remap's tail) — sanitized here
+        // so a bogus caller value can neither shift by a fraction nor skew
+        // the cache signature.
+        const off = (Number.isInteger(displayFretOffset) && displayFretOffset > 0)
+            ? displayFretOffset : 0;
         // '@' + maxFret: two profiles sharing the same strings but a
         // different max fret must NOT cache-hit each other's remap.
-        const targetSig = target.join(',') + '@' + maxFret;
+        // '+' + off: same rule for the display shift — a capo-only change
+        // must re-derive from raw (frets move by the capo delta).
+        const targetSig = target.join(',') + '@' + maxFret + '+' + off;
         const cacheHit = rawNotes === cacheNotesRef && rawChords === cacheChordsRef
             && rawAnchors === cacheAnchorsRef && rawTemplates === cacheTemplatesRef
             && tuning === cacheTuningRef && capo === cacheCapo && sc === cacheStringCount
@@ -618,7 +666,7 @@ export function createRetuner(opts) {
                 remappedAnchors = Array.isArray(rawAnchors) ? rawAnchors : [];
                 remappedTemplates = Array.isArray(rawTemplates) ? rawTemplates : [];
             } else {
-                _remap(rawNotes, rawChords, rawAnchors, rawTemplates, tuning, capo, sc, target, maxFret);
+                _remap(rawNotes, rawChords, rawAnchors, rawTemplates, tuning, capo, sc, target, maxFret, off);
             }
         }
 
