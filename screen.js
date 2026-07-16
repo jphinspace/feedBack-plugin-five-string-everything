@@ -4642,20 +4642,18 @@ import { CR } from './src/chart-retune.js';
         // _crRemapMidiTuning plus the capo-shortened neck
         // (CR.effectiveMaxFret) instead of the raw profile values.
         // _activeTargetTuning stays the RAW tuning — its midiTuning drives
-        // string count / geometry, and its labels are only re-spelled for
-        // a capo (the sounding pitch at the capo, which the highway's
-        // fret 0 now represents), never for an octave shift (the octave
-        // moves the CHART, not the instrument's strings — and the labels
-        // are octave-less pitch classes anyway).
+        // string count / geometry, and its labels stay the raw open-string
+        // pitch classes. With PHYSICAL-fret display (the retuner's
+        // displayFretOffset — see the apply() patch point) the nut is the
+        // instrument's real nut, so re-spelling its labels to the
+        // sounding-at-capo pitches (the pre-physical-display v0.4.0
+        // behavior) would mislabel it; the capo bar's own "CAPO n" tag
+        // carries the transposition. Octave never re-spells either (it
+        // moves the CHART, not the strings — and the labels are
+        // octave-less pitch classes anyway).
         let _crCapo = 0;
         let _crOctave = 0;
         let _crRemapMidiTuning = _activeTargetTuning.midiTuning;
-        function _crApplyCapoLabels() {
-            if (_crCapo > 0) {
-                _activeTargetTuning.labels = _activeTargetTuning.midiTuning.map(
-                    m => CR.midiToPitchClassLabel(m + _crCapo));
-            }
-        }
         function _crRefreshEffectiveTuning() {
             _crRemapMidiTuning = (_crCapo === 0 && _crOctave === 0)
                 ? _activeTargetTuning.midiTuning
@@ -4707,7 +4705,6 @@ import { CR } from './src/chart-retune.js';
             _crMaxFret = activeTuning.maxFret;
             _crCapo = activeTuning.capo;
             _crOctave = activeTuning.octaveOffset;
-            _crApplyCapoLabels();
             _crRefreshEffectiveTuning();
         }
         // Fret digits on the board ghost (hollow preview at Z=0), not on
@@ -8726,16 +8723,17 @@ import { CR } from './src/chart-retune.js';
             // effective max fret on the very next draw() call.
             const adjSig = activeTuning.capo + '/' + activeTuning.octaveOffset;
             if (tuningSig !== _crTuningSig || adjSig !== _crAdjSig) {
-                // Nut labels only depend on strings + capo, not octave —
-                // dispose the sprite pool just for those (mirrors the
-                // tuningLabelsVisible listener case below; the cheap-key
-                // fast path in _syncOpenStringPitchLabels doesn't itself
-                // notice a tuning change, only a disposed pool does).
-                const labelsChanged = tuningSig !== _crTuningSig || activeTuning.capo !== _crCapo;
+                // Nut labels only depend on strings (raw open pitches —
+                // capo no longer re-spells them under physical-fret
+                // display) — dispose the sprite pool just for those
+                // (mirrors the tuningLabelsVisible listener case below;
+                // the cheap-key fast path in _syncOpenStringPitchLabels
+                // doesn't itself notice a tuning change, only a disposed
+                // pool does).
+                const labelsChanged = tuningSig !== _crTuningSig;
                 _activeTargetTuning = CR.resolveTargetTuning(tuningStrings);
                 _crCapo = activeTuning.capo;
                 _crOctave = activeTuning.octaveOffset;
-                _crApplyCapoLabels();
                 _crRefreshEffectiveTuning();
                 // Capo bar tracks the live capo value (no-ops pre-initScene;
                 // buildBoard()'s own end-of-build call covers the first paint).
@@ -9685,14 +9683,17 @@ import { CR } from './src/chart-retune.js';
         }
 
         /* ── PATCH POINT (capo marker) ──────────────────────────────────────
-         * Translucent capo bar clamped across the strings at displayed
-         * fret 0. The retuner maps notes against the capo-shifted open
+         * Translucent capo bar clamped across the strings at the PHYSICAL
+         * capo fret. The retuner maps notes against the capo-shifted open
          * pitches (CR.effectiveTargetMidiTuning) and the capo-shortened
-         * neck (CR.effectiveMaxFret), so the highway's fret 0 IS the capo —
-         * the bar sits at the nut / fret-0 line regardless of the capo
-         * value, and the physical fret is conveyed by the "CAPO n" tag
-         * (the nut's open-string labels are already re-spelled to the
-         * capo'd pitches by _crApplyCapoLabels).
+         * neck (CR.effectiveMaxFret), and draw() passes _crCapo as the
+         * engine's displayFretOffset so every fretted output fret is
+         * physical (capo 6 + relative 1 → lane 7). The bar therefore sits
+         * just nut-side of fret wire `_crCapo` — where a real capo clamps
+         * — with gems only ever arriving in lanes above it; opens stay
+         * f=0 (held by the bar, not fingered). The nut keeps the RAW
+         * open-string labels; the "CAPO n" tag on the bar carries the
+         * transposition.
          *
          * Lifecycle: rebuilt when the capo value changes (adjSig branch in
          * _bgLoadSettings) or when buildBoard() has cleared fretG (string
@@ -9735,9 +9736,12 @@ import { CR } from './src/chart-retune.js';
             // Slightly taller than the nut (spanY * 1.06 there) so the bar
             // reads as clamping over the strings, not tucked behind them.
             const capoH = yTopC - yBottomC + S_GAP * 1.1;
-            // Just on the playing side of the fret-0 wire (x=0); the nut
-            // body ends at ~x=0, so the bar never overlaps it.
-            const capoX = 0.55 * K * mir;
+            // Just nut-side of fret wire `_crCapo`, like a real capo. The
+            // inset is capped to a fraction of the fret column's own width
+            // so log spacing can't push the bar into the previous lane
+            // up the neck.
+            const nutSideOff = Math.min(0.55 * K, fretColumnWorldW(_crCapo) * 0.38);
+            const capoX = xFret(_crCapo) - nutSideOff * mir;
 
             _crCapoG = new T.Group();
             // One layer above BOARD_FRET_WIRE so the bar paints over the
@@ -16181,7 +16185,13 @@ import { CR } from './src/chart-retune.js';
                 // v0.4.0): the engine matches against the capo/octave-
                 // adjusted open pitches and the capo-shortened neck; the
                 // raw _activeTargetTuning still drives geometry/labels.
-                _crRetuner.apply(bundle, _crRemapMidiTuning, CR.effectiveMaxFret(_crMaxFret, _crCapo));
+                // PATCH POINT (capo marker): _crCapo as displayFretOffset
+                // makes the engine emit PHYSICAL frets (capo 6 + relative
+                // fret 1 → lane/label 7), so gems, anchors (camera + lane
+                // highlight), fret digits, and chord diagrams all land on
+                // the real neck position; opens stay f=0 (held by the
+                // capo, not fingered — keeps the wide open-bar rendering).
+                _crRetuner.apply(bundle, _crRemapMidiTuning, CR.effectiveMaxFret(_crMaxFret, _crCapo), _crCapo);
                 if (!_chartPrewarmed) {
                     _chartPrewarmed = true;
                     _prewarmChart(bundle);
