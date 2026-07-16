@@ -4670,6 +4670,14 @@ import { CR } from './src/chart-retune.js';
         // never strings/colors, so an adjust-only change must not force
         // the palette-recompute branch tuningSig gates.
         let _crAdjSig = '0/0';
+        // PATCH POINT (capo marker): translucent capo bar on the board at
+        // displayed fret 0 — see _syncCapoMarker() (defined after
+        // buildBoard(), where the board geometry helpers live).
+        let _crCapoG = null;       // T.Group child of fretG; null when capo is 0 / not built
+        let _crCapoLblMat = null;  // cloned sprite material — buildBoard()'s clear
+                                   // loop skips Sprites, so it's disposed explicitly
+                                   // (same contract as _inlayMats / _tuningLabelMats)
+        let _crCapoMarkerSig = ''; // capo value the current marker was built for
         // PATCH POINT (guitar profiles): this panel's arrangement class
         // ('bass' | 'rhythm' | 'lead'), selecting WHICH of the three
         // global tuning profiles _bgLoadSettings resolves. Per-panel state
@@ -8729,6 +8737,9 @@ import { CR } from './src/chart-retune.js';
                 _crOctave = activeTuning.octaveOffset;
                 _crApplyCapoLabels();
                 _crRefreshEffectiveTuning();
+                // Capo bar tracks the live capo value (no-ops pre-initScene;
+                // buildBoard()'s own end-of-build call covers the first paint).
+                _syncCapoMarker();
                 _crTuningSig = tuningSig;
                 _crAdjSig = adjSig;
                 if (labelsChanged) {
@@ -9666,6 +9677,124 @@ import { CR } from './src/chart-retune.js';
                 _inlayLabels.push(lbl);
                 _inlayMats.push(mat);
             }
+
+            // PATCH POINT (capo marker): the clear loop above stripped and
+            // disposed the previous marker's meshes along with everything
+            // else in fretG — rebuild against the fresh board geometry.
+            _syncCapoMarker();
+        }
+
+        /* ── PATCH POINT (capo marker) ──────────────────────────────────────
+         * Translucent capo bar clamped across the strings at displayed
+         * fret 0. The retuner maps notes against the capo-shifted open
+         * pitches (CR.effectiveTargetMidiTuning) and the capo-shortened
+         * neck (CR.effectiveMaxFret), so the highway's fret 0 IS the capo —
+         * the bar sits at the nut / fret-0 line regardless of the capo
+         * value, and the physical fret is conveyed by the "CAPO n" tag
+         * (the nut's open-string labels are already re-spelled to the
+         * capo'd pitches by _crApplyCapoLabels).
+         *
+         * Lifecycle: rebuilt when the capo value changes (adjSig branch in
+         * _bgLoadSettings) or when buildBoard() has cleared fretG (string
+         * count / lefty / invert / theme rebuilds — detected via the
+         * parent check, since the clear loop already disposed the group's
+         * mesh geometries/materials). The label sprite's cloned material
+         * is disposed explicitly here because both the clear loop and this
+         * teardown's traverse skip Sprites — same contract as _inlayMats /
+         * _tuningLabelMats. destroy()'s scene.traverse pass (no Sprite
+         * skip) handles the final teardown; it just nulls the refs.
+         */
+        function _syncCapoMarker() {
+            if (!fretG || !T) return;
+            const sig = String(_crCapo);
+            const stale = !!(_crCapoG && _crCapoG.parent !== fretG);
+            if (_crCapoG && !stale && _crCapoMarkerSig === sig) return;
+            if (_crCapoG) {
+                if (!stale) {
+                    fretG.remove(_crCapoG);
+                    _crCapoG.traverse((o) => {
+                        if (o instanceof T.Sprite) return;
+                        // capGeo is shared by both end caps — dispose is
+                        // idempotent, so the double visit is harmless.
+                        o.geometry?.dispose?.();
+                        const m = o.material;
+                        if (m) (Array.isArray(m) ? m : [m]).forEach((x) => x?.dispose?.());
+                    });
+                }
+                _crCapoLblMat?.dispose?.();
+                _crCapoLblMat = null;
+                _crCapoG = null;
+            }
+            _crCapoMarkerSig = sig;
+            if (!(_crCapo > 0)) return;
+
+            const mir = _leftyCached ? -1 : 1;
+            const yTopC = Math.max(sY(0), sY(nStr - 1));
+            const yBottomC = Math.min(sY(0), sY(nStr - 1));
+            const yMidC = (yTopC + yBottomC) / 2;
+            // Slightly taller than the nut (spanY * 1.06 there) so the bar
+            // reads as clamping over the strings, not tucked behind them.
+            const capoH = yTopC - yBottomC + S_GAP * 1.1;
+            // Just on the playing side of the fret-0 wire (x=0); the nut
+            // body ends at ~x=0, so the bar never overlaps it.
+            const capoX = 0.55 * K * mir;
+
+            _crCapoG = new T.Group();
+            // One layer above BOARD_FRET_WIRE so the bar paints over the
+            // wires and string boxes it crosses; depthTest:false +
+            // depthWrite:false for the same transparent-overlay reasons as
+            // the fret wires (see the buildBoard fret-wire comment).
+            const roBar = renderOrderForLayerAtZ(0, 'NOTE_FRET_LABEL');
+            // Gunmetal, deliberately darker than the (near-white default)
+            // nut it sits beside — at player-camera distance the two are
+            // nearly edge-on, and a light bar would read as a thicker nut.
+            const barMat = new T.MeshStandardMaterial({
+                color: 0x5a6272, roughness: 0.32, metalness: 0.25,
+                emissive: 0x14161c, transparent: true, opacity: 0.55,
+                depthTest: false, depthWrite: false,
+            });
+            const bar = new T.Mesh(new T.BoxGeometry(0.92 * K, capoH, 1.25 * K), barMat);
+            bar.position.set(capoX, yMidC, 0.1 * K);
+            bar.renderOrder = roBar;
+            _crCapoG.add(bar);
+
+            // Rounded end caps (the rollers a trigger capo clamps with) —
+            // shared geometry, same material as the bar.
+            const capGeo = new T.CylinderGeometry(0.55 * K, 0.55 * K, 1.3 * K, 16);
+            for (const yEnd of [yMidC - capoH * 0.5, yMidC + capoH * 0.5]) {
+                const cap = new T.Mesh(capGeo, barMat);
+                cap.rotation.x = Math.PI / 2; // axis along Z, matching the bar depth
+                cap.position.set(capoX, yEnd, 0.1 * K);
+                cap.renderOrder = roBar;
+                _crCapoG.add(cap);
+            }
+
+            // Specular ridge along the camera-facing face — sells the
+            // machined-metal look without a real envMap.
+            const stripMat = new T.MeshBasicMaterial({
+                color: 0xe9edf5, transparent: true, opacity: 0.5,
+                depthTest: false, depthWrite: false,
+            });
+            const strip = new T.Mesh(new T.BoxGeometry(0.26 * K, capoH * 0.96, 0.1 * K), stripMat);
+            strip.position.set(capoX - 0.18 * K * mir, yMidC, 0.72 * K);
+            strip.renderOrder = roBar + 0.0001;
+            _crCapoG.add(strip);
+
+            // "CAPO n" tag above the top string — n is the PHYSICAL capo
+            // fret (the one number this renumbered neck can't show
+            // anywhere else). Wide 'section'-style texture (4:1 canvas),
+            // so the sprite scale keeps that aspect.
+            _crCapoLblMat = txtMat('CAPO ' + _crCapo, '#cfd6e4', true, 'section').clone();
+            _crCapoLblMat.depthWrite = false;
+            _crCapoLblMat.opacity = 0.9;
+            const lblScale = 0.5 + textSize;
+            const capoLbl = new T.Sprite(_crCapoLblMat);
+            capoLbl.scale.set(15 * K * lblScale, 3.75 * K * lblScale, 1);
+            capoLbl.position.set(capoX, yTopC + S_GAP * 1.7, 0.4 * K);
+            capoLbl.renderOrder = 1000; // match the fret-row labels' pin above notes
+            _crCapoG.add(capoLbl);
+
+            fretG.add(_crCapoG);
         }
 
         /* ── String glow (called each frame) ────────────────────────────── */
@@ -15818,6 +15947,10 @@ import { CR } from './src/chart-retune.js';
             ambLight = dirLight = null;
             mStr = []; mGlow = []; mSus = []; mStrHitOutline = []; mAccentOutline = []; mAccentCore = []; mAccentHaloNear = []; mAccentHaloMid = []; mAccentHaloFar = []; _accentShellsByString = []; mWhiteOutline = mSusOutline = null; mMissOutline = null; mHitSusOutline = null; stringLines = []; stringLineGlows = []; _boardPlaneMat = null; fretWireMats = []; fretTubeGeo?.dispose?.(); fretTubeGeo = null;
             for (const m of _inlayMats) m?.dispose?.(); _inlayMats = []; _inlayLabels = [];
+            // PATCH POINT (capo marker): resources (label sprite material
+            // included) were disposed by the scene.traverse() pass above —
+            // just drop the refs so a re-init rebuilds from scratch.
+            _crCapoG = null; _crCapoLblMat = null; _crCapoMarkerSig = '';
             // mTapChevron: dispose explicitly — if no tap marker ever
             // spawned a pooled mesh, the scene.traverse() pass above never
             // reaches this material.
