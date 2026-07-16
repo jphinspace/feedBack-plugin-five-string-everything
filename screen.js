@@ -8968,6 +8968,27 @@ import { CR } from './src/chart-retune.js';
                         }
                     }
                 }
+                // PATCH POINT (tuning palettes): board string meshes. Their
+                // colors are baked at buildBoard() time, and upstream only
+                // ever changes the palette via the settings listener (which
+                // follows with a full buildBoard()). This fork also swaps
+                // palettes when the active TUNING changes — the tuningSig
+                // branch in _bgLoadSettings, e.g. the init-time arrangement-
+                // class correction landing on a concrete-color preset
+                // (Violin) after the board was already built under the
+                // default palette — and that path retints materials only.
+                // Without this, gems/glows/trails switch to the tuning's
+                // colors while the board strings keep the stale baked ones
+                // (user report: gem colors don't match the string colors).
+                // Opacity is left alone: updateStringHighlights (stringLines)
+                // and the vibrancy path (stringLineGlows) own it.
+                if (stringLines[s] && stringLines[s].material) {
+                    stringLines[s].material.color.setHex(c);
+                    stringLines[s].material.emissive.setHex(c);
+                }
+                if (stringLineGlows[s] && stringLineGlows[s].material) {
+                    stringLineGlows[s].material.color.setHex(c);
+                }
             }
             // Per-string gem bodies (strings 0..5) are a baked per-vertex
             // gradient (gNoteGrad), not a flat material — recolor them too so a
