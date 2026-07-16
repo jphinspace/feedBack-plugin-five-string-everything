@@ -9750,21 +9750,24 @@ import { CR } from './src/chart-retune.js';
             // the fret wires (see the buildBoard fret-wire comment).
             const roBar = renderOrderForLayerAtZ(0, 'NOTE_FRET_LABEL');
             // Gunmetal, deliberately darker than the (near-white default)
-            // nut it sits beside — at player-camera distance the two are
-            // nearly edge-on, and a light bar would read as a thicker nut.
+            // nut so it never reads as a second nut — but with a real
+            // emissive floor and near-solid opacity: at gameplay camera
+            // the bar is almost edge-on over a dark board, and a subtle
+            // translucent slab disappears entirely (user report, capo 4 /
+            // violin: only the text tag was visible).
             const barMat = new T.MeshStandardMaterial({
-                color: 0x5a6272, roughness: 0.32, metalness: 0.25,
-                emissive: 0x14161c, transparent: true, opacity: 0.55,
+                color: 0x8a93a6, roughness: 0.32, metalness: 0.25,
+                emissive: 0x2a2f3a, transparent: true, opacity: 0.72,
                 depthTest: false, depthWrite: false,
             });
-            const bar = new T.Mesh(new T.BoxGeometry(0.92 * K, capoH, 1.25 * K), barMat);
+            const bar = new T.Mesh(new T.BoxGeometry(1.1 * K, capoH, 1.35 * K), barMat);
             bar.position.set(capoX, yMidC, 0.1 * K);
             bar.renderOrder = roBar;
             _crCapoG.add(bar);
 
             // Rounded end caps (the rollers a trigger capo clamps with) —
             // shared geometry, same material as the bar.
-            const capGeo = new T.CylinderGeometry(0.55 * K, 0.55 * K, 1.3 * K, 16);
+            const capGeo = new T.CylinderGeometry(0.62 * K, 0.62 * K, 1.45 * K, 16);
             for (const yEnd of [yMidC - capoH * 0.5, yMidC + capoH * 0.5]) {
                 const cap = new T.Mesh(capGeo, barMat);
                 cap.rotation.x = Math.PI / 2; // axis along Z, matching the bar depth
@@ -9776,10 +9779,10 @@ import { CR } from './src/chart-retune.js';
             // Specular ridge along the camera-facing face — sells the
             // machined-metal look without a real envMap.
             const stripMat = new T.MeshBasicMaterial({
-                color: 0xe9edf5, transparent: true, opacity: 0.5,
+                color: 0xe9edf5, transparent: true, opacity: 0.75,
                 depthTest: false, depthWrite: false,
             });
-            const strip = new T.Mesh(new T.BoxGeometry(0.26 * K, capoH * 0.96, 0.1 * K), stripMat);
+            const strip = new T.Mesh(new T.BoxGeometry(0.3 * K, capoH * 0.96, 0.12 * K), stripMat);
             strip.position.set(capoX - 0.18 * K * mir, yMidC, 0.72 * K);
             strip.renderOrder = roBar + 0.0001;
             _crCapoG.add(strip);
