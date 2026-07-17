@@ -377,6 +377,50 @@ export function resolveActiveTuning(id, customTunings, arrClass = 'bass') {
     return asResult(BUILTIN_PRESET_TUNINGS.find(p => p.id === defaultTuningIdForClass(arrClass)));
 }
 
+// The silent auto-saved "active" tuning — the unsaved user-defined
+// tuning the settings editor edits live. One global slot: whenever the form
+// changes, the whole form state is persisted as the active tuning, and
+// resolution OVERLAYS it on every arrangement class until the user
+// explicitly selects a real tuning (built-in preset or saved custom) —
+// which throws the active tuning away. It is never listed in any picker and
+// never appears in the saved-tunings pool; this reserved id exists so
+// callers (the quick-adjust sliders, name lookups) can recognize it.
+export const ACTIVE_TUNING_ID = '__user_defined__';
+export const ACTIVE_TUNING_NAME = 'User-defined';
+
+// Parses + validates the persisted active tuning (JSON string as stored, or an
+// already-parsed object). Returns the same shape resolveActiveTuning
+// yields — { id, name, strings, colors, roles, maxFret, capo,
+// octaveOffset } with id/name fixed to the active-tuning constants — or null
+// when the active tuning is absent/malformed (callers then fall through to
+// normal profile resolution). Colors pass through as stored, exactly
+// like resolveActiveTuning's custom-tuning branch: the reader owns
+// resolving them (screen.js runs CR.resolveColorsArray over customs and
+// the active tuning alike). capo is validated against the active tuning's OWN resolved
+// maxFret, octaveOffset against the fixed bounds — same rules as a
+// saved custom tuning.
+export function parseActiveTuning(raw) {
+    let d = raw;
+    if (typeof d === 'string') {
+        const s = d.trim();
+        if (!s) return null;
+        try { d = JSON.parse(s); } catch (_) { return null; }
+    }
+    if (!d || typeof d !== 'object' || Array.isArray(d)) return null;
+    if (!isValidTuningStringsArray(d.strings)) return null;
+    const maxFret = isValidMaxFret(d.maxFret) ? d.maxFret : DEFAULT_MAX_FRET;
+    return {
+        id: ACTIVE_TUNING_ID,
+        name: ACTIVE_TUNING_NAME,
+        strings: d.strings.slice(),
+        colors: Array.isArray(d.colors) ? d.colors.slice() : null,
+        roles: null,
+        maxFret,
+        capo: resolveCapo(d.capo, maxFret),
+        octaveOffset: resolveOctaveOffset(d.octaveOffset),
+    };
+}
+
 // Length in [MIN,MAX], every entry parses, and every pitch is in the
 // supported C-1..E5 range. Shared by
 // window.cr3dSaveCustomTuning and the storage-read filter in screen.js.
