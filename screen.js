@@ -2299,7 +2299,7 @@ import { CR } from './src/chart-retune.js';
         return _bgBandsCache;
     }
 
-    const BG_DEFAULTS = { style: 'particles', intensity: 0.5, reactive: true, palette: 'default', bgTheme: 'default', hwTheme: 'default', showFretOnNote: true, fretNumberGhostScope: 'chords', cameraSmoothing: 0.5, zoomSmoothing: 0.5, tiltSmoothing: 0.5, cameraLockLow: false, cameraLockZoom: 0.5, cameraMode: 'lookahead', nutHeadstockVisible: true, tuningLabelsVisible: true, nutColor: '#f5f3f0', headstockColor: '#d4b48a', textSize: 0.5, vibrancy: 0.85, glow: 0.25, customImageDataUrl: '', customImageName: '', customVideoName: '', chordDiagramVisible: true, chordDiagramSize: 0.5, chordDiagramPosition: 'tl', fretColumnMarkerCadence: 1, projectionVisible: true, inlayLabelsVisible: false, sectionLabelsOnHighway: false, sectionHudVisible: false, sectionHudPosition: 'tr', sectionHudSize: 0.5, toneHudVisible: false, toneHudPosition: 'tl', toneHudSize: 0.5, fpsVisible: false, fretDividersVisible: true, slideArrowApproachVisible: true, slideArrowNeckVisible: true, slideArrowChainPreviewVisible: true, hitFx: 0.7, sparks: true, cinematic: true, verdictMarks: true, timingFx: true, streakFx: true, bloom: true, targetTuningIdBass: CR.DEFAULT_TUNING_ID, targetTuningIdRhythm: CR.DEFAULT_GUITAR_TUNING_ID, targetTuningIdLead: CR.DEFAULT_GUITAR_TUNING_ID, customTunings: '[]', tuningAdjustOverrides: '{}' };
+    const BG_DEFAULTS = { style: 'particles', intensity: 0.5, reactive: true, palette: 'default', bgTheme: 'default', hwTheme: 'default', showFretOnNote: true, fretNumberGhostScope: 'chords', cameraSmoothing: 0.5, zoomSmoothing: 0.5, tiltSmoothing: 0.5, cameraLockLow: false, cameraLockZoom: 0.5, cameraMode: 'lookahead', nutHeadstockVisible: true, tuningLabelsVisible: true, nutColor: '#f5f3f0', headstockColor: '#d4b48a', textSize: 0.5, vibrancy: 0.85, glow: 0.25, customImageDataUrl: '', customImageName: '', customVideoName: '', chordDiagramVisible: true, chordDiagramSize: 0.5, chordDiagramPosition: 'tl', fretColumnMarkerCadence: 1, projectionVisible: true, inlayLabelsVisible: false, sectionLabelsOnHighway: false, sectionHudVisible: false, sectionHudPosition: 'tr', sectionHudSize: 0.5, toneHudVisible: false, toneHudPosition: 'tl', toneHudSize: 0.5, fpsVisible: false, fretDividersVisible: true, slideArrowApproachVisible: true, slideArrowNeckVisible: true, slideArrowChainPreviewVisible: true, hitFx: 0.7, sparks: true, cinematic: true, verdictMarks: true, timingFx: true, streakFx: true, bloom: true, targetTuningIdBass: CR.DEFAULT_TUNING_ID, targetTuningIdRhythm: CR.DEFAULT_GUITAR_TUNING_ID, targetTuningIdLead: CR.DEFAULT_GUITAR_TUNING_ID, customTunings: '[]', tuningAdjustOverrides: '{}', activeTuning: '' };
     // User-selectable, persistable bg styles — must mirror settings.html's
     // VALID_STYLES. 'venue' is deliberately NOT here: it is an internal effective
     // style reached only via _venueSceneOverride (the viz-picker Venue flow), so
@@ -3027,6 +3027,40 @@ import { CR } from './src/chart-retune.js';
         map[tuningId] = { capo, octave };
         _bgWriteGlobal('tuningAdjustOverrides', JSON.stringify(map));
     }
+    // Silent auto-saved "active" tuning (CR.ACTIVE_TUNING_ID) — the
+    // unsaved user-defined tuning the settings editor edits live. While one exists it
+    // OVERLAYS the resolved tuning for EVERY arrangement class (the
+    // editor form is "what the highway plays right now"), and it carries
+    // its own capo/octave, so the per-tuning override map is skipped —
+    // the player-controls quick sliders edit the active tuning itself instead.
+    // Selecting any real tuning in a profile dropdown
+    // (cr3dSetActiveTuning) or saving a tuning (cr3dSaveCustomTuning)
+    // throws the active tuning away. Never listed in any picker.
+    function _crReadActiveTuning() {
+        const active = CR.parseActiveTuning(_bgReadSetting(null, 'activeTuning'));
+        if (!active) return null;
+        // Same read-time color resolution saved customs get in
+        // _crReadCustomTunings (the editor always sends per-string colors;
+        // gray is only the malformed-blob safety net).
+        const gray = active.strings.map(() => CR.intToHex(CR.LIGHT_GRAY_COLOR));
+        active.colors = CR.resolveColorsArray(active.colors, active.strings.length, gray);
+        return active;
+    }
+    function _crWriteActiveTuning(d) {
+        const normalized = CR.parseActiveTuning(d);
+        if (!normalized) return false;
+        _bgWriteGlobal('activeTuning', JSON.stringify({
+            strings: normalized.strings,
+            colors: normalized.colors,
+            maxFret: normalized.maxFret,
+            capo: normalized.capo,
+            octaveOffset: normalized.octaveOffset,
+        }));
+        return true;
+    }
+    function _crClearActiveTuning() {
+        if (_bgReadSetting(null, 'activeTuning')) _bgWriteGlobal('activeTuning', '');
+    }
     // Resolves a class's active tuning to { id, strings, colors, roles,
     // maxFret, capo, octaveOffset } — the branching (built-in presets,
     // then custom tunings, then the class-default preset for anything
@@ -3038,6 +3072,10 @@ import { CR } from './src/chart-retune.js';
     // profile's own maxFret), so a corrupt blob degrades per-field to the
     // profile default rather than zeroing both.
     function _crResolveActiveTuning(arrClass) {
+        // An unsaved settings-editor active-tuning overlays every class; it owns
+        // its capo/octave, so the override map below never applies to it.
+        const active = _crReadActiveTuning();
+        if (active) return active;
         const t = CR.resolveActiveTuning(_bgReadSetting(null, _crProfileKeyFor(arrClass)), _crReadCustomTunings(), arrClass);
         const ov = _crReadTuningAdjustOverrides()[t.id];
         if (ov && typeof ov === 'object') {
@@ -3048,9 +3086,23 @@ import { CR } from './src/chart-retune.js';
     }
     // Signature change with guitar profiles: takes the arrangement class
     // first. settings.html is the only caller; the two ship together.
-    window.cr3dSetActiveTuning = (arrClass, id) =>
+    window.cr3dSetActiveTuning = (arrClass, id) => {
+        // Selecting a real tuning is the "discard the active tuning" gesture —
+        // the settings editor re-seeds its form from the selection.
+        _crClearActiveTuning();
         _bgWriteGlobal(_crProfileKeyFor(arrClass), String(id || CR.defaultTuningIdForClass(arrClass)));
+    };
     window.cr3dListCustomTunings = () => _crReadCustomTunings();
+    // Active-tuning plumbing for the settings editor: write on every form change
+    // (live preview), clear alongside explicit tuning selection, and the
+    // resolved active tuning (active-tuning overlay + quick override applied) to
+    // seed the form from. cr3dActiveArrClass reports the class of the
+    // most recently active panel so the editor seeds from what's playing.
+    window.cr3dWriteActiveTuning = (d) => _crWriteActiveTuning(d);
+    window.cr3dClearActiveTuning = () => _crClearActiveTuning();
+    window.cr3dGetResolvedTuning = (arrClass) => _crResolveActiveTuning(arrClass || _crAdjArrClass);
+    window.cr3dActiveArrClass = () => _crAdjArrClass;
+    window.cr3dActiveTuningId = CR.ACTIVE_TUNING_ID;
     // Upserts a custom tuning profile by id (generates one for a new
     // profile). Validates strings via CR.isValidTuningStringsArray and
     // resolves colors via CR.resolveColorsArray (light gray substituted
@@ -3089,6 +3141,10 @@ import { CR } from './src/chart-retune.js';
             delete overrides[id];
             _bgWriteGlobal('tuningAdjustOverrides', JSON.stringify(overrides));
         }
+        // The active tuning was this form's live state — saving graduates
+        // it to a real tuning, so its storage slot empties (profiles keep pointing
+        // wherever they pointed; picking the new tuning is still explicit).
+        _crClearActiveTuning();
         return id;
     };
     window.cr3dDeleteCustomTuning = (id) => {
@@ -3160,6 +3216,7 @@ import { CR } from './src/chart-retune.js';
     let _crAdjEls = null;
     let _crAdjArrClass = 'bass';
     function _crAdjProfileName(t) {
+        if (t.id === CR.ACTIVE_TUNING_ID) return CR.ACTIVE_TUNING_NAME + ' (unsaved)';
         const preset = CR.BUILTIN_PRESET_TUNINGS.find(p => p.id === t.id);
         if (preset) return preset.label;
         const custom = _crReadCustomTunings().find(p => p.id === t.id);
@@ -3192,6 +3249,13 @@ import { CR } from './src/chart-retune.js';
         // _bgWriteGlobal (inside) emits the change: the module listener
         // below re-syncs the readouts and every panel re-remaps on its
         // next draw().
+        if (t.id === CR.ACTIVE_TUNING_ID) {
+            // Unsaved active tuning — the sliders edit it directly (it owns
+            // its capo/octave; "saved automatically anytime something
+            // changes"), never the per-tuning override map.
+            _crWriteActiveTuning({ strings: t.strings, colors: t.colors, maxFret: t.maxFret, capo, octaveOffset: oct });
+            return;
+        }
         _crWriteTuningAdjustOverride(t.id, capo, oct);
     }
     function _crBuildAdjustControls() {
@@ -3255,6 +3319,7 @@ import { CR } from './src/chart-retune.js';
     // or our own commit all round-trip through the change bus.
     _bgSubscribe((key) => {
         if (key === 'tuningAdjustOverrides' || key === 'customTunings'
+            || key === 'activeTuning'
             || _CR_PROFILE_KEYS.indexOf(key) !== -1) _crAdjRefresh();
     });
 
@@ -8324,7 +8389,7 @@ import { CR } from './src/chart-retune.js';
                     return;
                 }
                 if (_CR_PROFILE_KEYS.indexOf(changedKey) !== -1 || changedKey === 'customTunings'
-                    || changedKey === 'tuningAdjustOverrides') {
+                    || changedKey === 'tuningAdjustOverrides' || changedKey === 'activeTuning') {
                     // A tuning profile changed (or a saved custom
                     // profile's own notes were edited, or a capo/octave
                     // quick override moved). _bgLoadSettings re-resolves
@@ -8902,6 +8967,27 @@ import { CR } from './src/chart-retune.js';
                             pm.material.emissive.setHex(c);
                         }
                     }
+                }
+                // PATCH POINT (tuning palettes): board string meshes. Their
+                // colors are baked at buildBoard() time, and upstream only
+                // ever changes the palette via the settings listener (which
+                // follows with a full buildBoard()). This fork also swaps
+                // palettes when the active TUNING changes — the tuningSig
+                // branch in _bgLoadSettings, e.g. the init-time arrangement-
+                // class correction landing on a concrete-color preset
+                // (Violin) after the board was already built under the
+                // default palette — and that path retints materials only.
+                // Without this, gems/glows/trails switch to the tuning's
+                // colors while the board strings keep the stale baked ones
+                // (user report: gem colors don't match the string colors).
+                // Opacity is left alone: updateStringHighlights (stringLines)
+                // and the vibrancy path (stringLineGlows) own it.
+                if (stringLines[s] && stringLines[s].material) {
+                    stringLines[s].material.color.setHex(c);
+                    stringLines[s].material.emissive.setHex(c);
+                }
+                if (stringLineGlows[s] && stringLineGlows[s].material) {
+                    stringLineGlows[s].material.color.setHex(c);
                 }
             }
             // Per-string gem bodies (strings 0..5) are a baked per-vertex

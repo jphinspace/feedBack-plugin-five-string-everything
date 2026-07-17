@@ -540,6 +540,47 @@ const SPOT_FRETS = [0, 10, 20];
     check('createRetuner: switching maxFret back down re-invalidates the cache and re-drops the note', bundle.notes.length, 0);
 }
 
+// parseActiveTuning: the silent auto-saved "active" tuning (the unsaved
+// user-defined tuning the settings editor edits live). Accepts the stored
+// JSON string or a parsed object; resolves to the resolveActiveTuning
+// shape with the reserved id/name; malformed input resolves to null so
+// callers fall through to normal profile resolution.
+{
+    const { parseActiveTuning, ACTIVE_TUNING_ID, ACTIVE_TUNING_NAME } = CR;
+    const good = { strings: ['G3', 'D4', 'A4', 'E5'], colors: ['#f18313', '#3fc413', '#ecd234', '#e61f26'], maxFret: 14, capo: 4, octaveOffset: 1 };
+    const r = parseActiveTuning(JSON.stringify(good));
+    check('parseActiveTuning: valid JSON resolves with the reserved id/name',
+        { id: r.id, name: r.name }, { id: ACTIVE_TUNING_ID, name: ACTIVE_TUNING_NAME });
+    check('parseActiveTuning: fields pass through validated',
+        { strings: r.strings, colors: r.colors, maxFret: r.maxFret, capo: r.capo, octaveOffset: r.octaveOffset, roles: r.roles },
+        { strings: good.strings, colors: good.colors, maxFret: 14, capo: 4, octaveOffset: 1, roles: null });
+    check('parseActiveTuning: object input works like the JSON string', parseActiveTuning(good).capo, 4);
+
+    check('parseActiveTuning: empty/absent stores resolve to null',
+        [parseActiveTuning(''), parseActiveTuning('   '), parseActiveTuning(null), parseActiveTuning(undefined)],
+        [null, null, null, null]);
+    check('parseActiveTuning: malformed JSON resolves to null', parseActiveTuning('{nope'), null);
+    check('parseActiveTuning: non-object / array JSON resolves to null',
+        [parseActiveTuning('42'), parseActiveTuning('[1,2,3]')], [null, null]);
+    check('parseActiveTuning: invalid strings resolve to null',
+        parseActiveTuning({ strings: ['E1', 'A1'] }), null);
+
+    const sloppy = parseActiveTuning({ strings: ['E1', 'A1', 'D2', 'G2'], colors: 'nope', maxFret: 99, capo: 25, octaveOffset: 9 });
+    check('parseActiveTuning: out-of-range fields fall back per-field (maxFret default, capo/octave 0, colors null)',
+        { colors: sloppy.colors, maxFret: sloppy.maxFret, capo: sloppy.capo, octaveOffset: sloppy.octaveOffset },
+        { colors: null, maxFret: DEFAULT_MAX_FRET, capo: 0, octaveOffset: 0 });
+    // capo validated against the active tuning's OWN maxFret, like saved customs.
+    check('parseActiveTuning: capo valid under its own maxFret survives',
+        parseActiveTuning({ strings: ['E1', 'A1', 'D2', 'G2'], maxFret: 14, capo: 13 }).capo, 13);
+    check('parseActiveTuning: capo at/above its own maxFret disables to 0',
+        parseActiveTuning({ strings: ['E1', 'A1', 'D2', 'G2'], maxFret: 14, capo: 14 }).capo, 0);
+    // Input arrays are copied, never aliased — the caller may mutate.
+    const aliasIn = { strings: ['E1', 'A1', 'D2', 'G2'], colors: ['#111111', '#222222', '#333333', '#444444'] };
+    const aliased = parseActiveTuning(aliasIn);
+    assert.notStrictEqual(aliased.strings, aliasIn.strings, 'parsed strings must be a fresh copy'); passed++;
+    assert.notStrictEqual(aliased.colors, aliasIn.colors, 'parsed colors must be a fresh copy'); passed++;
+}
+
 // displayFretOffset: physical-fret display shift (capo marker follow-up).
 // The remap stays capo-relative internally; the offset relabels FRETTED
 // outputs (notes, slide endpoints, chord notes, template frets, anchors)

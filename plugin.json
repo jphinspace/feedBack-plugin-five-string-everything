@@ -1,7 +1,7 @@
 {
     "id": "chart_retuner",
     "name": "Chart Retuner",
-    "version": "0.4.3",
+    "version": "0.4.4",
     "type": "visualization",
     "script": "screen.js",
     "scriptType": "module",

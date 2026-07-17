@@ -1,6 +1,6 @@
 <div class="p-4">
     <div class="fb-text font-semibold">Chart Retuner</div>
-    <div class="fb-textDim text-sm">v0.4.3</div>
+    <div class="fb-textDim text-sm">v0.4.4</div>
     <p class="fb-textDim text-xs mt-1">
         Controls below mirror 3D Highway's own settings — this plugin
         renders its own highway remapped onto your real instrument's
@@ -51,6 +51,12 @@
 
     <div class="mt-4 rounded-lg border border-gray-800 bg-dark-700/40 p-3">
         <p class="text-xs font-medium text-gray-400 mb-2" id="cr3d-tuning-form-heading">Add a tuning</p>
+        <p class="text-[10px] text-gray-500 mb-2">
+            Changes below apply to the highway immediately as an unsaved
+            “User-defined” tuning. Picking any tuning in the dropdowns
+            above discards it and starts over from that selection; Save
+            keeps the current form as a reusable preset.
+        </p>
         <div class="mt-1">
             <label for="cr3d-tuning-name" class="text-xs font-medium text-gray-400 mb-1 block">Name</label>
             <input type="text" id="cr3d-tuning-name" placeholder="e.g. AEADG"
@@ -155,9 +161,9 @@
         // by explicit per-position roles in the real module (roles aren't
         // mirrored here — this editor never shows preset colors). None of
         // these are editable/deletable, so they never appear in
-        // readCustom(). maxFret mirrors each preset's own ceiling — only
-        // used here to seed a brand-new custom tuning's max-fret dropdown
-        // from BUILTIN_PRESETS[0] (see seedRowsFromDefault).
+        // readCustom(). maxFret mirrors each preset's own ceiling — used
+        // to seed the form when a preset is picked in a dropdown, and as
+        // activeSeedProfile's pre-load fallback (BUILTIN_PRESETS[0]).
         const BUILTIN_PRESETS = [
             { id: DEFAULT_BASS_ID, label: 'EADG (default)', strings: BEADG_STRINGS.slice(1), colors: null, maxFret: 20 },
             { id: 'beadg', label: 'BEADG', strings: BEADG_STRINGS, colors: null, maxFret: 24 },
@@ -332,6 +338,40 @@
             if (octaveLabel) octaveLabel.textContent = (octave > 0 ? '+' : '') + octave;
         }
 
+        // Live active-tuning push: any actual user edit persists the WHOLE form
+        // state as the silent unsaved "active" tuning, which the renderer
+        // overlays on every arrangement class immediately (no Save
+        // needed). Programmatic seeding (startEdit/resetForm) never
+        // pushes — only real edits do. Fallback for the pre-load window
+        // mirrors the other write fallbacks: bytes land, live-apply waits
+        // for the next reload.
+        function pushActiveTuning() {
+            const activeTuning = {
+                strings: rows.map((r) => r.note),
+                colors: rows.map((r) => r.color),
+                maxFret: maxFret,
+                capo: capo,
+                octaveOffset: octave,
+            };
+            if (window.cr3dWriteActiveTuning) { window.cr3dWriteActiveTuning(activeTuning); return; }
+            try { localStorage.setItem('chart_retuner_bg_activeTuning', JSON.stringify(activeTuning)); } catch (_) { /* storage blocked */ }
+        }
+        function clearActiveTuningFallback() {
+            if (window.cr3dClearActiveTuning) { window.cr3dClearActiveTuning(); return; }
+            try { localStorage.setItem('chart_retuner_bg_activeTuning', ''); } catch (_) { /* storage blocked */ }
+        }
+        // Seed source for a fresh form: the renderer's resolved view of
+        // the last active arrangement class (active-tuning overlay + quick
+        // override applied — "what the highway plays right now").
+        // Pre-load fallback: the built-in default preset, as before.
+        function activeSeedProfile() {
+            if (window.cr3dGetResolvedTuning) {
+                const t = window.cr3dGetResolvedTuning(window.cr3dActiveArrClass ? window.cr3dActiveArrClass() : 'bass');
+                if (t && Array.isArray(t.strings)) return t;
+            }
+            return BUILTIN_PRESETS[0];
+        }
+
         function showError(msg) {
             if (!errorP) return;
             errorP.textContent = msg;
@@ -428,7 +468,7 @@
                 const noteSelect = document.createElement('select');
                 noteSelect.className = 'cr3d-row-note flex-1 min-w-0 bg-dark-700 border border-gray-800 rounded px-2 py-1 text-xs text-gray-300 outline-none';
                 populateNoteOptions(noteSelect, r.note);
-                noteSelect.addEventListener('change', () => { rows[i].note = noteSelect.value; });
+                noteSelect.addEventListener('change', () => { rows[i].note = noteSelect.value; pushActiveTuning(); });
                 rowDiv.appendChild(noteSelect);
 
                 const colorInput = document.createElement('input');
@@ -436,7 +476,7 @@
                 colorInput.value = r.color;
                 colorInput.title = 'String ' + (i + 1) + ' color';
                 colorInput.className = 'cr3d-row-color w-8 h-8 rounded border border-gray-800 bg-dark-700 shrink-0 p-0';
-                colorInput.addEventListener('input', () => { rows[i].color = colorInput.value; });
+                colorInput.addEventListener('input', () => { rows[i].color = colorInput.value; pushActiveTuning(); });
                 rowDiv.appendChild(colorInput);
 
                 // Only the current top and bottom rows can be removed —
@@ -448,7 +488,7 @@
                     removeBtn.className = 'text-[10px] px-2 py-1 rounded bg-dark-700 border border-gray-800 text-red-400 hover:text-red-300 shrink-0 disabled:opacity-30 disabled:pointer-events-none';
                     removeBtn.textContent = 'Remove';
                     removeBtn.disabled = rows.length <= MIN_STRINGS;
-                    removeBtn.addEventListener('click', () => { rows.splice(i, 1); renderRows(); });
+                    removeBtn.addEventListener('click', () => { rows.splice(i, 1); renderRows(); pushActiveTuning(); });
                     rowDiv.appendChild(removeBtn);
                 } else {
                     const spacer = document.createElement('span');
@@ -482,13 +522,6 @@
             octave = resolveOctaveLocal(profile.octaveOffset);
             syncAdjustControls();
         }
-        // Seeds a brand-new "Add a tuning" form from the built-in default
-        // preset (BUILTIN_PRESETS[0] — EADG) rather than a hardcoded shape,
-        // so this automatically tracks whichever preset is default.
-        function seedRowsFromDefault() {
-            seedRowsFromProfile(BUILTIN_PRESETS[0]);
-        }
-
         function startEdit(profile) {
             editingId = profile.id;
             if (nameInput) nameInput.value = profile.name;
@@ -499,10 +532,14 @@
             if (cancelBtn) cancelBtn.classList.remove('hidden');
             clearError();
         }
-        function resetForm() {
+        // `seed` (optional): the profile whose values fill the fresh form.
+        // Defaults to the resolved active tuning (activeSeedProfile), so
+        // the form always starts from what the highway is playing — the
+        // dropdown-change flow passes the just-selected preset explicitly.
+        function resetForm(seed) {
             editingId = null;
             if (nameInput) nameInput.value = '';
-            seedRowsFromDefault();
+            seedRowsFromProfile(seed || activeSeedProfile());
             renderRows();
             if (formHeading) formHeading.textContent = 'Add a tuning';
             if (saveBtn) saveBtn.textContent = 'Save';
@@ -530,8 +567,18 @@
 
         for (const { cls, el } of sels) {
             el.addEventListener('change', () => {
-                if (window.cr3dSetActiveTuning) window.cr3dSetActiveTuning(cls, el.value);
-                else writeActiveFallback(cls, el.value);
+                if (window.cr3dSetActiveTuning) {
+                    // cr3dSetActiveTuning discards the unsaved active tuning itself.
+                    window.cr3dSetActiveTuning(cls, el.value);
+                } else {
+                    writeActiveFallback(cls, el.value);
+                    clearActiveTuningFallback();
+                }
+                // "Reset to whatever is that selected preset": the form
+                // starts over from the selection, previous customizations
+                // are thrown out with the active tuning.
+                const pool = BUILTIN_PRESETS.concat(readCustom());
+                resetForm(pool.find((p) => p.id === el.value));
             });
         }
 
@@ -543,6 +590,7 @@
                 const next = defaultStringFor('low', rows[0] ? rows[0].note : 'B0');
                 rows.unshift(next);
                 renderRows();
+                pushActiveTuning();
             });
         }
         if (addHighBtn) {
@@ -551,6 +599,7 @@
                 const next = defaultStringFor('high', rows[rows.length - 1] ? rows[rows.length - 1].note : 'G2');
                 rows.push(next);
                 renderRows();
+                pushActiveTuning();
             });
         }
 
@@ -580,6 +629,9 @@
                     const idx = list.findIndex((p) => p.id === id);
                     if (idx >= 0) list[idx] = entry; else list.push(entry);
                     writeCustomFallback(list);
+                    // Mirrors cr3dSaveCustomTuning: saving graduates the
+                    // active tuning, so its storage slot empties.
+                    clearActiveTuningFallback();
                     savedId = id;
                 }
                 if (!savedId) { showError('Could not save — check each string is a valid note + octave.'); return; }
@@ -603,6 +655,7 @@
                 // Keep the capo slider's ceiling on the new neck (and
                 // clamp a now-impossible working capo).
                 syncAdjustControls();
+                pushActiveTuning();
             });
         }
 
@@ -611,6 +664,7 @@
                 const v = parseInt(capoSlider.value, 10);
                 capo = resolveCapoLocal(v, maxFret);
                 syncAdjustControls();
+                pushActiveTuning();
             });
         }
         if (octaveSlider) {
@@ -618,6 +672,7 @@
                 const v = parseInt(octaveSlider.value, 10);
                 octave = resolveOctaveLocal(v);
                 syncAdjustControls();
+                pushActiveTuning();
             });
         }
 
