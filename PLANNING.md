@@ -2,77 +2,43 @@
 
 This file holds **only future / not-yet-implemented work**, in enough detail
 to pick up and build from. Everything already shipped — the design rationale,
-the patch-point contract against upstream `highway_3d`, the full phase log,
-and the sync log — lives in [`HISTORY.md`](HISTORY.md).
+the (retired) patch-point contract against upstream `highway_3d`, the full
+phase log, and the sync log — lives in [`HISTORY.md`](HISTORY.md).
+
+**Since v0.5.0 (2026-07-17)** the plugin is a provider of feedBack's
+`chart-transform` capability domain (feedBack#952): `src/main.js` registers
+the remap engine via `register-provider`, core substitutes the chart for
+the built-in renderer AND scoring consumers, and the old renderer copy +
+upstream-sync process are retired. `settings.html` is the former
+`settings-waiting-for-feedBack-support.html` (renamed into place).
 
 ---
 
-## Ongoing process — syncing from upstream `highway_3d`
+## Post-migration follow-ups
 
-Our tuning-remap logic lives entirely in the documented patch points (listed
-in `HISTORY.md`); everything else in `screen.js` is `highway_3d`'s own code
-and must be periodically re-pulled from the **canonical** upstream
-(`github.com/got-feedBack/feedBack`, `plugins/highway_3d/`) rather than
-silently drifting.
-
-Repeatable procedure:
-
-1. Shallow-clone the canonical upstream into a scratch directory — never add
-   a remote to, or otherwise modify, any local `feedBack` checkout.
-2. Diff upstream's `plugins/highway_3d/` against whatever this plugin was
-   last synced to (recorded in `HISTORY.md`'s sync log) file-by-file. If only
-   `screen.js`/`plugin.json` differ, the sync is just a `screen.js` merge; a
-   `settings.html` divergence additionally needs the Phase 7 isolation
-   renames (globals, storage keys, DOM ids — see `HISTORY.md`) re-applied to
-   whatever's new.
-3. For each upstream `screen.js` hunk, locate the equivalent surrounding text
-   in our copy (search on a unique line from the hunk, not line numbers —
-   line counts have diverged) and apply the same change. If a hunk touches
-   anything on the patch-point list (the `CR` retuner block,
-   `resolveStringCount`, nut labels, the notes/chords/anchors/templates
-   substitution shim, the color palette, note-state provider calls, or any
-   renamed `h3d*`/`h3d_bg_`/`viz3d_*` identifier), reconcile it by hand and
-   flag it to the user — never copy blindly.
-4. Verify: `node --check screen.js`, `node test/retune-engine.test.mjs`,
-   `node test/chord-solver.test.mjs`, and extract + `diff` the newly-applied
-   region against upstream's to confirm the reapplication was byte-exact.
-5. Append a sync-log entry to `HISTORY.md` (upstream version/commit, what
-   changed, patch-point overlap or none) and bump this plugin's own version.
-
----
-
-## Migration goal — retire the forked highway in favor of feedBack's built-in
-
-The fork exists only because core has no hook to transform a chart's
-notes/chords/tuning before a renderer reads them (see HISTORY.md, "Settled
-design"). Once the main feedBack application supports this plugin natively —
-tracked upstream at feedBack#952 — the plugin keeps its pure remap engine
-(`src/`) and sheds the rendering fork:
-
-- **`settings-waiting-for-feedBack-support.html`** already exists as the
-  post-migration settings panel: JUST the plugin-specific parts (the Target
-  Tunings section — profile selects, custom tuning editor with strings/
-  colors/max fret/capo/octave, manage list), none of the "3D Highway — …"
-  rendering sections that only configure the forked renderer. At migration
-  time, point `plugin.json`'s `settings.html` at it (or rename it into
-  place). **Until then, keep its Target Tunings MARKUP in lockstep with
-  `settings.html`'s** — it was copied verbatim and must stay that way. Its
-  inline SCRIPT deliberately diverges: it dynamic-imports the real `src/`
-  modules instead of hand-mirroring their constants (the old "mirrored
-  constants" backlog item, resolved 2026-07-13 for this file only —
-  `settings.html` keeps its mirrors and dies with the fork, so don't port
-  script changes blindly in either direction).
-- What else goes at migration time: the forked `screen.js` (and with it the
-  Phase 7 isolation renames, the upstream-sync process above, the
-  `routes.py` video-upload endpoints, Butterchurn assets, and the
-  `chart_retuner_bg_*`/`chart_retuner_viz3d_*` storage namespace — plan a
-  one-time cleanup/migration for users' saved values where a core
-  equivalent exists).
-- What stays: everything under `src/` (pitch, target-tuning, retune-engine,
-  chord-solver, string-colors), the tests, the tuning-profile settings keys
-  (`targetTuningId*`, `customTunings`, `tuningAdjustOverrides`), and the
-  player-controls capo/octave widget (already written against the
-  documented v3 `playerControlSlot()` contract, not fork internals).
+1. ~~**Orphaned storage cleanup**~~ — DONE in v0.5.0: `src/main.js` runs a
+   one-time sweep (`chart_retuner_storage_cleanup_v1` guard) deleting every
+   `chart_retuner_bg_*` key outside the kept set (`targetTuningId{Bass,
+   Rhythm,Lead}`, `customTunings`, `tuningAdjustOverrides`, `activeTuning` —
+   the migrated legacy `targetTuningId` and all per-panel `bg_panel<N>_*`
+   keys go too) plus all `chart_retuner_viz3d_*` Butterchurn state. Server-
+   side leftovers under `{config_dir}/plugin_uploads/chart_retuner/` are NOT
+   swept (the plugin no longer has a backend); harmless, delete manually.
+2. **minHost bump** — currently `0.3.0-alpha.1` (the local core that ships
+   the chart-transform domain). Pin to the first tagged core release that
+   includes the domain once it exists; on older hosts the plugin loads but
+   the domain dispatches report `no-owner` (remap unavailable, no errors).
+3. **Nut labels / capo marker** — pre-0.5.0 affordances with no core
+   equivalent yet. If core grows a nut-label or capo-marker surface, feed it
+   from the resolved tuning's `labels` / capo (the transform already exports
+   `tuning`, `stringCount`, and `capo`).
+4. **Per-panel (splitscreen) independent targets** — splitscreen panels DO
+   remap: core installs the active provider on every highway instance
+   (announced via `highway:created`), and each panel restages against its
+   own `songInfo`, so per-panel arrangement classes resolve exactly as
+   pre-0.5.0 versions did. What remains future is *different tuning
+   targets per panel* beyond the per-class profiles — blocked on core's
+   chart-transform per-panel selection follow-up.
 
 ## Future enhancements
 

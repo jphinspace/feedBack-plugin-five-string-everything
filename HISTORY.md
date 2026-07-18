@@ -237,7 +237,62 @@ the revoiced adjustment. Untagged notes read as tier 0, so direct API use
 and all-tier-0 charts behave byte-identically to before. Cosmetic — gems
 were never affected. Suites: 426 + 120 assertions.
 
-## Upstream sync log
+
+## Phase 16 — the de-fork (v0.5.0, 2026-07-17)
+
+feedBack shipped the `chart-transform` capability domain (feedBack#952): a
+core-owned provider-coordinator whose synchronous `highway.setChartTransform`
+hook substitutes the chart — notes, chords, anchors, chord templates, string
+count, tuning, capo — for EVERY consumer (built-in 2D renderer, custom viz
+via the bundle, overlays and scorers via the getters), applied AFTER
+difficulty/mastery filtering. That is exactly the hook whose absence forced
+the fork (see "Settled design"), so the fork is retired:
+
+- **Deleted:** the forked `screen.js` (16,711 lines, with the Phase 7
+  isolation renames), `routes.py` (video-upload endpoints), Butterchurn
+  vendor assets + `viz-worklet.js`, `FREECAM_BRIDGE.md` (the `__h3dCamCtl`
+  bridge died with the renderer), the old `settings.html` (all "3D Highway —
+  …" rendering sections), and the upstream-sync process.
+- **New:** `src/main.js` — a ~470-line runtime replacing all of it: the
+  `chart_retuner_bg_*` settings storage (same keys, so tunings/profiles/
+  overrides survive), tuning resolution (unchanged logic), the `cr3d*`
+  settings-panel bridges, the capo/octave player controls (now with an
+  enable toggle that drives domain `select-provider`/`clear-provider`), and
+  the `chart-transform` provider itself. Two `createRetuner()` instances
+  serve the effective (difficulty-filtered) and full-difficulty views; the
+  transform exports the target `stringCount`, standard-relative `tuning`
+  offsets, and target `capo` so scoring consumers judge the target
+  instrument. Per-string colors apply via core's `highway.setStringColors`
+  (restored when another provider is selected).
+- **`settings.html`** is the former `settings-waiting-for-feedBack-support.html`
+  renamed into place (Target Tunings only; script dynamic-imports `src/`).
+- **Kept byte-identical:** everything under `src/` (pitch, target-tuning,
+  chord-solver, retune-engine, string-colors) and both test suites.
+- **Behavior notes:** scoring now judges the REMAPPED chart (the fork was
+  visual-only — `_origNote` back-references are no longer needed by core's
+  note-state path, though the engine still tags them, harmlessly); the
+  on/off mechanism moved from the viz picker (`matchesArrangement`) to the
+  domain selection, surfaced as the widget's Retuner checkbox; nut labels
+  and the capo bar marker had no core surface and are gone for now
+  (PLANNING follow-up 3).
+- **Fork-parity fixes (same release):** the transform keeps the fork's
+  arrangement gate — only `\b(lead|rhythm|bass|combo|guitar)\b` arrangements
+  remap (empty stays bass, matching pre-guitar hosts); keys/drums/vocals/
+  unknown charts pass through untransformed (`return null` → core keeps the
+  original chart). Live-tracked presets (EADG/BEADG/EADGBE, `colors: null`)
+  no longer override the user's Highway String Colors at all — core's own
+  palette applies, matching the fork's live-tracked semantics (one nuance:
+  BEADG's low-B now takes core's per-string color rather than the shared
+  `low7` role slot); concrete-color tunings still apply their saved colors
+  via `setStringColors`, captured/restored per surface on deactivation —
+  including splitscreen panels announced via `highway:created` (the
+  transform itself reaches panels through core's chart-transform domain
+  with no plugin code; only the color mirroring needed a listener). A one-time
+  storage sweep deletes the dead fork keys (see PLANNING follow-up 1).
+  `test/provider.test.mjs` covers registration, remap/passthrough routing,
+  filtered-vs-full views, and the tuning/capo exports end-to-end.
+
+## Upstream sync log (retired with the fork — kept for the record)
 
 Procedure: see PLANNING.md ("Syncing from upstream"). Each entry notes what
 this repo's `screen.js` was synced to, so the next sync diffs from there.
