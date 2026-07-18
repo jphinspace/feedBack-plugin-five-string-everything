@@ -106,30 +106,26 @@ When no full voicing fits, the chord simplifies progressively (drop
 doubled notes → triad → power chord → single root note) rather than
 disappearing. Chord diagrams and hand-shape highlights follow the
 remapped voicing; the chord *name* still shows the chart's original
-label. Note that scoring (note_detect) keys off the original chart
-positions, so judgments follow the chart, not the remapped shape.
+label. Scoring (note_detect) judges the **remapped** chart — the target
+instrument's tuning, string count, and capo flow through feedBack's
+chart-transform contract, so judgments follow what you actually play.
 
-## Fork of `highway_3d` — manual sync required
+## A chart-transform capability provider (v0.5.0+)
 
-This plugin is a fork of the bundled
-[`highway_3d`](https://github.com/got-feedBack/feedBack/tree/main/plugins/highway_3d)
-plugin — same 3D highway, same settings, same everything, except note gems
-(and the hand-position highlight, and chord shapes) land on the remapped
-string/fret. It runs alongside `highway_3d` without modifying it; **`highway_3d`
-must stay installed** — this plugin depends on it for shared features
-(Highway String Colors) and reuses its whole rendering engine as a base.
+Since v0.5.0 this plugin is a provider of feedBack's **`chart-transform`
+capability domain** ([feedBack#952](https://github.com/got-feedBack/feedBack/issues/952)):
+core remaps the chart *before* the built-in highway, any custom
+visualization, overlays, and scoring consumers read it, so the plugin
+works with **every renderer**, with nothing to keep in sync upstream.
+Versions before 0.5.0 shipped their own copy of the bundled `highway_3d`
+renderer instead; that
+era's design writeup and patch-point contract live in
+[`HISTORY.md`](HISTORY.md). Future work is tracked in
+[`PLANNING.md`](PLANNING.md).
 
-Because it's a fork rather than a hook into the original, this repo carries
-its **own independent copy** of `screen.js`, forked from and patched against
-[`highway_3d/screen.js`](https://github.com/got-feedBack/feedBack/blob/main/plugins/highway_3d/screen.js).
-It does **not** automatically pick up upstream fixes/features — that copy
-has to be **manually re-synced** whenever the upstream file changes. See
-[Syncing from upstream](#syncing-from-upstream-highway_3d) below for the
-procedure, and [`HISTORY.md`](HISTORY.md) for the full design writeup —
-the algorithm, every patch point against `highway_3d`, and why each one
-exists. Future work is tracked in [`PLANNING.md`](PLANNING.md).
-
-You can track this improvement in the main feedBack repository at https://github.com/got-feedBack/feedBack/issues/952
+Requires a feedBack version that ships the chart-transform domain; on
+older hosts the plugin loads but remapping is unavailable (everything
+no-ops cleanly).
 
 ## Install
 
@@ -146,15 +142,16 @@ git clone https://github.com/jphinspace/feedBack-plugin-chart-retuner.git /path/
 
 Restart feedBack (or reload plugins) after installing.
 
-After installing, `highway_3d` may continue to be selected by default for
-bass arrangements. You may need to select `Chart Retuner` manually from the
-viz picker.
+After installing, remapping is **off** until you enable it: open the
+player's plugin controls (left rail → Plugins) and tick the **Retuner**
+checkbox. The choice persists — feedBack's chart-transform domain
+remembers the selected provider across sessions.
 
 ## Build
 
-No build step for `screen.js` itself — it's plain JS, no bundler. The
-Tailwind stylesheet (`assets/plugin.css`) is prebuilt and committed; only
-regenerate it if you add Tailwind classes to `screen.js`/`settings.html`:
+No build step for the runtime — plain ES modules under `src/`, no bundler.
+The Tailwind stylesheet (`assets/plugin.css`) is prebuilt and committed;
+only regenerate it if you add Tailwind classes to `settings.html`:
 
 ```sh
 bash build-tailwind.sh
@@ -164,30 +161,11 @@ bash build-tailwind.sh
 
 ```sh
 node test/retune-engine.test.mjs
+node test/chord-solver.test.mjs
+node test/provider.test.mjs
 ```
-
-### Syncing from upstream `highway_3d`
-
-This fork needs to periodically pull fixes from the canonical `highway_3d`
-plugin rather than silently drifting. Short version:
-
-1. Shallow-clone `https://github.com/got-feedBack/feedBack` somewhere
-   scratch (never point this repo's own remotes at it).
-2. Diff its `plugins/highway_3d/screen.js` against the version this
-   plugin was last synced to (noted in `HISTORY.md`'s sync-log entries).
-3. For each changed hunk, find the same surrounding code in this repo's
-   `screen.js` (by content, not line number — we've diverged) and reapply
-   it — *unless* it touches one of our patch points (listed in
-   `HISTORY.md`), in which case reconcile by hand instead of copying
-   blindly.
-4. Re-run the test suite and diff this repo's `screen.js` against the fresh
-   upstream copy — every remaining hunk should trace to a documented patch
-   point.
-
-Full procedure: `PLANNING.md` ("Syncing from upstream"). Sync log (what was
-synced, when): `HISTORY.md`.
 
 ## License
 
-AGPL-3.0-only, same as feedBack and the plugin this is forked from. Third-party
-components (Butterchurn) are noted in [`NOTICE`](NOTICE).
+AGPL-3.0-only, same as feedBack. Historical third-party component notes
+(versions before 0.5.0 vendored Butterchurn) are in [`NOTICE`](NOTICE).
