@@ -137,4 +137,39 @@ transform(input1);
 assert.deepEqual(primaryHw.calls[primaryHw.calls.length - 1], ['#111111'], 'primary colors restored');
 assert.deepEqual(panelHw.calls[panelHw.calls.length - 1], ['#111111'], 'panel colors restored');
 
+// Case 7: player-controls mount honors the host-UI version — v3 mounts
+// into feedBack.ui.playerControlSlot(); v2/other hosts get #player-controls.
+function makeStubEl(id) {
+    return {
+        id: id || '',
+        children: [],
+        style: {},
+        appendChild(child) { this.children.push(child); return child; },
+        contains(node) {
+            return this.children.includes(node)
+                || this.children.some((c) => typeof c.contains === 'function' && c.contains(node));
+        },
+        addEventListener() {},
+    };
+}
+const v3Slot = makeStubEl('v3-slot');
+const v2Bar = makeStubEl('player-controls');
+globalThis.document = {
+    createElement: () => makeStubEl(),
+    getElementById: (id) => (id === 'player-controls' ? v2Bar : null),
+};
+
+// v3 host: uiVersion gates the slot path.
+globalThis.feedBack.uiVersion = 'v3';
+globalThis.feedBack.ui = { playerControlSlot: () => v3Slot };
+globalThis.feedBack.emit('song:ready', {});
+assert.equal(v3Slot.children.length, 1, 'v3 host mounts the widget into the plugin slot');
+assert.equal(v2Bar.children.length, 0, 'v3 host does not touch #player-controls');
+
+// v2/other host: even with a playerControlSlot-shaped api present, a
+// non-v3 uiVersion must route to the classic controls bar.
+globalThis.feedBack.uiVersion = 'v2';
+globalThis.feedBack.emit('song:ready', {});
+assert.equal(v2Bar.children.length, 1, 'non-v3 host mounts into #player-controls');
+
 console.log('OK - end-to-end transform sanity passed');

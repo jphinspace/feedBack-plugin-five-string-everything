@@ -522,7 +522,11 @@ import { CR } from './chart-retune.js';
     function _crMountAdjustControls() {
         if (typeof document === 'undefined') return;
         const fb = window.feedBack;
-        const slot = (fb && fb.ui && typeof fb.ui.playerControlSlot === 'function')
+        // Per the documented player-chrome contract: detect v3 via
+        // uiVersion and mount into the plugin slot; v2/other hosts get
+        // the classic #player-controls bar.
+        const isV3 = !!(fb && fb.uiVersion === 'v3');
+        const slot = (isV3 && fb.ui && typeof fb.ui.playerControlSlot === 'function')
             ? fb.ui.playerControlSlot()
             : document.getElementById('player-controls');
         if (!slot) return;
