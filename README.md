@@ -10,9 +10,8 @@ Notes outside a target instrument's range are dropped.
 > sound exactly like the original (notes can land in different octaves,
 > chords may be revoiced or simplified, and out-of-range notes are
 > dropped), and it may be more difficult to play than the original
-> arrangement. If you have suggestions for improving the mapping, feel
-> free to [submit an issue](https://github.com/jphinspace/feedBack-plugin-chart-retuner/issues)
-> with feedback.
+> arrangement. If you have suggestions for improving the mapping, please
+> [submit an issue](https://github.com/jphinspace/feedBack-plugin-chart-retuner/issues).
 
 ## Target tunings
 
