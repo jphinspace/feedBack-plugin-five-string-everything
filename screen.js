@@ -1,21 +1,9 @@
 // Chart Retuner — chart-transform provider (feedBack#952).
 //
 // Registers CR.createRetuner() (./src/chart-retune.js) as a chart-transform
-// provider: core hands the current chart's difficulty-filtered AND
-// full-difficulty notes/chords/anchors/templates to `_transform()` after
-// every difficulty-filter rebuild (song ready, mastery slider move,
-// explicit refresh), and the remapped result reaches every renderer's
-// draw bundle, every highway getter, and any scorer that reads
-// getNotes()/getChords() — not just one renderer this plugin owns. The
-// target instrument's string COUNT (4-8) and pitches are fully
-// user-configurable via the settings picker; EADG is the built-in bass
-// default, EADGBE the guitar default; any 4-8-string tuning of your own
-// (AEADG, BbEbAbDbGb, a cello, a banjo, ...) also works — see
-// CR.resolveTargetTuning. The remap math and chord-aware revoicing live in
-// ./src/ (imported as the `CR` namespace below); this file only wires that
-// engine into the capability, resolves which of the three per-arrangement
-// tuning profiles applies, and hosts the Target Tunings settings bridge +
-// the player-controls capo/octave quick-adjust widget.
+// provider, so the remapped chart reaches every renderer and scorer, not
+// just one renderer this plugin owns. Also hosts the Target Tunings
+// settings bridge and the player-controls Retuner/Capo pills.
 import { CR } from './src/chart-retune.js';
 
 (function () {
@@ -23,8 +11,7 @@ import { CR } from './src/chart-retune.js';
 
     const PROVIDER_ID = 'chart_retuner';
 
-    // Legacy namespace (predates this file's own rewrite) kept verbatim so
-    // upgrading installs keep their saved tuning profiles/custom tunings.
+    // Legacy namespace, kept as-is so upgrading installs keep their saved tunings.
     const STORAGE_PREFIX = 'chart_retuner_bg_';
     const _mem = Object.create(null); // in-memory fallback when localStorage is blocked
 
@@ -43,12 +30,8 @@ import { CR } from './src/chart-retune.js';
         _refresh();
     }
 
-    /* ── Target tuning profiles (bass / rhythm / lead) ───────────────────
-     * Three per-arrangement-class profiles sharing one pool of built-in
-     * presets + saved custom tunings — any profile may point at any
-     * tuning. `arrangementClassFor` in _transform() picks which profile a
-     * given chart resolves against.
-     */
+    // Three per-arrangement-class tuning profiles sharing one pool of
+    // built-in presets + saved custom tunings.
     const _PROFILE_KEY_BY_CLASS = {
         bass: 'targetTuningIdBass',
         rhythm: 'targetTuningIdRhythm',
@@ -59,11 +42,7 @@ import { CR } from './src/chart-retune.js';
         return _PROFILE_KEY_BY_CLASS[arrClass] || _PROFILE_KEY_BY_CLASS.bass;
     }
 
-    // One-time migration from the pre-guitar single 'targetTuningId'
-    // setting: an existing user's pick becomes their bass profile (this
-    // plugin was bass-only before guitar profiles existed). Written
-    // directly, bypassing _write, so load-time migration can't fire a
-    // refresh before the provider is even registered.
+    // One-time migration from the pre-guitar single 'targetTuningId' key to the bass profile.
     (function _migrateLegacyTuningProfile() {
         try {
             if (localStorage.getItem(STORAGE_PREFIX + 'targetTuningIdBass') != null) return;
@@ -71,7 +50,7 @@ import { CR } from './src/chart-retune.js';
             if (legacy == null) return;
             _mem.targetTuningIdBass = legacy;
             localStorage.setItem(STORAGE_PREFIX + 'targetTuningIdBass', legacy);
-        } catch (_) { /* storage blocked — per-class defaults apply */ }
+        } catch (_) { /* storage blocked */ }
     })();
 
     function _readCustomTunings() {
@@ -83,11 +62,8 @@ import { CR } from './src/chart-retune.js';
     }
     function _writeCustomTunings(list) { _write('customTunings', JSON.stringify(list)); }
 
-    // Per-tuning capo/octave quick-adjust overrides (the player-controls
-    // sliders), one global blob keyed by the resolved tuning id: an
-    // override replaces the profile's own saved capo/capoEnabled/
-    // octaveOffset defaults (including back to off/0), so a quick capo on
-    // EADGBE never leaks onto the cello preset.
+    // Per-tuning capo/octave overrides, keyed by resolved tuning id — lets a
+    // quick capo on EADGBE not leak onto the cello preset.
     function _readTuningAdjustOverrides() {
         let map;
         try { map = JSON.parse(_read('tuningAdjustOverrides') || '{}'); } catch (_) { map = null; }
@@ -100,10 +76,7 @@ import { CR } from './src/chart-retune.js';
         _write('tuningAdjustOverrides', JSON.stringify(map));
     }
 
-    // Silent auto-saved "active" tuning (CR.ACTIVE_TUNING_ID) — the
-    // unsaved user-defined tuning the settings editor edits live. While
-    // one exists it overlays every arrangement class and carries its own
-    // capo/octave, so the override map above is skipped for it.
+    // The unsaved "active" tuning the settings editor edits live; overlays every class while it exists.
     function _readActiveTuning() {
         const active = CR.parseActiveTuning(_read('activeTuning'));
         if (!active) return null;
@@ -127,11 +100,7 @@ import { CR } from './src/chart-retune.js';
         if (_read('activeTuning')) _write('activeTuning', '');
     }
 
-    // Resolves a class's active tuning to { id, strings, colors, roles,
-    // maxFret, capo, capoEnabled, octaveOffset }: an unsaved active-tuning
-    // overlay wins outright, else the class's built-in/custom profile with
-    // any quick-adjust override laid over its own capo/capoEnabled/
-    // octaveOffset defaults.
+    // Resolves a class's tuning: active-tuning overlay, else the profile with any quick-adjust override applied.
     function _resolveActiveTuning(arrClass) {
         const active = _readActiveTuning();
         if (active) return active;
@@ -145,10 +114,8 @@ import { CR } from './src/chart-retune.js';
         return t;
     }
 
-    // Settings.html bridge — see settings.html's own comment for why it
-    // dynamic-imports src/chart-retune.js directly rather than mirroring
-    // constants, and falls back to raw localStorage writes when these
-    // globals haven't registered yet.
+    // Bridge for settings.html (dynamic-imports src/chart-retune.js directly; falls back to
+    // raw localStorage writes if this script hasn't registered these yet).
     window.cr3dSetActiveTuning = (arrClass, id) => {
         _clearActiveTuning();
         _write(_profileKeyFor(arrClass), String(id || CR.defaultTuningIdForClass(arrClass)));
@@ -175,8 +142,7 @@ import { CR } from './src/chart-retune.js';
         const idx = list.findIndex(p => p.id === id);
         if (idx >= 0) list[idx] = entry; else list.push(entry);
         _writeCustomTunings(list);
-        // An editor save is the deliberate act — drop any quick-adjust
-        // override for this tuning so the freshly saved defaults apply.
+        // A save is deliberate — drop any quick-adjust override so the new defaults apply.
         const overrides = _readTuningAdjustOverrides();
         if (overrides[id]) {
             delete overrides[id];
@@ -197,14 +163,9 @@ import { CR } from './src/chart-retune.js';
         }
     };
 
-    /* ── Standard open-string base MIDI, by string count ─────────────────
-     * Same table as lib/song.py's base_open_string_midis / static/js/
-     * tuning-display.js's _TUNING_BASE_MIDI / highway_3d's own
-     * _baseOpenStringMidis — so a consuming renderer's independently
-     * computed base, combined with the tuning offsets + capo this plugin
-     * returns from _transform(), reconstructs the exact resolved target
-     * pitch for its open-string nut labels.
-     */
+    // Standard open-string base MIDI by string count — same table as lib/song.py's
+    // base_open_string_midis, so a consuming renderer's own base + this plugin's
+    // returned tuning offsets/capo reconstruct the right pitch for nut labels.
     const _BASE_OPEN_MIDI = {
         4: [28, 33, 38, 43],
         5: [23, 28, 33, 38, 43],
@@ -219,15 +180,11 @@ import { CR } from './src/chart-retune.js';
         return base.slice();
     }
 
-    // Runs the remap engine over one notes/chords/anchors/templates view.
-    // `sourceTuning`/`sourceCapo`/`sourceStringCount` describe the CHART's
-    // own tuning (songInfo, untouched by this plugin); `targetMidiTuning`/
-    // `maxFret` are this plugin's resolved target, already folding in this
-    // plugin's own (separate) target capo when enabled — see
-    // _transform(). Frets come back capo-relative (no displayFretOffset)
-    // — the standard chart convention every consuming renderer already
-    // understands, pairing with the `capo` field _transform() returns
-    // separately.
+    // Runs the remap engine over one notes/chords/anchors/templates view. sourceTuning/
+    // sourceCapo/sourceStringCount describe the CHART's own tuning (untouched by this
+    // plugin); targetMidiTuning/maxFret already fold in this plugin's own capo, if
+    // enabled. Frets come back capo-relative, pairing with the `capo` field
+    // _transform() returns separately — the same convention every chart already uses.
     function _applyRetune(notes, chords, anchors, chordTemplates, sourceTuning, sourceCapo, sourceStringCount, targetMidiTuning, maxFret) {
         const bundle = {
             notes, chords, anchors: anchors || [], chordTemplates,
@@ -237,12 +194,8 @@ import { CR } from './src/chart-retune.js';
         return bundle;
     }
 
-    // The chart-transform provider entry point (feedBack#952) — called by
-    // core after every difficulty-filter rebuild (song ready, mastery
-    // slider move, explicit refresh), never per frame. `input` carries
-    // isolated copies of the chart's difficulty-filtered and
-    // full-difficulty arrays; the retuner is re-run over each view since
-    // its own cache only tracks one input shape at a time.
+    // The chart-transform entry point (feedBack#952) — called after every
+    // difficulty-filter rebuild (song ready, mastery move, refresh), never per frame.
     function _transform(input) {
         const songInfo = input.songInfo || {};
         const arrClass = CR.arrangementClassFor(songInfo.arrangement);
@@ -251,14 +204,8 @@ import { CR } from './src/chart-retune.js';
 
         const active = _resolveActiveTuning(arrClass);
         const target = CR.resolveTargetTuning(active.strings);
-        // The plugin's OWN target-side capo — a separate concept from
-        // whatever capo (if any) the chart's SOURCE was recorded with.
-        // The source's capo still feeds sourceCapo below, so the engine
-        // always matches against the chart's true sounding pitches; this
-        // capo instead describes the TARGET instrument, and only applies
-        // when the tuning's capoEnabled flag is on (off by default — a
-        // disabled tuning's capo fret is preserved in storage but never
-        // reaches the remap).
+        // This plugin's own target-side capo — separate from whatever capo the
+        // chart's source used (that still feeds sourceCapo above).
         const effCapo = active.capoEnabled ? active.capo : 0;
         const remapMidiTuning = (effCapo === 0 && active.octaveOffset === 0)
             ? target.midiTuning
@@ -289,85 +236,123 @@ import { CR } from './src/chart-retune.js';
         };
     }
 
-    /* ── Capo & octave quick controls (player chrome) ────────────────────
-     * A capo on/off toggle + fret slider, and an octave slider, in the
-     * player chrome — v3's always-reachable plugin slot
-     * (window.feedBack.ui.playerControlSlot()) or, in classic v2,
-     * #player-controls — so a player can clamp a capo on / shift the
-     * chart an octave without a settings round-trip. This capo is this
-     * plugin's OWN target-side concept (see _transform()), independent of
-     * whatever capo the chart's source used. They edit the active tuning
-     * profile's capo/capoEnabled/octave (the unsaved active tuning
-     * directly, a saved profile via the quick-adjust override blob),
-     * applying live via refresh() and persisting per tuning. One widget
-     * per session: it tracks the arrangement class of the most recently
-     * transformed chart, so under splitscreen the last-loaded panel's
-     * arrangement wins.
+    /* ── Retuner / Capo controls (player chrome) ──────────────────────────
+     * v3's Plugin Controls rail popover (playerControlSlot()), or classic
+     * v2's #player-controls. Retuner/Capo are pills (highway_3d's
+     * convention for this slot); fret + octave are sliders, since both
+     * need to be adjustable mid-song here as well as in Settings. Mounted
+     * from song:ready directly (not just _transform()) so the Retuner
+     * pill stays reachable even while this plugin isn't the active
+     * provider.
      */
-    let _crAdjRoot = null;
-    let _crAdjEls = null;
+    let _crRoot = null;
+    let _crPills = null; // { retuner, capo }
+    let _crEls = null;   // { detailsWrap, fretRow, fretSlider, fretVal, octSlider, octVal }
     let _crAdjArrClass = 'bass';
-    function _crAdjProfileName(t) {
+
+    function _crIsActive() {
+        const domain = window.feedBack && window.feedBack.chartTransformDomain;
+        return !!(domain && domain.snapshot().active === PROVIDER_ID);
+    }
+    function _crSetActive(on) {
+        if (!_capabilitiesReady()) return;
+        window.feedBack.capabilities.dispatch({
+            capability: 'chart-transform',
+            command: on ? 'select-provider' : 'clear-provider',
+            source: PROVIDER_ID,
+            payload: on ? { providerId: PROVIDER_ID } : undefined,
+        });
+    }
+    function _crProfileName(t) {
         if (t.id === CR.ACTIVE_TUNING_ID) return CR.ACTIVE_TUNING_NAME + ' (unsaved)';
         const preset = CR.BUILTIN_PRESET_TUNINGS.find(p => p.id === t.id);
         if (preset) return preset.label;
         const custom = _readCustomTunings().find(p => p.id === t.id);
         return custom ? custom.name : t.strings.join(' ');
     }
+
+    const _PILL_STYLE = 'padding:.375rem .75rem;border:0;border-radius:.5rem;font-size:.75rem;'
+        + 'line-height:1rem;cursor:pointer;transition:background-color .15s,color .15s;';
+    const _PILL_COLOR = { idle: '#181830', hover: '#1e1e3a', text: '#d1d5db', textDim: '#6b7280', onBg: 'rgba(20,83,45,0.5)', onText: '#86efac' };
+    function _crPill(label) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.textContent = label;
+        b.style.cssText = _PILL_STYLE;
+        b.addEventListener('mouseenter', () => { if (!b._on) b.style.backgroundColor = _PILL_COLOR.hover; });
+        b.addEventListener('mouseleave', () => { if (!b._on) b.style.backgroundColor = _PILL_COLOR.idle; });
+        return b;
+    }
+    function _crPaintPill(btn, on, disabled, title) {
+        btn._on = !!on && !disabled;
+        btn.disabled = !!disabled;
+        btn.style.pointerEvents = disabled ? 'none' : '';
+        btn.style.cursor = disabled ? 'not-allowed' : 'pointer';
+        btn.style.opacity = disabled ? '.45' : '1';
+        btn.title = title;
+        btn.setAttribute('aria-pressed', btn._on ? 'true' : 'false');
+        btn.style.backgroundColor = disabled ? _PILL_COLOR.idle : (btn._on ? _PILL_COLOR.onBg : _PILL_COLOR.idle);
+        btn.style.color = disabled ? _PILL_COLOR.textDim : (btn._on ? _PILL_COLOR.onText : _PILL_COLOR.text);
+    }
+
     function _crAdjRefresh() {
-        if (!_crAdjEls) return;
+        if (!_crPills) return;
+        const active = _crIsActive();
+        _crPaintPill(_crPills.retuner, active, false,
+            active ? 'Retuning active — click to play the original tuning.' : 'Off — click to retune this chart.');
+        _crEls.detailsWrap.style.display = active ? '' : 'none';
+        if (!active) return;
         const t = _resolveActiveTuning(_crAdjArrClass);
-        _crAdjEls.name.textContent = 'Retuner · ' + _crAdjProfileName(t);
-        _crAdjEls.capoToggle.checked = !!t.capoEnabled;
-        // The fret row (label + slider + readout) only shows once capo is
-        // switched on — off is the default and the common case.
-        _crAdjEls.capoRow.style.display = t.capoEnabled ? '' : 'none';
-        _crAdjEls.capoSlider.max = String(t.maxFret - 1);
-        _crAdjEls.capoSlider.value = String(t.capo);
-        _crAdjEls.capoVal.textContent = t.capo === 0 ? 'off' : String(t.capo);
-        _crAdjEls.octSlider.value = String(t.octaveOffset);
-        _crAdjEls.octVal.textContent = (t.octaveOffset > 0 ? '+' : '') + t.octaveOffset;
+        _crPaintPill(_crPills.capo, t.capoEnabled, false,
+            (t.capoEnabled ? 'Capo fret ' + t.capo : 'Off') + ' on ' + _crProfileName(t) + ' — click to toggle.');
+        _crEls.fretRow.style.display = t.capoEnabled ? '' : 'none';
+        _crEls.fretSlider.max = String(t.maxFret - 1);
+        _crEls.fretSlider.value = String(t.capo);
+        _crEls.fretVal.textContent = String(t.capo);
+        _crEls.octSlider.value = String(t.octaveOffset);
+        _crEls.octVal.textContent = (t.octaveOffset > 0 ? '+' : '') + t.octaveOffset;
     }
     function _crAdjNoteArrClass(cls) {
         if (cls === _crAdjArrClass) return;
         _crAdjArrClass = cls;
         _crAdjRefresh();
     }
-    function _crAdjCommit() {
-        if (!_crAdjEls) return;
+    function _crToggleCapo() {
         const t = _resolveActiveTuning(_crAdjArrClass);
-        const capoEnabled = _crAdjEls.capoToggle.checked;
-        const capo = Math.max(0, Math.min(t.maxFret - 1, parseInt(_crAdjEls.capoSlider.value, 10) || 0));
-        const oct = Math.max(CR.MIN_OCTAVE_OFFSET, Math.min(CR.MAX_OCTAVE_OFFSET, parseInt(_crAdjEls.octSlider.value, 10) || 0));
+        const capoEnabled = !t.capoEnabled;
         if (t.id === CR.ACTIVE_TUNING_ID) {
-            _writeActiveTuning({ strings: t.strings, colors: t.colors, maxFret: t.maxFret, capo, capoEnabled, octaveOffset: oct });
+            _writeActiveTuning({ strings: t.strings, colors: t.colors, maxFret: t.maxFret, capo: t.capo, capoEnabled, octaveOffset: t.octaveOffset });
             return;
         }
-        _writeTuningAdjustOverride(t.id, capo, capoEnabled, oct);
+        _writeTuningAdjustOverride(t.id, t.capo, capoEnabled, t.octaveOffset);
     }
-    function _crBuildAdjustControls() {
+    function _crAdjCommit() {
+        const t = _resolveActiveTuning(_crAdjArrClass);
+        const capo = Math.max(0, Math.min(t.maxFret - 1, parseInt(_crEls.fretSlider.value, 10) || 0));
+        const oct = Math.max(CR.MIN_OCTAVE_OFFSET, Math.min(CR.MAX_OCTAVE_OFFSET, parseInt(_crEls.octSlider.value, 10) || 0));
+        if (t.id === CR.ACTIVE_TUNING_ID) {
+            _writeActiveTuning({ strings: t.strings, colors: t.colors, maxFret: t.maxFret, capo, capoEnabled: t.capoEnabled, octaveOffset: oct });
+            return;
+        }
+        _writeTuningAdjustOverride(t.id, capo, t.capoEnabled, oct);
+    }
+    function _crBuildControls() {
         const root = document.createElement('div');
         root.id = 'cr3d-adjust-controls';
-        root.style.cssText = 'display:flex;gap:4px 10px;align-items:center;flex-wrap:wrap;padding:4px 8px;font-size:11px;line-height:1.2;';
-        const name = document.createElement('div');
-        name.style.cssText = 'font-weight:600;opacity:0.8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px;flex-basis:100%;';
-        name.title = 'Chart Retuner — the active target tuning these sliders adjust';
-        root.appendChild(name);
+        root.style.cssText = 'display:flex;gap:6px 10px;align-items:center;flex-wrap:wrap;';
+        const retuner = _crPill('Retuner');
+        root.appendChild(retuner);
 
-        const capoToggleWrap = document.createElement('label');
-        capoToggleWrap.style.cssText = 'display:flex;align-items:center;gap:4px;white-space:nowrap;cursor:pointer;';
-        capoToggleWrap.title = 'Capo on the TARGET tuning below — independent of any capo the chart itself was recorded with. Off by default.';
-        const capoToggle = document.createElement('input');
-        capoToggle.type = 'checkbox';
-        const capoToggleText = document.createElement('span');
-        capoToggleText.textContent = 'Capo';
-        capoToggleWrap.appendChild(capoToggle);
-        capoToggleWrap.appendChild(capoToggleText);
-        root.appendChild(capoToggleWrap);
+        // Everything below is moot while Retuner is off.
+        const detailsWrap = document.createElement('div');
+        detailsWrap.style.cssText = 'display:flex;gap:6px 10px;align-items:center;flex-wrap:wrap;';
+        root.appendChild(detailsWrap);
+        const capo = _crPill('Capo');
+        detailsWrap.appendChild(capo);
 
         function row(labelText, min, max, title) {
             const wrap = document.createElement('label');
-            wrap.style.cssText = 'display:flex;align-items:center;gap:6px;white-space:nowrap;cursor:pointer;';
+            wrap.style.cssText = 'display:flex;align-items:center;gap:6px;white-space:nowrap;cursor:pointer;font-size:.75rem;color:' + _PILL_COLOR.text + ';';
             wrap.title = title;
             const text = document.createElement('span');
             text.textContent = labelText;
@@ -376,50 +361,52 @@ import { CR } from './src/chart-retune.js';
             slider.min = String(min);
             slider.max = String(max);
             slider.step = '1';
-            slider.style.cssText = 'width:110px;';
+            slider.style.cssText = 'width:100px;';
             const val = document.createElement('span');
-            val.style.cssText = 'min-width:2.2em;text-align:right;font-variant-numeric:tabular-nums;';
+            val.style.cssText = 'min-width:2em;text-align:right;font-variant-numeric:tabular-nums;';
             wrap.appendChild(text);
             wrap.appendChild(slider);
             wrap.appendChild(val);
-            root.appendChild(wrap);
+            detailsWrap.appendChild(wrap);
             return { wrap, slider, val };
         }
-        const capo = row('Fret', 0, CR.DEFAULT_MAX_FRET - 1,
-            'Capo fret for the active target tuning. One fret = one half-step up per string; frets above (max fret − capo) fall off the neck. Applies live; persists per tuning.');
-        const oct = row('Octave', CR.MIN_OCTAVE_OFFSET, CR.MAX_OCTAVE_OFFSET,
-            'Shift the whole chart up/down whole octaves — +1 plays an E-standard bass chart on guitar strings note-for-note. Applies live; persists per tuning.');
-        capoToggle.addEventListener('change', _crAdjCommit);
-        capo.slider.addEventListener('input', _crAdjCommit);
+        const fret = row('Fret', 0, CR.DEFAULT_MAX_FRET - 1, 'Capo fret — applies live, persists per tuning.');
+        const oct = row('Octave', CR.MIN_OCTAVE_OFFSET, CR.MAX_OCTAVE_OFFSET, 'Shift the chart up/down whole octaves — applies live, persists per tuning.');
+
+        retuner.addEventListener('click', () => _crSetActive(!retuner._on));
+        capo.addEventListener('click', _crToggleCapo);
+        fret.slider.addEventListener('input', _crAdjCommit);
         oct.slider.addEventListener('input', _crAdjCommit);
-        _crAdjRoot = root;
-        _crAdjEls = {
-            name, capoToggle, capoRow: capo.wrap, capoSlider: capo.slider, capoVal: capo.val,
-            octSlider: oct.slider, octVal: oct.val,
-        };
+
+        _crRoot = root;
+        _crPills = { retuner, capo };
+        _crEls = { detailsWrap, fretRow: fret.wrap, fretSlider: fret.slider, fretVal: fret.val, octSlider: oct.slider, octVal: oct.val };
     }
     function _crMountAdjustControls() {
         if (typeof document === 'undefined') return;
         const fb = window.feedBack;
-        // v3: mount into the stable plugin slot (never #player-controls —
-        // its legacy anchors are gone and the transport auto-hides; see
-        // CLAUDE.md "player-chrome contract"). v2: append to the classic
-        // always-visible controls bar.
+        // v3: mount into the stable plugin slot (#player-controls's legacy
+        // anchors are gone and the v3 transport auto-hides). v2: classic bar.
         const isV3 = !!(fb && fb.uiVersion === 'v3');
         const slot = (isV3 && fb.ui && typeof fb.ui.playerControlSlot === 'function')
             ? fb.ui.playerControlSlot()
             : document.getElementById('player-controls');
         if (!slot) return;
-        // Re-injection guard against the ACTUAL container, not a
-        // hard-coded id (the host shim may re-home nodes).
-        if (_crAdjRoot && slot.contains(_crAdjRoot)) { _crAdjRefresh(); return; }
-        if (!_crAdjRoot) _crBuildAdjustControls();
-        slot.appendChild(_crAdjRoot);
+        if (_crRoot && slot.contains(_crRoot)) { _crAdjRefresh(); return; }
+        if (!_crRoot) _crBuildControls();
+        slot.appendChild(_crRoot);
         _crAdjRefresh();
     }
-    // Keep the readouts live for any change that isn't this widget's own
-    // commit — another session editing the same profiles, or a settings-
-    // editor save (which also clears this tuning's override).
+    if (window.feedBack && typeof window.feedBack.on === 'function') {
+        window.feedBack.on('song:ready', () => {
+            const hw = window.highway;
+            const songInfo = (hw && typeof hw.getSongInfo === 'function') ? (hw.getSongInfo() || {}) : {};
+            _crAdjNoteArrClass(CR.arrangementClassFor(songInfo.arrangement));
+            _crMountAdjustControls();
+        });
+        // Keeps both this widget and settings.html's toggle in sync regardless of which changed it.
+        window.feedBack.on('chart-transform:transform-changed', _crAdjRefresh);
+    }
     const _refreshListeners = [_crAdjRefresh];
 
     /* ── chart-transform capability registration ─────────────────────── */
@@ -439,11 +426,9 @@ import { CR } from './src/chart-retune.js';
             source: PROVIDER_ID,
             payload: { providerId: PROVIDER_ID, label: 'Chart Retuner', transform: _transform },
         })).then(() => {
-            // Auto-activate the first time this plugin ever registers. Core
-            // persists "no selection" and "explicitly cleared" identically
-            // (an absent localStorage key), so this flag is the only way
-            // to tell "never chosen" from "user turned it off" apart on
-            // later loads.
+            // Auto-activate only the first time this plugin ever registers — an
+            // absent key means either "never chosen" or "explicitly cleared", and
+            // this flag is what tells the two apart on later loads.
             if (_read('autoSelected') != null) return;
             _write('autoSelected', '1');
             api.dispatch({

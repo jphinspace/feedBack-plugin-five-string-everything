@@ -38,25 +38,16 @@ export function isValidMaxFret(v) {
 // half-steps + capo at fret k reproduces the un-capo'd chart exactly
 // (cumulative offset 0) for any chart that fits the shortened neck.
 //
-// This is a SEPARATE concept from any capo the chart's own SOURCE
-// arrangement was recorded with (songInfo.capo) — that one describes the
-// original instrument and is consumed on its own (see
-// computeOpenStringMidiByString below) to compute each source note's true
-// sounding pitch before remapping. This capo describes the TARGET
-// instrument the retuned chart lands on, and is gated by capoEnabled
-// below: a fret value can be saved/carried around while disabled, but
-// only applies to the remap once enabled.
+// Separate from the chart's own SOURCE capo (songInfo.capo, consumed by
+// computeOpenStringMidiByString below); this one describes the TARGET
+// instrument and is gated by capoEnabled below.
 export function isValidCapo(v, maxFret) {
     return Number.isInteger(v) && v >= 0 && v < (Number.isInteger(maxFret) ? maxFret : DEFAULT_MAX_FRET);
 }
 export function resolveCapo(v, maxFret) {
     return isValidCapo(v, maxFret) ? v : 0;
 }
-// On/off gate for the target capo above (v0.5.0) — off by default (every
-// built-in preset and every tuning saved before this field existed reads
-// as off), since assuming no capo on the target instrument is the more
-// broadly useful default. Any non-`true` stored value (missing, corrupt,
-// explicitly false) resolves to off.
+// On/off gate for the capo above (v0.5.0) — off by default; only literal `true` counts.
 export function resolveCapoEnabled(v) {
     return v === true;
 }
