@@ -122,8 +122,8 @@ import { CR } from './src/chart-retune.js';
     };
     window.cr3dWriteActiveTuning = (d) => _writeActiveTuning(d);
     window.cr3dClearActiveTuning = () => _clearActiveTuning();
-    window.cr3dGetResolvedTuning = (arrClass) => _resolveActiveTuning(arrClass || _crAdjArrClass);
-    window.cr3dActiveArrClass = () => _crAdjArrClass;
+    window.cr3dGetResolvedTuning = (arrClass) => _resolveActiveTuning(arrClass || _crCurrentArrClass());
+    window.cr3dActiveArrClass = () => _crCurrentArrClass();
     window.cr3dSaveCustomTuning = (profile) => {
         if (!profile || typeof profile.name !== 'string' || !profile.name.trim()) return null;
         if (!CR.isValidTuningStringsArray(profile.strings)) return null;
@@ -199,7 +199,6 @@ import { CR } from './src/chart-retune.js';
     function _transform(input) {
         const songInfo = input.songInfo || {};
         const arrClass = CR.arrangementClassFor(songInfo.arrangement);
-        _crAdjNoteArrClass(arrClass);
         _crMountAdjustControls();
 
         const active = _resolveActiveTuning(arrClass);
@@ -243,13 +242,21 @@ import { CR } from './src/chart-retune.js';
      * need to be adjustable mid-song here as well as in Settings. Mounted
      * from song:ready directly (not just _transform()) so the Retuner
      * pill stays reachable even while this plugin isn't the active
-     * provider.
+     * provider. One shared widget for the whole app: it always reflects
+     * window.highway (the primary panel), never a cached value — under
+     * splitscreen a secondary panel's own tuning is still configured
+     * correctly (each panel resolves its own arrangement class), just not
+     * shown in this widget; use Settings for that panel's class.
      */
     let _crRoot = null;
     let _crPills = null; // { retuner, capo }
     let _crEls = null;   // { detailsWrap, fretRow, fretSlider, fretVal, octSlider, octVal }
-    let _crAdjArrClass = 'bass';
 
+    function _crCurrentArrClass() {
+        const hw = window.highway;
+        const songInfo = (hw && typeof hw.getSongInfo === 'function') ? (hw.getSongInfo() || {}) : {};
+        return CR.arrangementClassFor(songInfo.arrangement);
+    }
     function _crIsActive() {
         const domain = window.feedBack && window.feedBack.chartTransformDomain;
         return !!(domain && domain.snapshot().active === PROVIDER_ID);
@@ -302,7 +309,7 @@ import { CR } from './src/chart-retune.js';
             active ? 'Retuning active — click to play the original tuning.' : 'Off — click to retune this chart.');
         _crEls.detailsWrap.style.display = active ? '' : 'none';
         if (!active) return;
-        const t = _resolveActiveTuning(_crAdjArrClass);
+        const t = _resolveActiveTuning(_crCurrentArrClass());
         _crPaintPill(_crPills.capo, t.capoEnabled, false,
             (t.capoEnabled ? 'Capo fret ' + t.capo : 'Off') + ' on ' + _crProfileName(t) + ' — click to toggle.');
         _crEls.fretRow.style.display = t.capoEnabled ? '' : 'none';
@@ -312,13 +319,8 @@ import { CR } from './src/chart-retune.js';
         _crEls.octSlider.value = String(t.octaveOffset);
         _crEls.octVal.textContent = (t.octaveOffset > 0 ? '+' : '') + t.octaveOffset;
     }
-    function _crAdjNoteArrClass(cls) {
-        if (cls === _crAdjArrClass) return;
-        _crAdjArrClass = cls;
-        _crAdjRefresh();
-    }
     function _crToggleCapo() {
-        const t = _resolveActiveTuning(_crAdjArrClass);
+        const t = _resolveActiveTuning(_crCurrentArrClass());
         const capoEnabled = !t.capoEnabled;
         if (t.id === CR.ACTIVE_TUNING_ID) {
             _writeActiveTuning({ strings: t.strings, colors: t.colors, maxFret: t.maxFret, capo: t.capo, capoEnabled, octaveOffset: t.octaveOffset });
@@ -327,7 +329,7 @@ import { CR } from './src/chart-retune.js';
         _writeTuningAdjustOverride(t.id, t.capo, capoEnabled, t.octaveOffset);
     }
     function _crAdjCommit() {
-        const t = _resolveActiveTuning(_crAdjArrClass);
+        const t = _resolveActiveTuning(_crCurrentArrClass());
         const capo = Math.max(0, Math.min(t.maxFret - 1, parseInt(_crEls.fretSlider.value, 10) || 0));
         const oct = Math.max(CR.MIN_OCTAVE_OFFSET, Math.min(CR.MAX_OCTAVE_OFFSET, parseInt(_crEls.octSlider.value, 10) || 0));
         if (t.id === CR.ACTIVE_TUNING_ID) {
@@ -356,6 +358,7 @@ import { CR } from './src/chart-retune.js';
             wrap.title = title;
             const text = document.createElement('span');
             text.textContent = labelText;
+            text.style.marginRight = '4px';
             const slider = document.createElement('input');
             slider.type = 'range';
             slider.min = String(min);
@@ -392,18 +395,19 @@ import { CR } from './src/chart-retune.js';
             ? fb.ui.playerControlSlot()
             : document.getElementById('player-controls');
         if (!slot) return;
+        // A stale copy from a previous script execution (core re-registers
+        // this plugin's transform on rehydration, but the old closure's DOM
+        // node never got removed) is a different element than our own
+        // _crRoot — drop it so clicks always land on the live instance.
+        const stale = document.getElementById('cr3d-adjust-controls');
+        if (stale && stale !== _crRoot) stale.remove();
         if (_crRoot && slot.contains(_crRoot)) { _crAdjRefresh(); return; }
         if (!_crRoot) _crBuildControls();
         slot.appendChild(_crRoot);
         _crAdjRefresh();
     }
     if (window.feedBack && typeof window.feedBack.on === 'function') {
-        window.feedBack.on('song:ready', () => {
-            const hw = window.highway;
-            const songInfo = (hw && typeof hw.getSongInfo === 'function') ? (hw.getSongInfo() || {}) : {};
-            _crAdjNoteArrClass(CR.arrangementClassFor(songInfo.arrangement));
-            _crMountAdjustControls();
-        });
+        window.feedBack.on('song:ready', _crMountAdjustControls);
         // Keeps both this widget and settings.html's toggle in sync regardless of which changed it.
         window.feedBack.on('chart-transform:transform-changed', _crAdjRefresh);
     }
