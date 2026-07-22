@@ -1,9 +1,10 @@
 # Chart Retuner — development history
 
 A condensed record of completed work. Future/unimplemented work lives in
-[`PLANNING.md`](PLANNING.md), which also carries the repeatable upstream-sync
-procedure; the sync **log** (what was actually synced, when) is at the bottom
-of this file.
+[`PLANNING.md`](PLANNING.md). Phases 1-18 (through v0.4.4) built and
+maintained a forked-`highway_3d` renderer, including a repeatable
+upstream-sync procedure and log (bottom of this file); Phase 19 retired
+that architecture in favor of the `chart-transform` capability.
 
 *Note: this plugin and repo were originally named "Five-String Everything"
 (internal abbreviation `FSE` / `fse-retune.js`); renamed to Chart Retuner in
@@ -12,12 +13,20 @@ use whichever name was current at the time.*
 
 ## Settled design (why the plugin is shaped this way)
 
-- **Own renderer, not a hook.** feedBack has no hook to transform a chart's
+> **Superseded by Phase 19.** The "own renderer, not a hook" bullet below,
+> the Patch points list, and the Isolation renames note all describe the
+> forked-`highway_3d`-renderer architecture this plugin shipped under
+> through Phase 18. Phase 19 replaced that renderer fork with a
+> `chart-transform` capability provider; the current `screen.js` no longer
+> forks or syncs against `highway_3d` at all. Kept below as the historical
+> record of why that architecture existed and what it took to maintain.
+
+- **Own renderer, not a hook.** feedBack had no hook to transform a chart's
   notes/chords/tuning before a renderer or scorer reads them, and core's
-  `stringCount` is a private closure primitive with no setter. So this plugin
-  is an independent `setRenderer`-contract visualization built by **forking
-  `highway_3d/screen.js` verbatim** and patching it minimally — we own the
-  copy outright. Rendering matches `highway_3d` in every respect except note
+  `stringCount` was a private closure primitive with no setter. So this plugin
+  was an independent `setRenderer`-contract visualization built by **forking
+  `highway_3d/screen.js` verbatim** and patching it minimally — we owned the
+  copy outright. Rendering matched `highway_3d` in every respect except note
   gem position (and everything derived from it).
 - **Pure string/fret offset arithmetic** — one fret = one half-step; no
   frequency/Hz ever computed. One general algorithm, **no tuning-specific
@@ -30,11 +39,13 @@ use whichever name was current at the time.*
   mutates `bundle.notes`/`.chords`/`.songInfo`; note_detect judges detected
   audio pitch against the original chart data. Remapped note copies carry an
   `_origNote` back-reference so `getNoteState` lighting keys correctly.
+  **No longer true as of Phase 19** — see its entry in the Phase log below.
 - **Chord collisions:** two notes landing on one target string keep only the
   lower-pitched one (per string, not per chord) — later superseded by the
   chord solver revoicing instead (Phase 13).
 - **No enable/disable toggle** — `matchesArrangement` + the viz picker are
-  the on/off mechanism.
+  the on/off mechanism. **Superseded by Phase 19's Retuning active toggle**
+  once the viz picker stopped being the on/off mechanism.
 - **Known limitation:** RS2014 `cent_offset` is ignored (same as
   `lib/song.py`'s note-pitch formula); charts with a nonzero value remap
   incorrectly. Backlogged in PLANNING.md.
@@ -237,10 +248,70 @@ the revoiced adjustment. Untagged notes read as tier 0, so direct API use
 and all-tier-0 charts behave byte-identically to before. Cosmetic — gems
 were never affected. Suites: 426 + 120 assertions.
 
-## Upstream sync log
+**Phase 19 — Migrated to the chart-transform capability (v0.5.0,
+2026-07-21).** feedBack core shipped a `chart-transform` capability
+([#952](https://github.com/got-feedBack/feedBack/issues/952),
+`got-feedBack/feedBack#1000`): a provider-coordinator that substitutes a
+chart's notes/chords/anchors/chord-templates/string-count/tuning/capo after
+difficulty filtering, reaching every renderer's draw bundle and every
+`highway.getNotes()`/`getChords()`-style getter — not just one renderer a
+plugin happens to own. This retired the whole forked-`highway_3d`-renderer
+architecture from Phases 1-18:
 
-Procedure: see PLANNING.md ("Syncing from upstream"). Each entry notes what
-this repo's `screen.js` was synced to, so the next sync diffs from there.
+- `screen.js` shrank from a ~16,700-line fork of `highway_3d/screen.js` to a
+  capability-registration file: it resolves the active target tuning (same
+  `src/` engine, same three per-arrangement-class profiles), calls
+  `CR.createRetuner().apply()` over both the difficulty-filtered and
+  full-difficulty chart views, and returns the remapped result from a
+  `transform(input)` function registered via
+  `capabilities.dispatch({ capability: 'chart-transform', command:
+  'register-provider', ... })`. It also derives `tuning`/`capo` offset
+  metadata (the same `base_open_string_midis`-style table `lib/song.py`,
+  `static/js/tuning-display.js`, and `highway_3d` all share) so any
+  renderer that builds open-string nut labels from those fields gets correct
+  labels for whatever target tuning is active.
+  Notes come back **capo-relative** (no physical-fret-display shift — that
+  was a `highway_3d`-only rendering convention this plugin no longer owns),
+  pairing with the returned `capo` field exactly the way an originally
+  capo'd chart already works for every consumer.
+- The plugin no longer draws anything itself, so it no longer appears in
+  the viz picker, doesn't require `highway_3d` to be installed, and doesn't
+  carry its own Three.js/Butterchurn rendering stack, background styles,
+  camera system, or Free-Camera Bridge. `routes.py` (the background-video
+  upload endpoints), `FREECAM_BRIDGE.md`, and the Butterchurn/viz-worklet
+  assets were deleted; `NOTICE` (Butterchurn/Three.js attribution) went with
+  them.
+- `settings-waiting-for-feedBack-support.html` — prepared back in Phase 7
+  for exactly this migration — was promoted to `settings.html` as-is (its
+  Target Tunings markup was already the surviving copy); the ~1800-line
+  `highway_3d`-rendering settings sections it never carried don't need
+  removing. It gained one new control: a **Retuning active** toggle
+  (`select-provider`/`clear-provider` on the `chart-transform` capability),
+  replacing the old implicit on/off mechanism (picking a different viz in
+  the picker) that no longer exists once retuning applies regardless of
+  which renderer is active.
+- Since the remapped chart now reaches `getNotes()`/`getChords()` directly
+  (previously those returned the untouched original — see the superseded
+  "scoring is unaffected" bullet above), a scorer reading chart data through
+  those getters judges against the remapped/revoiced fingering rather than
+  the chart's original positions — see PLANNING.md item 4.
+- The upstream-sync process (`HISTORY.md`'s sync log below, `PLANNING.md`'s
+  old "Syncing from upstream" procedure) is retired along with the fork it
+  existed to maintain.
+- Unchanged: everything under `src/` (pitch, target-tuning, retune-engine,
+  chord-solver, string-colors) and its test suite, the tuning-profile
+  settings keys (`targetTuningId*`, `customTunings`, `tuningAdjustOverrides`
+  — same `chart_retuner_bg_` storage namespace, so upgrading installs keep
+  their saved tunings), and the player-controls capo/octave widget (already
+  framework-agnostic — it only ever depended on `playerControlSlot()`, not
+  the renderer).
+
+## Upstream sync log (historical — closed by Phase 19)
+
+Procedure: see PLANNING.md ("Syncing from upstream") — the pre-Phase-19
+version of the file. Each entry notes what this repo's `screen.js` (then a
+`highway_3d` fork) was synced to, so the next sync would have diffed from
+there. No further entries: Phase 19 removed the fork this log tracked.
 
 - **2026-07-10** — synced to canonical `got-feedBack/feedBack`
   (`highway_3d` `3.31.5`, last commit touching the plugin: `b3215694`; the

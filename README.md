@@ -13,6 +13,21 @@ Notes outside a target instrument's range are dropped.
 > arrangement. If you have suggestions for improving the mapping, please
 > [submit an issue](https://github.com/jphinspace/feedBack-plugin-chart-retuner/issues).
 
+## How it works
+
+Chart Retuner registers as a **chart-transform provider**
+([feedBack#952](https://github.com/got-feedBack/feedBack/issues/952)) — a
+core capability that substitutes the chart's notes, chords, hand-position
+anchors, chord templates, string count, and tuning/capo before both
+rendering and scoring. That means the remap applies no matter which
+visualization you have picked (the built-in 2D highway, 3D Highway, or any
+other viz plugin), and any scorer (note_detect) that reads chart data
+through `highway.getNotes()`/`getChords()` judges against the remapped
+chart rather than the original.
+
+A **Retuning active** toggle in the plugin's settings turns this off (play
+every chart in its original tuning) without uninstalling the plugin.
+
 ## Target tunings
 
 Each arrangement class has its own tuning profile, configurable in the
@@ -45,9 +60,10 @@ a bass tuning or vice versa:
 - **Mandolin (GGDDAAEE)**
 - **Your own saved custom profiles**
 
-Every saved tuning carries its own
-fixed per-string colors, set via a per-string color picker when you create
-or edit it, independent of the shared Highway String Colors setting.
+Every saved tuning carries its own fixed per-string colors, set via a
+per-string color picker when you create or edit it — shown in the tuning
+editor for visual reference; whether they drive a renderer's own coloring
+depends on that renderer.
 
 Every tuning also carries its own **max fret** (12, 14, 20, 21, 22, or 24)
 — the highest fret a chart is allowed to remap onto for that instrument.
@@ -105,30 +121,7 @@ When no full voicing fits, the chord simplifies progressively (drop
 doubled notes → triad → power chord → single root note) rather than
 disappearing. Chord diagrams and hand-shape highlights follow the
 remapped voicing; the chord *name* still shows the chart's original
-label. Note that scoring (note_detect) keys off the original chart
-positions, so judgments follow the chart, not the remapped shape.
-
-## Fork of `highway_3d` — manual sync required
-
-This plugin is a fork of the bundled
-[`highway_3d`](https://github.com/got-feedBack/feedBack/tree/main/plugins/highway_3d)
-plugin — same 3D highway, same settings, same everything, except note gems
-(and the hand-position highlight, and chord shapes) land on the remapped
-string/fret. It runs alongside `highway_3d` without modifying it; **`highway_3d`
-must stay installed** — this plugin depends on it for shared features
-(Highway String Colors) and reuses its whole rendering engine as a base.
-
-Because it's a fork rather than a hook into the original, this repo carries
-its **own independent copy** of `screen.js`, forked from and patched against
-[`highway_3d/screen.js`](https://github.com/got-feedBack/feedBack/blob/main/plugins/highway_3d/screen.js).
-It does **not** automatically pick up upstream fixes/features — that copy
-has to be **manually re-synced** whenever the upstream file changes. See
-[Syncing from upstream](#syncing-from-upstream-highway_3d) below for the
-procedure, and [`HISTORY.md`](HISTORY.md) for the full design writeup —
-the algorithm, every patch point against `highway_3d`, and why each one
-exists. Future work is tracked in [`PLANNING.md`](PLANNING.md).
-
-You can track this improvement in the main feedBack repository at https://github.com/got-feedBack/feedBack/issues/952
+label.
 
 ## Install
 
@@ -143,11 +136,9 @@ feedBack install's `plugins/` directory, e.g.:
 git clone https://github.com/jphinspace/feedBack-plugin-chart-retuner.git /path/to/feedBack/plugins/feedBack-plugin-chart-retuner
 ```
 
-Restart feedBack (or reload plugins) after installing.
-
-After installing, `highway_3d` may continue to be selected by default for
-bass arrangements. You may need to select `Chart Retuner` manually from the
-viz picker.
+Restart feedBack (or reload plugins) after installing. Retuning activates
+automatically on first install (see the **Retuning active** toggle above
+to turn it off).
 
 ## Build
 
@@ -163,30 +154,9 @@ bash build-tailwind.sh
 
 ```sh
 node test/retune-engine.test.mjs
+node test/chord-solver.test.mjs
 ```
-
-### Syncing from upstream `highway_3d`
-
-This fork needs to periodically pull fixes from the canonical `highway_3d`
-plugin rather than silently drifting. Short version:
-
-1. Shallow-clone `https://github.com/got-feedBack/feedBack` somewhere
-   scratch (never point this repo's own remotes at it).
-2. Diff its `plugins/highway_3d/screen.js` against the version this
-   plugin was last synced to (noted in `HISTORY.md`'s sync-log entries).
-3. For each changed hunk, find the same surrounding code in this repo's
-   `screen.js` (by content, not line number — we've diverged) and reapply
-   it — *unless* it touches one of our patch points (listed in
-   `HISTORY.md`), in which case reconcile by hand instead of copying
-   blindly.
-4. Re-run the test suite and diff this repo's `screen.js` against the fresh
-   upstream copy — every remaining hunk should trace to a documented patch
-   point.
-
-Full procedure: `PLANNING.md` ("Syncing from upstream"). Sync log (what was
-synced, when): `HISTORY.md`.
 
 ## License
 
-AGPL-3.0-only, same as feedBack and the plugin this is forked from. Third-party
-components (Butterchurn) are noted in [`NOTICE`](NOTICE).
+AGPL-3.0-only, same as feedBack.

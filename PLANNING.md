@@ -1,78 +1,10 @@
 # Chart Retuner — planning
 
 This file holds **only future / not-yet-implemented work**, in enough detail
-to pick up and build from. Everything already shipped — the design rationale,
-the patch-point contract against upstream `highway_3d`, the full phase log,
-and the sync log — lives in [`HISTORY.md`](HISTORY.md).
+to pick up and build from. Everything already shipped — the design rationale
+and the full phase log — lives in [`HISTORY.md`](HISTORY.md).
 
 ---
-
-## Ongoing process — syncing from upstream `highway_3d`
-
-Our tuning-remap logic lives entirely in the documented patch points (listed
-in `HISTORY.md`); everything else in `screen.js` is `highway_3d`'s own code
-and must be periodically re-pulled from the **canonical** upstream
-(`github.com/got-feedBack/feedBack`, `plugins/highway_3d/`) rather than
-silently drifting.
-
-Repeatable procedure:
-
-1. Shallow-clone the canonical upstream into a scratch directory — never add
-   a remote to, or otherwise modify, any local `feedBack` checkout.
-2. Diff upstream's `plugins/highway_3d/` against whatever this plugin was
-   last synced to (recorded in `HISTORY.md`'s sync log) file-by-file. If only
-   `screen.js`/`plugin.json` differ, the sync is just a `screen.js` merge; a
-   `settings.html` divergence additionally needs the Phase 7 isolation
-   renames (globals, storage keys, DOM ids — see `HISTORY.md`) re-applied to
-   whatever's new.
-3. For each upstream `screen.js` hunk, locate the equivalent surrounding text
-   in our copy (search on a unique line from the hunk, not line numbers —
-   line counts have diverged) and apply the same change. If a hunk touches
-   anything on the patch-point list (the `CR` retuner block,
-   `resolveStringCount`, nut labels, the notes/chords/anchors/templates
-   substitution shim, the color palette, note-state provider calls, or any
-   renamed `h3d*`/`h3d_bg_`/`viz3d_*` identifier), reconcile it by hand and
-   flag it to the user — never copy blindly.
-4. Verify: `node --check screen.js`, `node test/retune-engine.test.mjs`,
-   `node test/chord-solver.test.mjs`, and extract + `diff` the newly-applied
-   region against upstream's to confirm the reapplication was byte-exact.
-5. Append a sync-log entry to `HISTORY.md` (upstream version/commit, what
-   changed, patch-point overlap or none) and bump this plugin's own version.
-
----
-
-## Migration goal — retire the forked highway in favor of feedBack's built-in
-
-The fork exists only because core has no hook to transform a chart's
-notes/chords/tuning before a renderer reads them (see HISTORY.md, "Settled
-design"). Once the main feedBack application supports this plugin natively —
-tracked upstream at feedBack#952 — the plugin keeps its pure remap engine
-(`src/`) and sheds the rendering fork:
-
-- **`settings-waiting-for-feedBack-support.html`** already exists as the
-  post-migration settings panel: JUST the plugin-specific parts (the Target
-  Tunings section — profile selects, custom tuning editor with strings/
-  colors/max fret/capo/octave, manage list), none of the "3D Highway — …"
-  rendering sections that only configure the forked renderer. At migration
-  time, point `plugin.json`'s `settings.html` at it (or rename it into
-  place). **Until then, keep its Target Tunings MARKUP in lockstep with
-  `settings.html`'s** — it was copied verbatim and must stay that way. Its
-  inline SCRIPT deliberately diverges: it dynamic-imports the real `src/`
-  modules instead of hand-mirroring their constants (the old "mirrored
-  constants" backlog item, resolved 2026-07-13 for this file only —
-  `settings.html` keeps its mirrors and dies with the fork, so don't port
-  script changes blindly in either direction).
-- What else goes at migration time: the forked `screen.js` (and with it the
-  Phase 7 isolation renames, the upstream-sync process above, the
-  `routes.py` video-upload endpoints, Butterchurn assets, and the
-  `chart_retuner_bg_*`/`chart_retuner_viz3d_*` storage namespace — plan a
-  one-time cleanup/migration for users' saved values where a core
-  equivalent exists).
-- What stays: everything under `src/` (pitch, target-tuning, retune-engine,
-  chord-solver, string-colors), the tests, the tuning-profile settings keys
-  (`targetTuningId*`, `customTunings`, `tuningAdjustOverrides`), and the
-  player-controls capo/octave widget (already written against the
-  documented v3 `playerControlSlot()` contract, not fork internals).
 
 ## Future enhancements
 
@@ -105,14 +37,12 @@ per-profile value through the same layers this needs:
   maxFret, chordSpan)` threads it into every solver call **and folds it
   into the internal `targetSig` cache key** (two profiles sharing strings
   but different spans must not cache-hit each other — same rule as maxFret).
-- `screen.js`: per-panel `_crChordSpan` refreshed at both PATCH POINTs
-  (`_primeActiveTargetTuningForInit`, `_bgLoadSettings`) — like `_crMaxFret`,
-  it never affects strings/colors, so it must not trigger the palette
-  branch.
-- `settings.html`: a `<select>` in the tuning editor + a mirrored option
-  list (legacy panel only — `settings-waiting-for-feedBack-support.html`
-  reads `BUILTIN_PRESET_TUNINGS` and validators from the imported module,
-  so a new field there is picked up with no mirror).
+- `screen.js`: thread the resolved profile's `chordSpan` into the
+  `_transform()` call alongside `maxFret` — it never affects strings/colors,
+  so it doesn't touch the tuning/capo output fields.
+- `settings.html`: a `<select>` in the tuning editor — it reads
+  `BUILTIN_PRESET_TUNINGS` and validators from the imported module, so a
+  new field there is picked up with no mirror.
 
 **Verify.** Solver-level: a chord solvable only at span 5 degrades at span 3
 and solves at 5; `createRetuner` end-to-end with a mandolin-style target +
@@ -134,18 +64,17 @@ diagram still shows the chart's original name — "Am7" over a power chord.
 Where `createRetuner` rebuilds a `chordTemplates` entry from a solved
 voicing, append a marker to the rebuilt template's display name when
 `rung > 0` (e.g. `"Am7 ▾"` or `"Am7 (simplified)"` — pick after seeing it
-rendered; the name field flows straight into the chord-diagram HUD).
-Decisions to make at build time:
+rendered; the name field flows straight into a consuming renderer's chord
+diagram). Decisions to make at build time:
 - Marker only for degradation (rung > 0), or also for revoicing (tier ≥ 2,
   same pitches re-fingered)? Recommendation: degradation only — revoiced
   chords still sound the full chord, so flagging them reads as noise.
-- Confirm nothing keys off template `name` equality in `screen.js` (grep
-  before renaming; chord identity everywhere else is `chord.id`).
 - Optional settings toggle if the marker annoys anyone; default on.
 
 **Verify.** Solver test: a degraded rung yields a rebuilt template whose
 name carries the marker and whose Tier-0 twin doesn't. Manual: play a chart
-known to degrade (Eb-standard chart on a narrow-ceiling target).
+known to degrade (Eb-standard chart on a narrow-ceiling target) and confirm
+the marker shows in a chord-diagram-capable renderer.
 
 ### 3. Per-string fret floor (banjo drone, short strings)
 
@@ -179,20 +108,22 @@ rendering impossible positions.
 **Priority note:** wait for evidence banjo targets see real use — the field
 touches every remap layer.
 
-### 4. Judgment translation for revoiced chords
+### 4. Judgment translation for revoiced chords — mostly resolved by the chart-transform migration
 
-**Problem.** Scoring (note_detect) keys judgments off the ORIGINAL chart
-positions via `_origNote` — correct pitches for Tier-0 output, but a
-revoiced (tier ≥ 2) or degraded chord has the player fretting *different
-sounding pitches* than the chart expects, so judgments drift from what's
-actually played. Documented in the README as a known gap.
+**Original problem.** Scoring (note_detect) used to key judgments off the
+chart's ORIGINAL positions — correct for a Tier-0 exact remap, but a
+revoiced (tier ≥ 2) or degraded chord had the player fretting *different
+sounding pitches* than a note-for-note reading of the chart implied.
 
-**Status: research item, not currently buildable plugin-side.** note_detect
-compares detected audio pitch against chart data it reads itself from
-`highway.getNotes()`/`getSongInfo()`; this plugin never mutates those (by
-design — see HISTORY.md, "scoring unaffected"). A real fix needs a core or
-note_detect contract change, e.g. a scorer-side "expected-pitch translation"
-hook a viz can register, or pitch-class-tolerant judging. Track alongside
-the upstream conversation (feedBack#952). What the plugin *could* do today:
-contribute a diagnostics payload counting revoiced/degraded chords per song
-so the size of the problem is measurable in the field.
+**Status since the chart-transform migration (see HISTORY.md).** The notes
+this plugin now hands back through `getNotes()`/`getChords()` already carry
+the FINAL (possibly revoiced) string/fret assignment, paired with
+`getTuning()`/`getCapo()` describing the same target. A scorer computing
+expected pitch from those — the standard `base + tuning + capo + fret`
+formula every chart-transform-aware consumer uses — gets the correct
+pitch for whatever is actually being played, revoiced or not. The
+remaining dependency is entirely on the scorer's own implementation
+(note_detect, out of this repo) reading chart data through the
+transform-aware getters rather than a private snapshot — not something
+this plugin can verify or fix from here. No further plugin-side work is
+planned unless a scorer is found not to follow the standard getters.

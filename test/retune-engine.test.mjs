@@ -10,6 +10,7 @@ const {
     isValidMaxFret,
     isValidCapo,
     resolveCapo,
+    resolveCapoEnabled,
     MIN_OCTAVE_OFFSET,
     MAX_OCTAVE_OFFSET,
     isValidOctaveOffset,
@@ -547,14 +548,18 @@ const SPOT_FRETS = [0, 10, 20];
 // callers fall through to normal profile resolution.
 {
     const { parseActiveTuning, ACTIVE_TUNING_ID, ACTIVE_TUNING_NAME } = CR;
-    const good = { strings: ['G3', 'D4', 'A4', 'E5'], colors: ['#f18313', '#3fc413', '#ecd234', '#e61f26'], maxFret: 14, capo: 4, octaveOffset: 1 };
+    const good = { strings: ['G3', 'D4', 'A4', 'E5'], colors: ['#f18313', '#3fc413', '#ecd234', '#e61f26'], maxFret: 14, capo: 4, capoEnabled: true, octaveOffset: 1 };
     const r = parseActiveTuning(JSON.stringify(good));
     check('parseActiveTuning: valid JSON resolves with the reserved id/name',
         { id: r.id, name: r.name }, { id: ACTIVE_TUNING_ID, name: ACTIVE_TUNING_NAME });
     check('parseActiveTuning: fields pass through validated',
-        { strings: r.strings, colors: r.colors, maxFret: r.maxFret, capo: r.capo, octaveOffset: r.octaveOffset, roles: r.roles },
-        { strings: good.strings, colors: good.colors, maxFret: 14, capo: 4, octaveOffset: 1, roles: null });
+        { strings: r.strings, colors: r.colors, maxFret: r.maxFret, capo: r.capo, capoEnabled: r.capoEnabled, octaveOffset: r.octaveOffset, roles: r.roles },
+        { strings: good.strings, colors: good.colors, maxFret: 14, capo: 4, capoEnabled: true, octaveOffset: 1, roles: null });
     check('parseActiveTuning: object input works like the JSON string', parseActiveTuning(good).capo, 4);
+    check('parseActiveTuning: capoEnabled absent defaults to off',
+        parseActiveTuning({ strings: ['E1', 'A1', 'D2', 'G2'] }).capoEnabled, false);
+    check('parseActiveTuning: a non-boolean capoEnabled resolves to off',
+        parseActiveTuning({ strings: ['E1', 'A1', 'D2', 'G2'], capoEnabled: 'true' }).capoEnabled, false);
 
     check('parseActiveTuning: empty/absent stores resolve to null',
         [parseActiveTuning(''), parseActiveTuning('   '), parseActiveTuning(null), parseActiveTuning(undefined)],
@@ -857,10 +862,11 @@ const SPOT_FRETS = [0, 10, 20];
         BUILTIN_PRESET_TUNINGS.filter(p => p.colors === null).every(p => isValidTuningStringsArray(p.strings) && (p.roles === undefined || p.roles.length === p.strings.length)),
         true);
 
-    // Every resolution also reports the RESOLVED id plus capo/octaveOffset
-    // (v0.4.0, both 0 unless the profile carries valid values) — folded
+    // Every resolution also reports the RESOLVED id plus capo/capoEnabled/
+    // octaveOffset (v0.4.0 capo/octaveOffset, v0.5.0 capoEnabled — all
+    // default off/0 unless the profile carries valid values) — folded
     // into the expected shapes below via this tiny helper.
-    const adj = (id, shape) => Object.assign({ id, capo: 0, octaveOffset: 0 }, shape);
+    const adj = (id, shape) => Object.assign({ id, capo: 0, capoEnabled: false, octaveOffset: 0 }, shape);
     check('resolveActiveTuning: no id (fresh install) resolves to EADG, live colors',
         resolveActiveTuning(undefined, []), adj('eadg', { strings: DEFAULT_TARGET_TUNING.slice(1), colors: null, roles: null, maxFret: 20 }));
     check('resolveActiveTuning: explicit EADG id resolves the same as no id',
@@ -1044,6 +1050,9 @@ const SPOT_FRETS = [0, 10, 20];
     check('isValidCapo: non-integers are invalid', isValidCapo(1.5, 20), false);
     check('resolveCapo: invalid values resolve to 0', resolveCapo(25, 20), 0);
     check('resolveCapo: a valid capo passes through', resolveCapo(4, 20), 4);
+    check('resolveCapoEnabled: only literal true resolves to on',
+        [resolveCapoEnabled(true), resolveCapoEnabled(false), resolveCapoEnabled(undefined), resolveCapoEnabled('true'), resolveCapoEnabled(1)],
+        [true, false, false, false, false]);
     check('octave-offset bounds', [MIN_OCTAVE_OFFSET, MAX_OCTAVE_OFFSET], [-2, 2]);
     check('isValidOctaveOffset over the boundary values',
         [isValidOctaveOffset(-2), isValidOctaveOffset(2), isValidOctaveOffset(0), isValidOctaveOffset(3), isValidOctaveOffset(-3), isValidOctaveOffset(0.5)],
@@ -1139,7 +1148,7 @@ const SPOT_FRETS = [0, 10, 20];
 {
     const t = resolveActiveTuning('eadgbe', []);
     check('resolveActiveTuning reports the resolved id', t.id, 'eadgbe');
-    check('built-in presets default to capo 0 / octave 0', [t.capo, t.octaveOffset], [0, 0]);
+    check('built-in presets default to capo 0 / capoEnabled off / octave 0', [t.capo, t.capoEnabled, t.octaveOffset], [0, false, 0]);
 
     const uke = resolveActiveTuning('ukulele_gcea', []);
     check('ukulele preset strings (reentrant gCEA)', uke.strings, ['G4', 'C4', 'E4', 'A4']);
@@ -1148,14 +1157,14 @@ const SPOT_FRETS = [0, 10, 20];
     check('baritone ukulele preset strings (DGBE)', bari.strings, ['D3', 'G3', 'B3', 'E4']);
 
     const customs = [
-        { id: 'c1', name: 'Octave cello', strings: ['C2', 'G2', 'D3', 'A3'], colors: ['#111111', '#222222', '#333333', '#444444'], maxFret: 24, capo: 2, octaveOffset: 1 },
-        { id: 'c2', name: 'Bad adjust', strings: ['C2', 'G2', 'D3', 'A3'], colors: ['#111111', '#222222', '#333333', '#444444'], maxFret: 12, capo: 20, octaveOffset: 9 },
+        { id: 'c1', name: 'Octave cello', strings: ['C2', 'G2', 'D3', 'A3'], colors: ['#111111', '#222222', '#333333', '#444444'], maxFret: 24, capo: 2, capoEnabled: true, octaveOffset: 1 },
+        { id: 'c2', name: 'Bad adjust', strings: ['C2', 'G2', 'D3', 'A3'], colors: ['#111111', '#222222', '#333333', '#444444'], maxFret: 12, capo: 20, capoEnabled: 'yes', octaveOffset: 9 },
     ];
     const c1 = resolveActiveTuning('c1', customs);
-    check('a custom tuning carries its saved capo/octave', [c1.id, c1.capo, c1.octaveOffset], ['c1', 2, 1]);
+    check('a custom tuning carries its saved capo/capoEnabled/octave', [c1.id, c1.capo, c1.capoEnabled, c1.octaveOffset], ['c1', 2, true, 1]);
     const c2 = resolveActiveTuning('c2', customs);
-    check('a saved capo at/past the tuning\'s own max fret disables the capo; out-of-range octave resolves to 0',
-        [c2.capo, c2.octaveOffset], [0, 0]);
+    check('a saved capo at/past the tuning\'s own max fret disables the capo; a non-boolean capoEnabled resolves off; out-of-range octave resolves to 0',
+        [c2.capo, c2.capoEnabled, c2.octaveOffset], [0, false, 0]);
     const fb = resolveActiveTuning('nonexistent', [], 'bass');
     check('the class-default fallback reports its own id', fb.id, 'eadg');
 
