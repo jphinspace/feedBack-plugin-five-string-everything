@@ -195,15 +195,25 @@ export const ANCHOR_DONOR_WINDOW_S = 2;
 // — `_crTier` 0, or untagged notes from direct API use) and prefers it.
 // No tier-0 donor nearby -> the revoiced adjustment is still the best
 // available signal, same as before.
+//
+// Widening: a note open in the source needs no hand position there, so the
+// source chart's anchors were never authored to cover it — but retuning can
+// land that same note on a nonzero target fret, which now does need one.
+// Each anchor's band is widened (never shrunk) to also cover any such
+// newly-fretted note within its own span (up to the next anchor), keeping
+// its original coverage intact.
 export function remapAnchors(anchors, remappedNotes, maxFret = DEFAULT_MAX_FRET) {
     if (!Array.isArray(anchors) || anchors.length === 0) return anchors || [];
     if (!Array.isArray(remappedNotes) || remappedNotes.length === 0) return anchors.slice();
     const fretted = remappedNotes.filter(n => n._origNote.f > 0);
     const donors = fretted.length ? fretted : remappedNotes;
+    const newlyFretted = remappedNotes.filter(n => n._origNote.f === 0 && n.f > 0);
     const tierOf = n => n._crTier || 0;
     const out = [];
     let ptr = 0;
-    for (const a of anchors) {
+    let nfPtr = 0;
+    for (let i = 0; i < anchors.length; i++) {
+        const a = anchors[i];
         while (ptr < donors.length - 1 && donors[ptr].t < a.time) ptr++;
         let note = donors[ptr];
         if (tierOf(note) !== 0) {
@@ -213,10 +223,91 @@ export function remapAnchors(anchors, remappedNotes, maxFret = DEFAULT_MAX_FRET)
             }
         }
         const adjustment = note.f - note._origNote.f;
-        const fret = Math.max(0, Math.min(maxFret, a.fret + adjustment));
-        out.push({ time: a.time, fret, width: a.width });
+        let fret = Math.max(0, Math.min(maxFret, a.fret + adjustment));
+        let width = a.width;
+
+        const spanEnd = i + 1 < anchors.length ? anchors[i + 1].time : Infinity;
+        while (nfPtr < newlyFretted.length && newlyFretted[nfPtr].t < a.time) nfPtr++;
+        for (let k = nfPtr; k < newlyFretted.length && newlyFretted[k].t < spanEnd; k++) {
+            const nf = newlyFretted[k].f;
+            if (nf < fret) { width += fret - nf; fret = nf; }
+            else if (nf > fret + width) { width = nf - fret; }
+        }
+        out.push({ time: a.time, fret, width });
     }
     return out;
+}
+
+// A comfortable single-position hand span, in frets — the trigger
+// threshold below which a cross-string jump is left alone.
+export const HAND_JUMP_FRET_THRESHOLD = 5;
+// A jump farther apart than this in time gives the hand time to
+// relocate normally; only a fast jump is a real ergonomics problem.
+export const HAND_JUMP_TIME_WINDOW_S = 0.75;
+// An alternate placement must beat the natural one by at least this many
+// frets to be worth relocating to — rejects marginal, barely-better swaps.
+export const HAND_JUMP_MIN_IMPROVEMENT = 2;
+
+// Relocates a note to an exact-pitch alternate on an adjacent target
+// string when it's reached via a large, fast cross-string jump from a
+// temporal neighbor — e.g. a source open string that lands on a nonzero
+// target fret can trade places with a far-off fretted neighbor for a much
+// closer one (BEADG's perfect-fourths spacing means fret 8 on one string
+// sounds identical to fret 3 on the next string up). `notes` must be
+// time-sorted; mutates in place. `isEligible(note)` (default: every note)
+// lets a caller restrict this to genuinely standalone notes — a note
+// solved as part of a simultaneous group already has a deliberate voicing
+// this pass has no business overriding.
+//
+// Triggering and scoring measure different things: a note only counts as
+// a hand-travel PROBLEM when it's a CROSS-string jump (a same-string run
+// is a normal slide/shift, not what this pass targets) — but once
+// triggered, candidate placements are compared by raw fret distance to
+// each time-near neighbor regardless of string, so a "fix" can never trade
+// a cross-string stretch for an equally bad same-string leap.
+//
+// Evaluated per note against its own natural placement, not decided once
+// per pitch: the same pitch played elsewhere in the song via a
+// comfortable approach is left untouched, only the actual hard jumps
+// move. An alternate is adopted only if it clearly reduces the worst-case
+// distance AND doesn't collide with another note sounding at the same
+// instant.
+export function reduceHandTravel(notes, target, maxFret = DEFAULT_MAX_FRET, isEligible = () => true) {
+    if (!Array.isArray(notes) || notes.length < 2 || !Array.isArray(target)) return;
+    const near = (t1, t2) => Math.abs(t2 - t1) <= HAND_JUMP_TIME_WINDOW_S;
+    for (let i = 0; i < notes.length; i++) {
+        const n = notes[i];
+        if (n.f <= 0 || !isEligible(n)) continue;
+        const prev = i > 0 ? notes[i - 1] : null;
+        const next = i + 1 < notes.length ? notes[i + 1] : null;
+
+        const triggerGap = Math.max(
+            (prev && prev.s !== n.s && near(prev.t, n.t)) ? Math.abs(n.f - prev.f) : -1,
+            (next && next.s !== n.s && near(n.t, next.t)) ? Math.abs(n.f - next.f) : -1,
+        );
+        if (triggerGap < HAND_JUMP_FRET_THRESHOLD) continue;
+
+        const score = (f) => Math.max(
+            (prev && near(prev.t, n.t)) ? Math.abs(f - prev.f) : -1,
+            (next && near(n.t, next.t)) ? Math.abs(f - next.f) : -1,
+        );
+        const naturalScore = score(n.f);
+
+        const pitch = target[n.s] + n.f;
+        let best = null;
+        for (const altS of [n.s - 1, n.s + 1]) {
+            if (altS < 0 || altS >= target.length) continue;
+            const altF = pitch - target[altS];
+            if (altF < 0 || altF > maxFret) continue;
+            if (notes.some(o => o !== n && o.t === n.t && o.s === altS)) continue;
+            const altScore = score(altF);
+            if (best === null || altScore < best.score) best = { s: altS, f: altF, score: altScore };
+        }
+        if (best && best.score <= naturalScore - HAND_JUMP_MIN_IMPROVEMENT) {
+            n.s = best.s;
+            n.f = best.f;
+        }
+    }
 }
 
 // Remaps a chord template's frets/fingers (indexed by original string)
@@ -497,6 +588,10 @@ export function createRetuner(opts) {
         // as before; only groups the per-note path would break
         // (drops, collisions, unplayable stretches) get revoiced.
         const newNotes = [];
+        // Notes with no simultaneous partner at all — reduceHandTravel may
+        // only ever relocate these; a note the solver placed as part of a
+        // group already has a deliberate voicing this pass must not touch.
+        const standalone = new WeakSet();
         if (Array.isArray(rawNotes)) {
             const byTime = new Map();
             for (const n of rawNotes) {
@@ -515,11 +610,13 @@ export function createRetuner(opts) {
                         const copy = Object.assign({}, note, entry);
                         copy._origNote = note; // keyed by the note-state provider
                         copy._crTier = 0; // exact per-note remap — always a preferred anchor donor
+                        standalone.add(copy);
                         newNotes.push(copy);
                     }
                 }
             }
             newNotes.sort((a, b) => a.t - b.t);
+            reduceHandTravel(newNotes, target, maxFret, n => standalone.has(n));
         }
         const newChords = [];
         if (Array.isArray(rawChords)) {

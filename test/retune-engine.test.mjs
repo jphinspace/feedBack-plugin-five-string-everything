@@ -270,7 +270,141 @@ const SPOT_FRETS = [0, 10, 20];
     ];
     const remappedOpenDonor = remapAnchors(openDonorAnchors, openDonorNotes);
     check('anchor before open-string note uses fretted-note adjustment', remappedOpenDonor[0], { time: 0, fret: 2, width: 4 });
-    check('anchor aligned with open-string note skips it for the next fretted donor', remappedOpenDonor[1], { time: 1, fret: 7, width: 4 });
+    // The open note (t=1) is still skipped as the ADJUSTMENT donor (base
+    // band comes from the next fretted donor, fret 7) — but it now needs
+    // its own hand position in the target (fret 4), so the band widens
+    // down to include it rather than leaving it uncovered.
+    check('anchor aligned with an open note that is now fretted: donor-skip picks the base band, widening covers the note itself',
+        remappedOpenDonor[1], { time: 1, fret: 4, width: 7 });
+}
+
+// Anchor widening: a note open in the source (no hand position needed)
+// that lands on a nonzero target fret after retuning DOES need one, and
+// the source chart's own anchors were never authored to cover it — this
+// is the exact shape of a real chart bug (Alestorm "Drink", Bass, an
+// ~11s passage of open strings retuned onto BEADG landing on fret 1
+// while its covering anchor's donor-derived band started at fret 3).
+{
+    // A long passage: one open-in-source run (now fretted) plus a normally
+    // fretted run, both covered by a single anchor spanning to the next one.
+    const notes = [
+        { t: 1, f: 1, _origNote: { t: 1, f: 0 } },  // newly fretted (was open)
+        { t: 2, f: 1, _origNote: { t: 2, f: 0 } },  // newly fretted (was open)
+        { t: 3, f: 4, _origNote: { t: 3, f: 3 } },  // normally fretted, sets the base band
+    ];
+    const anchors = [
+        { time: 1, fret: 3, width: 4 }, // donor adjustment +1 -> base band [4,8]
+        { time: 10, fret: 2, width: 4 }, // same donor, same +1, no notes in its own span
+    ];
+    const [widened, untouched] = remapAnchors(anchors, notes);
+    check('widening lowers fret to cover the newly-fretted notes without discarding the original top edge',
+        widened, { time: 1, fret: 1, width: 7 });
+    check('an anchor with no newly-fretted notes in its own span only gets the donor adjustment, no widening',
+        untouched, { time: 10, fret: 3, width: 4 });
+
+    // Widening also raises the top edge when the newly-fretted note sits
+    // above the base band, and never widens using a note outside the
+    // anchor's own span (that belongs to the next anchor instead).
+    const risingNotes = [
+        { t: 1, f: 2, _origNote: { t: 1, f: 2 } },   // fretted donor: base band [2,6]
+        { t: 2, f: 9, _origNote: { t: 2, f: 0 } },   // newly fretted, above the base band
+        { t: 6, f: 12, _origNote: { t: 6, f: 0 } },  // newly fretted, but belongs to the NEXT anchor's span
+    ];
+    const risingAnchors = [
+        { time: 1, fret: 2, width: 4 },
+        { time: 5, fret: 2, width: 4 },
+    ];
+    const [risingWidened, risingNext] = remapAnchors(risingAnchors, risingNotes);
+    check('widening raises width to cover a newly-fretted note above the base band',
+        risingWidened, { time: 1, fret: 2, width: 7 });
+    check('a newly-fretted note past the next anchor\'s time widens that anchor, not this one',
+        risingNext, { time: 5, fret: 2, width: 10 });
+}
+
+// reduceHandTravel: relocates a note reached via a large, fast cross-string
+// jump to an exact-pitch alternate on an adjacent string — the real-chart
+// case (Alestorm "Drink", Bass) was a source open string landing on target
+// fret 1, alternating rapidly with a fretted neighbor on fret 8 one string
+// over — an easy open-to-fretted jump in the source, a 7-fret unplayable
+// stretch after retuning. BEADG's perfect-fourths spacing means fret 8 on
+// one string is the same pitch as fret 3 on the next string up.
+{
+    const { reduceHandTravel } = CR;
+    const target = [0, 5, 10, 15]; // uniform fourths, easy arithmetic
+
+    const trill = [
+        { t: 0, s: 0, f: 1 },
+        { t: 0.2, s: 1, f: 8 },
+        { t: 0.4, s: 0, f: 1 },
+        { t: 0.6, s: 1, f: 8 },
+    ];
+    reduceHandTravel(trill, target, 20);
+    check('reduceHandTravel: the low note stays put (no valid lower alternate)',
+        trill.map(n => ({ s: n.s, f: n.f })),
+        [{ s: 0, f: 1 }, { s: 2, f: 3 }, { s: 0, f: 1 }, { s: 2, f: 3 }]);
+
+    const smoothRun = [
+        { t: 10, s: 1, f: 7 },
+        { t: 10.3, s: 1, f: 8 },
+        { t: 10.6, s: 1, f: 9 },
+    ];
+    reduceHandTravel(smoothRun, target, 20);
+    check('reduceHandTravel: leaves a same-string comfortable run untouched (same pitch elsewhere is not blanket-relocated)',
+        smoothRun.map(n => ({ s: n.s, f: n.f })),
+        [{ s: 1, f: 7 }, { s: 1, f: 8 }, { s: 1, f: 9 }]);
+
+    const ineligible = [
+        { t: 0, s: 0, f: 1 },
+        { t: 0.2, s: 1, f: 8 },
+    ];
+    reduceHandTravel(ineligible, target, 20, (n) => n.s !== 1);
+    check('reduceHandTravel: isEligible excludes a note from relocation (e.g. part of a solved chord group)',
+        ineligible.map(n => ({ s: n.s, f: n.f })), [{ s: 0, f: 1 }, { s: 1, f: 8 }]);
+
+    const blocked = [
+        { t: 0, s: 0, f: 1 },
+        { t: 0.2, s: 1, f: 8 },
+        { t: 0.2, s: 2, f: 3 }, // already occupies the would-be alternate at the same instant
+    ];
+    reduceHandTravel(blocked, target, 20);
+    check('reduceHandTravel: a collision with a simultaneous note blocks the alternate',
+        blocked.map(n => ({ s: n.s, f: n.f })), [{ s: 0, f: 1 }, { s: 1, f: 8 }, { s: 2, f: 3 }]);
+
+    const farApart = [
+        { t: 0, s: 0, f: 1 },
+        { t: 5, s: 1, f: 8 },
+    ];
+    reduceHandTravel(farApart, target, 20);
+    check('reduceHandTravel: a big jump with plenty of time to move the hand is left alone',
+        farApart.map(n => ({ s: n.s, f: n.f })), [{ s: 0, f: 1 }, { s: 1, f: 8 }]);
+
+    // Same-string-leap regression guard: a candidate on the SAME string as
+    // the neighbor can look tempting under a naive "different-string-only"
+    // gap metric (it reads as zero cross-string gap), but it can be an even
+    // bigger same-string leap. Scoring must catch this and prefer the
+    // genuinely closer cross-string alternate instead.
+    const trapTarget = [0, 5, 10];
+    const trap = [
+        { t: 0, s: 0, f: 1 },
+        { t: 0.2, s: 1, f: 13 },
+    ];
+    reduceHandTravel(trap, trapTarget, 20);
+    check('reduceHandTravel: rejects a same-string alternate that trades one big jump for a worse one',
+        trap.map(n => ({ s: n.s, f: n.f })), [{ s: 0, f: 1 }, { s: 2, f: 8 }]);
+
+    // Only a 1-fret-better alternate exists — below HAND_JUMP_MIN_IMPROVEMENT (2).
+    const marginalTarget = [0, 5, 6];
+    const marginal = [
+        { t: 0, s: 0, f: 1 },
+        { t: 0.2, s: 1, f: 8 },
+    ];
+    reduceHandTravel(marginal, marginalTarget, 20);
+    check('reduceHandTravel: a marginal (1-fret) improvement is not worth relocating for',
+        marginal.map(n => ({ s: n.s, f: n.f })), [{ s: 0, f: 1 }, { s: 1, f: 8 }]);
+
+    check('HAND_JUMP_FRET_THRESHOLD / TIME_WINDOW / MIN_IMPROVEMENT are the documented defaults',
+        [CR.HAND_JUMP_FRET_THRESHOLD, CR.HAND_JUMP_TIME_WINDOW_S, CR.HAND_JUMP_MIN_IMPROVEMENT],
+        [5, 0.75, 2]);
 }
 
 // Collision resolution for simultaneous notes NOT wrapped in a Chord
@@ -946,6 +1080,24 @@ const SPOT_FRETS = [0, 10, 20];
     check('arrangementClassFor: whitespace-only pins bass', arrangementClassFor('   '), 'bass');
     check('arrangementClassFor: undefined pins bass', arrangementClassFor(undefined), 'bass');
     check('arrangementClassFor: non-string pins bass', arrangementClassFor(42), 'bass');
+}
+
+// First-time install: no stored active-tuning overlay and no per-class
+// profile id for any arrangement class. Confirms the full chain lands on
+// a real, playable builtin default (not null/undefined/a crash) for
+// every class, with capo off and no octave shift, exactly what a
+// brand-new user sees with zero prior localStorage state.
+{
+    const { parseActiveTuning } = CR;
+    check('fresh install: no persisted active tuning to overlay', parseActiveTuning(undefined), null);
+    for (const [cls, expectedId] of [['bass', 'eadg'], ['rhythm', 'eadgbe'], ['lead', 'eadgbe']]) {
+        const t = resolveActiveTuning(undefined, [], cls);
+        check(`fresh install: ${cls} class resolves to its builtin default (${expectedId}), capo off, no octave shift`,
+            { id: t.id, capo: t.capo, capoEnabled: t.capoEnabled, octaveOffset: t.octaveOffset },
+            { id: expectedId, capo: 0, capoEnabled: false, octaveOffset: 0 });
+        check(`fresh install: ${cls} class's resolved id is a real, findable builtin preset`,
+            BUILTIN_PRESET_TUNINGS.some(p => p.id === t.id), true);
+    }
 }
 
 // intToHex / resolveColorsArray: plain data-shape transforms.
