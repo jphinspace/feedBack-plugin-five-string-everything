@@ -99,6 +99,10 @@ import { CR } from './src/chart-retune.js';
     function _clearActiveTuning() {
         if (_read('activeTuning')) _write('activeTuning', '');
     }
+    // Startup: an unsaved active tuning left over from a previous session
+    // (forgotten edits never saved or reselected away from) would otherwise
+    // keep silently overriding every arrangement class's playback forever.
+    _clearActiveTuning();
 
     // Resolves a class's tuning: active-tuning overlay, else the profile with any quick-adjust override applied.
     function _resolveActiveTuning(arrClass) {
@@ -122,8 +126,6 @@ import { CR } from './src/chart-retune.js';
     };
     window.cr3dWriteActiveTuning = (d) => _writeActiveTuning(d);
     window.cr3dClearActiveTuning = () => _clearActiveTuning();
-    window.cr3dGetResolvedTuning = (arrClass) => _resolveActiveTuning(arrClass || _crCurrentArrClass());
-    window.cr3dActiveArrClass = () => _crCurrentArrClass();
     window.cr3dSaveCustomTuning = (profile) => {
         if (!profile || typeof profile.name !== 'string' || !profile.name.trim()) return null;
         if (!CR.isValidTuningStringsArray(profile.strings)) return null;
@@ -252,10 +254,20 @@ import { CR } from './src/chart-retune.js';
     let _crPills = null; // { retuner, capo }
     let _crEls = null;   // { detailsWrap, fretRow, fretSlider, fretVal, octSlider, octVal }
 
+    // The core "Default arrangement" gameplay setting (an arrangement name,
+    // e.g. "Lead" or "Bass 2") — _crCurrentArrClass()'s fallback before any
+    // song has loaded, instead of always assuming bass. Fetched once; '' until
+    // it resolves, which CR.arrangementClassFor already treats as bass.
+    let _crDefaultArrangement = '';
+    fetch('/api/settings').then(r => r.json()).then(data => {
+        _crDefaultArrangement = (data && typeof data.default_arrangement === 'string') ? data.default_arrangement : '';
+        _crAdjRefresh();
+    }).catch(() => { /* keep the bass fallback */ });
+
     function _crCurrentArrClass() {
         const hw = window.highway;
-        const songInfo = (hw && typeof hw.getSongInfo === 'function') ? (hw.getSongInfo() || {}) : {};
-        return CR.arrangementClassFor(songInfo.arrangement);
+        const arrangement = (hw && typeof hw.getSongInfo === 'function') ? (hw.getSongInfo() || {}).arrangement : undefined;
+        return CR.arrangementClassFor(arrangement || _crDefaultArrangement);
     }
     function _crIsActive() {
         const domain = window.feedBack && window.feedBack.chartTransformDomain;

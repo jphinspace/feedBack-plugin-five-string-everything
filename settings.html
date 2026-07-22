@@ -42,16 +42,17 @@
     if (!toggle) return;
     const PROVIDER_ID = 'chart_retuner';
     function sync() {
-        const domain = window.feedBack && window.feedBack.chartTransformDomain;
-        if (!domain) return false;
+        // chartTransformDomain is a core module script that runs to
+        // completion before DOMContentLoaded, which is what gates
+        // loadPlugins() fetching and executing this file — always present.
+        const domain = window.feedBack.chartTransformDomain;
         toggle.disabled = false;
         const active = domain.snapshot().active === PROVIDER_ID;
         toggle.checked = active;
         // The rest of the panel is moot while retuning is off.
         if (tuningSection) tuningSection.classList.toggle('hidden', !active);
-        return true;
     }
-    if (!sync()) setTimeout(sync, 500);
+    sync();
     toggle.addEventListener('change', () => {
         const api = window.feedBack && window.feedBack.capabilities;
         if (!api) return;
@@ -428,16 +429,36 @@
             if (window.cr3dClearActiveTuning) { window.cr3dClearActiveTuning(); return; }
             try { localStorage.setItem('chart_retuner_bg_activeTuning', ''); } catch (_) { /* storage blocked */ }
         }
-        // Seed source for a fresh form: the renderer's resolved view of
-        // the last active arrangement class (active-tuning overlay + quick
-        // override applied — "what the highway plays right now").
-        // Pre-load fallback: the built-in default preset, as before.
+        // Arrangement class for a fresh form: a live song's arrangement if
+        // one is loaded, else the core "Default arrangement" gameplay
+        // setting (fetched below), else bass.
+        let defaultArrangement = '';
+        function currentArrClass() {
+            const hw = window.highway;
+            const arrangement = (hw && typeof hw.getSongInfo === 'function') ? (hw.getSongInfo() || {}).arrangement : undefined;
+            return CR.arrangementClassFor(arrangement || defaultArrangement);
+        }
+        function readOverrideFor(tuningId) {
+            let map;
+            try { map = JSON.parse(localStorage.getItem('chart_retuner_bg_tuningAdjustOverrides') || '{}'); } catch (_) { map = null; }
+            return (map && typeof map === 'object') ? map[tuningId] : null;
+        }
+        // Seed source for a fresh form: the last-used preset for the
+        // current arrangement class, with any mid-song capo/octave quick
+        // adjustment applied on top — reads localStorage directly rather
+        // than screen.js's bridge, so it never depends on script load order.
         function activeSeedProfile() {
-            if (window.cr3dGetResolvedTuning) {
-                const t = window.cr3dGetResolvedTuning(window.cr3dActiveArrClass ? window.cr3dActiveArrClass() : 'bass');
-                if (t && Array.isArray(t.strings)) return t;
-            }
-            return BUILTIN_PRESETS[0];
+            const cls = currentArrClass();
+            const id = readActiveId(cls);
+            const pool = BUILTIN_PRESETS.concat(readCustom());
+            const profile = pool.find((p) => p.id === id) || BUILTIN_PRESETS[0];
+            const ov = readOverrideFor(profile.id);
+            if (!ov || typeof ov !== 'object') return profile;
+            const merged = Object.assign({}, profile);
+            if (CR.isValidCapo(ov.capo, merged.maxFret)) merged.capo = ov.capo;
+            if (typeof ov.capoEnabled === 'boolean') merged.capoEnabled = ov.capoEnabled;
+            if (CR.isValidOctaveOffset(ov.octave)) merged.octaveOffset = ov.octave;
+            return merged;
         }
 
         function showError(msg) {
@@ -624,7 +645,15 @@
             });
         }
 
-        if (cancelBtn) cancelBtn.addEventListener('click', () => loadPreset());
+        if (cancelBtn) {
+            cancelBtn.addEventListener('click', () => {
+                // Discard the unsaved active-tuning overlay too — otherwise
+                // it keeps silently overriding every arrangement class's
+                // playback even after "cancelling" out of editing it.
+                clearActiveTuningFallback();
+                loadPreset();
+            });
+        }
         if (deleteBtn) {
             deleteBtn.addEventListener('click', () => {
                 const profile = readCustom().find((p) => p.id === editingId);
@@ -746,7 +775,14 @@
         }
 
         renderActiveDropdowns();
-        loadPreset();
+        // The dropdowns don't need defaultArrangement, but the initial
+        // form seed does (activeSeedProfile -> currentArrClass) — wait for
+        // the one real async dependency instead of guessing with a timer.
+        fetch('/api/settings').then((r) => r.json()).catch(() => ({}))
+            .then((data) => {
+                defaultArrangement = (data && typeof data.default_arrangement === 'string') ? data.default_arrangement : '';
+                loadPreset();
+            });
     } // init()
     })();
     </script>
