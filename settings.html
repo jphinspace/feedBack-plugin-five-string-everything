@@ -7,30 +7,48 @@
 -->
 <div class="p-4">
     <div class="fb-text font-semibold">Chart Retuner</div>
-    <div class="fb-textDim text-sm">v0.5.0</div>
+    <div class="fb-textDim text-sm" id="cr3d-version"></div>
     <p class="fb-textDim text-xs mt-1">
         Remaps every chart onto your real instrument's tuning (bass and
         guitar profiles, customizable below).
     </p>
 </div>
+<script>
+(function () {
+    // plugin.json's "version" is the only source of truth: the plugin
+    // loader stamps it onto this panel's wrapping <details> as
+    // data-plugin-version, so this never needs updating by hand.
+    const host = document.currentScript && document.currentScript.closest('[data-plugin-id]');
+    const version = host && host.dataset.pluginVersion;
+    const el = document.getElementById('cr3d-version');
+    if (el && version) el.textContent = 'v' + version;
+})();
+</script>
 
 <div class="mt-4 flex items-center justify-between gap-3 rounded-lg border border-gray-800 bg-dark-700/40 px-3 py-2">
     <div>
         <label for="cr3d-active-toggle" class="text-xs font-medium text-gray-300">Retuning active</label>
         <p class="text-[10px] text-gray-500 mt-0.5">Turn off to play every chart in its original tuning without uninstalling the plugin. Also available as a quick toggle in the player controls, mid-song.</p>
     </div>
-    <input type="checkbox" id="cr3d-active-toggle" class="w-4 h-4 accent-accent shrink-0" disabled>
+    <label class="fb-switch">
+        <input type="checkbox" id="cr3d-active-toggle" disabled>
+        <span class="fb-switch-track"></span>
+    </label>
 </div>
 <script>
 (function () {
     const toggle = document.getElementById('cr3d-active-toggle');
+    const tuningSection = document.getElementById('cr3d-tuning-section');
     if (!toggle) return;
     const PROVIDER_ID = 'chart_retuner';
     function sync() {
         const domain = window.feedBack && window.feedBack.chartTransformDomain;
         if (!domain) return false;
         toggle.disabled = false;
-        toggle.checked = domain.snapshot().active === PROVIDER_ID;
+        const active = domain.snapshot().active === PROVIDER_ID;
+        toggle.checked = active;
+        // The rest of the panel is moot while retuning is off.
+        if (tuningSection) tuningSection.classList.toggle('hidden', !active);
         return true;
     }
     if (!sync()) setTimeout(sync, 500);
@@ -50,15 +68,16 @@
 })();
 </script>
 
-<div role="group" aria-labelledby="cr3d-tuning-heading" class="mt-6">
+<div id="cr3d-tuning-section" role="group" aria-labelledby="cr3d-tuning-heading" class="mt-6">
     <h3 id="cr3d-tuning-heading" class="text-sm font-medium text-gray-400 mb-2">Target Tunings</h3>
     <p class="text-xs text-gray-500 mb-3">
         Every chart is remapped onto a target tuning — any pitches, 4-8
         strings. Each arrangement class (bass / rhythm / lead) has its own
-        profile below, and all three pick from the same pool: built-in
-        presets (not editable/deletable) listed first, then your saved
-        custom tunings. Any profile may use any tuning — a bass tuning on
-        a guitar arrangement is fine. Add your own for AEADG, BbEbAbDbGb,
+        profile below, and all three pick from the same pool: your saved
+        custom tunings listed first, then the built-in presets below a
+        divider. Picking either opens it for editing below. Any profile
+        may use any tuning — a bass tuning on a guitar arrangement is
+        fine. Add your own for AEADG, BbEbAbDbGb,
         a 7-string, or anything else. Strings can only be added/removed
         from the ends, never the middle — a new string gets a fresh
         default note + color; existing strings' colors never shift, and a
@@ -85,18 +104,17 @@
         <p class="text-[10px] text-gray-500 mt-1">Apply to the highway immediately — no reload required.</p>
     </div>
 
-    <div class="mt-4">
-        <p class="text-xs font-medium text-gray-400 mb-1">Saved custom tunings</p>
-        <div id="cr3d-tuning-list" class="space-y-1"></div>
-    </div>
-
     <div class="mt-4 rounded-lg border border-gray-800 bg-dark-700/40 p-3">
-        <p class="text-xs font-medium text-gray-400 mb-2" id="cr3d-tuning-form-heading">Add a tuning</p>
+        <p class="text-xs font-medium text-gray-400 mb-2" id="cr3d-tuning-form-heading">Edit tuning</p>
         <p class="text-[10px] text-gray-500 mb-2">
-            Changes below apply to the highway immediately as an unsaved
-            “User-defined” tuning. Picking any tuning in the dropdowns
-            above discards it and starts over from that selection; Save
-            keeps the current form as a reusable preset.
+            Picking any tuning above — built-in or custom — opens it here,
+            and applies live as an unsaved preview while you tweak it.
+            Save is disabled until you change something. Editing a
+            built-in preset names it “New custom preset N” and always
+            saves as a new custom tuning — built-ins themselves can't be
+            overwritten or deleted, and no tuning can be saved under a
+            built-in's name. Editing a custom tuning keeps its name and
+            updates it in place; Delete removes it.
         </p>
         <div class="mt-1">
             <label for="cr3d-tuning-name" class="text-xs font-medium text-gray-400 mb-1 block">Name</label>
@@ -118,15 +136,20 @@
         </div>
 
         <div class="mt-3">
-            <label class="flex items-center gap-2 text-xs font-medium text-gray-400">
-                <input type="checkbox" id="cr3d-tuning-capo-enabled" class="w-3.5 h-3.5 accent-accent">
-                Capo
-            </label>
-            <p class="text-[10px] text-gray-500 mt-1">
-                A capo on the tuning below you're building — independent
-                of any capo the chart itself was recorded with. Off by
-                default: play the tuning as-is unless you turn this on.
-            </p>
+            <div class="flex items-center justify-between gap-3 rounded-lg border border-gray-800 bg-dark-700/40 px-3 py-2">
+                <div>
+                    <label for="cr3d-tuning-capo-enabled" class="text-xs font-medium text-gray-400">Capo</label>
+                    <p class="text-[10px] text-gray-500 mt-0.5">
+                        A capo on the tuning below you're building — independent
+                        of any capo the chart itself was recorded with. Off by
+                        default: play the tuning as-is unless you turn this on.
+                    </p>
+                </div>
+                <label class="fb-switch">
+                    <input type="checkbox" id="cr3d-tuning-capo-enabled">
+                    <span class="fb-switch-track"></span>
+                </label>
+            </div>
             <div id="cr3d-tuning-capo-block" class="mt-2 hidden">
                 <label for="cr3d-tuning-capo" class="text-xs font-medium text-gray-400 mb-1 block">
                     Capo fret: <span id="cr3d-tuning-capo-label">none</span>
@@ -167,18 +190,21 @@
         <p id="cr3d-tuning-limit-note" class="text-[10px] text-gray-500 mt-1 hidden"></p>
 
         <p class="text-[10px] text-gray-500 mt-2">
-            Pick each string's open note, low to high — the five
-            <span style="color:#f2c14e;font-weight:700">★ BEADG</span> notes
-            are marked for reference. Strings can repeat the same note
+            Pick each string's open note, low to high — the
+            <span style="color:#f2c14e;font-weight:700">BEADG bass</span> and
+            <span style="color:#f2c14e;font-weight:700">E standard guitar</span>
+            notes are marked for reference. Strings can repeat the same note
             (e.g. a unison pair); nothing requires them to be distinct.
             4-8 strings, C-1 to E5.
         </p>
         <p id="cr3d-tuning-form-error" class="text-xs text-red-400 mt-2 hidden"></p>
         <div class="flex gap-2 mt-3">
             <button type="button" id="cr3d-tuning-save"
-                class="text-xs px-3 py-1.5 rounded bg-accent text-white">Save</button>
+                class="text-xs px-3 py-1.5 rounded bg-accent text-white disabled:opacity-30 disabled:pointer-events-none">Save</button>
+            <button type="button" id="cr3d-tuning-delete"
+                class="text-xs px-3 py-1.5 rounded bg-dark-700 border border-gray-800 text-red-400 hover:text-red-300 hidden">Delete</button>
             <button type="button" id="cr3d-tuning-cancel"
-                class="text-xs px-3 py-1.5 rounded bg-dark-700 border border-gray-800 text-gray-400 hover:text-gray-200 hidden">Cancel edit</button>
+                class="text-xs px-3 py-1.5 rounded bg-dark-700 border border-gray-800 text-gray-400 hover:text-gray-200">Cancel edit</button>
         </div>
     </div>
 
@@ -306,9 +332,11 @@
             return window.cr3dResolveDisplayColor ? window.cr3dResolveDisplayColor(strings, colors, index) : fallbackResolveDisplayColor(strings, colors, index);
         }
 
-        // Every BEADG note, by MIDI — highlighted in every dropdown as a
-        // familiar reference point (covers EADG's own notes too).
+        // BEADG bass and E-standard guitar notes, by MIDI — highlighted in
+        // every dropdown as familiar reference points (BEADG covers EADG's own notes too).
         const BEADG_DEFAULT_MIDIS = CR.DEFAULT_TARGET_TUNING.map(midiFromNote);
+        const EADGBE_PRESET = BUILTIN_PRESETS.find((p) => p.id === CR.DEFAULT_GUITAR_TUNING_ID);
+        const EADGBE_DEFAULT_MIDIS = EADGBE_PRESET ? EADGBE_PRESET.strings.map(midiFromNote) : [];
 
         // Matches `currentSpec` by MIDI, not spelling, so a flat-spelled
         // legacy value (e.g. "Bb1") still lands on its equivalent option
@@ -318,10 +346,13 @@
             for (let midi = NOTE_OPTION_MIN_MIDI; midi <= NOTE_OPTION_MAX_MIDI; midi++) {
                 const label = CR.midiToNoteLabel(midi);
                 const isBeadgNote = BEADG_DEFAULT_MIDIS.includes(midi);
+                const isEadgbeNote = EADGBE_DEFAULT_MIDIS.includes(midi);
                 const opt = document.createElement('option');
                 opt.value = label;
-                opt.textContent = isBeadgNote ? ('★ ' + label + ' (BEADG)') : label;
-                if (isBeadgNote) {
+                opt.textContent = isBeadgNote ? (label + ' (BEADG bass)')
+                    : isEadgbeNote ? (label + ' (E standard guitar)')
+                    : label;
+                if (isBeadgNote || isEadgbeNote) {
                     opt.style.fontWeight = '700';
                     opt.style.color = '#f2c14e';
                 }
@@ -337,7 +368,6 @@
             .map((p) => ({ cls: p.cls, el: $('cr3d-tuning-active-' + p.cls) }))
             .filter((s) => !!s.el);
         if (sels.length === 0) return;
-        const listEl = $('cr3d-tuning-list');
         const nameInput = $('cr3d-tuning-name');
         const maxFretSelect = $('cr3d-tuning-maxfret');
         const capoEnabledCheckbox = $('cr3d-tuning-capo-enabled');
@@ -352,10 +382,11 @@
         const limitNoteP = $('cr3d-tuning-limit-note');
         const errorP = $('cr3d-tuning-form-error');
         const saveBtn = $('cr3d-tuning-save');
+        const deleteBtn = $('cr3d-tuning-delete');
         const cancelBtn = $('cr3d-tuning-cancel');
-        const formHeading = $('cr3d-tuning-form-heading');
 
-        let editingId = null; // null = "add new"
+        let editingId = null; // null = save creates a new custom tuning (builtin or unsaved base)
+        let dirty = false;    // one-way flag: true once any field has changed since loadPreset()
         let rows = []; // [{ note, color }], low to high — the editor's working state
         let maxFret = CR.DEFAULT_MAX_FRET; // the editor's working max-fret value
         let capo = 0;             // the editor's working capo fret (0 = no capo)
@@ -379,8 +410,8 @@
         // Live active-tuning push: any actual user edit persists the WHOLE form
         // state as the silent unsaved "active" tuning (CR.ACTIVE_TUNING_ID),
         // which the renderer overlays on every arrangement class
-        // immediately (no Save needed). Programmatic seeding
-        // (startEdit/resetForm) never pushes — only real edits do.
+        // immediately (no Save needed). Programmatic seeding (loadPreset)
+        // never pushes — only real edits do.
         function pushActiveTuning() {
             const activeTuning = {
                 strings: rows.map((r) => r.note),
@@ -420,72 +451,35 @@
             errorP.classList.add('hidden');
         }
 
+        // Custom tunings first (editable/deletable — picking one opens it
+        // below), then an unselectable divider, then the built-in presets.
         function renderActiveDropdowns() {
             const custom = readCustom();
             for (const { cls, el } of sels) {
                 const activeId = readActiveId(cls);
                 el.innerHTML = '';
-                for (const p of BUILTIN_PRESETS) {
-                    const opt = document.createElement('option');
-                    opt.value = p.id;
-                    opt.textContent = p.label;
-                    el.appendChild(opt);
-                }
                 for (const p of custom) {
                     const opt = document.createElement('option');
                     opt.value = p.id;
                     opt.textContent = p.name + ' (' + p.strings.join(' ') + ')';
                     el.appendChild(opt);
                 }
+                if (custom.length > 0) {
+                    const sep = document.createElement('option');
+                    sep.disabled = true;
+                    sep.textContent = '──────────';
+                    el.appendChild(sep);
+                }
+                for (const p of BUILTIN_PRESETS) {
+                    const opt = document.createElement('option');
+                    opt.value = p.id;
+                    opt.textContent = p.label;
+                    el.appendChild(opt);
+                }
                 // A stale/deleted id falls back to the class's built-in
                 // default rather than leaving the dropdown on a
                 // nonexistent selection.
                 el.value = (BUILTIN_PRESETS.some((p) => p.id === activeId) || custom.some((p) => p.id === activeId)) ? activeId : defaultIdFor(cls);
-            }
-        }
-
-        function renderManageList() {
-            if (!listEl) return;
-            const custom = readCustom();
-            listEl.innerHTML = '';
-            if (custom.length === 0) {
-                const p = document.createElement('p');
-                p.className = 'text-[10px] text-gray-500';
-                p.textContent = 'No saved custom tunings yet.';
-                listEl.appendChild(p);
-                return;
-            }
-            for (const profile of custom) {
-                const row = document.createElement('div');
-                row.className = 'flex items-center justify-between gap-2 text-xs bg-dark-700/40 border border-gray-800 rounded px-2 py-1.5';
-                const label = document.createElement('span');
-                label.className = 'text-gray-300 truncate';
-                const maxFret = CR.isValidMaxFret(profile.maxFret) ? profile.maxFret : CR.DEFAULT_MAX_FRET;
-                const pCapo = CR.resolveCapo(profile.capo, maxFret);
-                const pCapoEnabled = CR.resolveCapoEnabled(profile.capoEnabled);
-                const pOct = CR.resolveOctaveOffset(profile.octaveOffset);
-                label.textContent = profile.name + ' — ' + profile.strings.join(' ')
-                    + ' (max fret ' + maxFret
-                    + (pCapoEnabled && pCapo !== 0 ? ', capo ' + pCapo : '')
-                    + (pOct !== 0 ? ', ' + (pOct > 0 ? '+' : '') + pOct + ' oct' : '')
-                    + ')';
-                row.appendChild(label);
-                const btns = document.createElement('div');
-                btns.className = 'flex items-center gap-1 shrink-0';
-                const editBtn = document.createElement('button');
-                editBtn.type = 'button';
-                editBtn.className = 'text-[10px] px-2 py-1 rounded bg-dark-700 border border-gray-800 text-gray-400 hover:text-gray-200';
-                editBtn.textContent = 'Edit';
-                editBtn.addEventListener('click', () => startEdit(profile));
-                const delBtn = document.createElement('button');
-                delBtn.type = 'button';
-                delBtn.className = 'text-[10px] px-2 py-1 rounded bg-dark-700 border border-gray-800 text-red-400 hover:text-red-300';
-                delBtn.textContent = 'Delete';
-                delBtn.addEventListener('click', () => deleteProfile(profile));
-                btns.appendChild(editBtn);
-                btns.appendChild(delBtn);
-                row.appendChild(btns);
-                listEl.appendChild(row);
             }
         }
 
@@ -506,7 +500,7 @@
                 const noteSelect = document.createElement('select');
                 noteSelect.className = 'cr3d-row-note flex-1 min-w-0 bg-dark-700 border border-gray-800 rounded px-2 py-1 text-xs text-gray-300 outline-none';
                 populateNoteOptions(noteSelect, r.note);
-                noteSelect.addEventListener('change', () => { rows[i].note = noteSelect.value; pushActiveTuning(); });
+                noteSelect.addEventListener('change', () => { rows[i].note = noteSelect.value; pushActiveTuning(); onFieldChanged(); });
                 rowDiv.appendChild(noteSelect);
 
                 const colorInput = document.createElement('input');
@@ -514,7 +508,7 @@
                 colorInput.value = r.color;
                 colorInput.title = 'String ' + (i + 1) + ' color';
                 colorInput.className = 'cr3d-row-color w-8 h-8 rounded border border-gray-800 bg-dark-700 shrink-0 p-0';
-                colorInput.addEventListener('input', () => { rows[i].color = colorInput.value; pushActiveTuning(); });
+                colorInput.addEventListener('input', () => { rows[i].color = colorInput.value; pushActiveTuning(); onFieldChanged(); });
                 rowDiv.appendChild(colorInput);
 
                 // Only the current top and bottom rows can be removed —
@@ -526,7 +520,7 @@
                     removeBtn.className = 'text-[10px] px-2 py-1 rounded bg-dark-700 border border-gray-800 text-red-400 hover:text-red-300 shrink-0 disabled:opacity-30 disabled:pointer-events-none';
                     removeBtn.textContent = 'Remove';
                     removeBtn.disabled = rows.length <= MIN_STRINGS;
-                    removeBtn.addEventListener('click', () => { rows.splice(i, 1); renderRows(); pushActiveTuning(); });
+                    removeBtn.addEventListener('click', () => { rows.splice(i, 1); renderRows(); pushActiveTuning(); onFieldChanged(); });
                     rowDiv.appendChild(removeBtn);
                 } else {
                     const spacer = document.createElement('span');
@@ -561,29 +555,42 @@
             octave = CR.resolveOctaveOffset(profile.octaveOffset);
             syncAdjustControls();
         }
-        function startEdit(profile) {
-            editingId = profile.id;
-            if (nameInput) nameInput.value = profile.name;
+        // Builtin and custom presets load the same way. `seed` (optional)
+        // defaults to the resolved active tuning (activeSeedProfile) — the
+        // dropdown-change flow passes the just-selected preset explicitly.
+        // A custom base can be saved in place (editingId set, Delete
+        // shown); a builtin base always saves as a new custom tuning.
+        function loadPreset(seed) {
+            const profile = seed || activeSeedProfile();
+            const isCustom = readCustom().some((p) => p.id === profile.id);
+            editingId = isCustom ? profile.id : null;
+            if (nameInput) nameInput.value = isCustom ? profile.name : '';
             seedRowsFromProfile(profile);
             renderRows();
-            if (formHeading) formHeading.textContent = 'Edit tuning';
-            if (saveBtn) saveBtn.textContent = 'Save changes';
-            if (cancelBtn) cancelBtn.classList.remove('hidden');
+            dirty = false;
+            if (saveBtn) {
+                saveBtn.textContent = isCustom ? 'Save changes' : 'Save';
+                saveBtn.disabled = true;
+            }
+            if (deleteBtn) deleteBtn.classList.toggle('hidden', !isCustom);
             clearError();
         }
-        // `seed` (optional): the profile whose values fill the fresh form.
-        // Defaults to the resolved active tuning (activeSeedProfile), so
-        // the form always starts from what the highway is playing — the
-        // dropdown-change flow passes the just-selected preset explicitly.
-        function resetForm(seed) {
-            editingId = null;
-            if (nameInput) nameInput.value = '';
-            seedRowsFromProfile(seed || activeSeedProfile());
-            renderRows();
-            if (formHeading) formHeading.textContent = 'Add a tuning';
-            if (saveBtn) saveBtn.textContent = 'Save';
-            if (cancelBtn) cancelBtn.classList.add('hidden');
-            clearError();
+        // First edit since loadPreset() enables Save; starting from a
+        // non-custom base with a blank name also fills in a fresh
+        // "New custom preset N" so it always saves as something new.
+        function onFieldChanged() {
+            if (dirty) return;
+            dirty = true;
+            if (saveBtn) saveBtn.disabled = false;
+            if (editingId === null && nameInput && !nameInput.value.trim()) {
+                nameInput.value = nextAutoName();
+            }
+        }
+        function nextAutoName() {
+            const used = new Set(readCustom().map((p) => p.name));
+            let n = 1;
+            while (used.has('New custom preset ' + n)) n++;
+            return 'New custom preset ' + n;
         }
 
         function deleteProfile(profile) {
@@ -599,9 +606,8 @@
                     if (readActiveId(cls) === profile.id) writeActiveFallback(cls, defaultIdFor(cls));
                 }
             }
-            if (editingId === profile.id) resetForm();
+            if (editingId === profile.id) loadPreset();
             renderActiveDropdowns();
-            renderManageList();
         }
 
         for (const { cls, el } of sels) {
@@ -613,15 +619,20 @@
                     writeActiveFallback(cls, el.value);
                     clearActiveTuningFallback();
                 }
-                // "Reset to whatever is that selected preset": the form
-                // starts over from the selection, previous customizations
-                // are thrown out with the active tuning.
                 const pool = BUILTIN_PRESETS.concat(readCustom());
-                resetForm(pool.find((p) => p.id === el.value));
+                loadPreset(pool.find((p) => p.id === el.value));
             });
         }
 
-        if (cancelBtn) cancelBtn.addEventListener('click', resetForm);
+        if (cancelBtn) cancelBtn.addEventListener('click', () => loadPreset());
+        if (deleteBtn) {
+            deleteBtn.addEventListener('click', () => {
+                const profile = readCustom().find((p) => p.id === editingId);
+                if (profile) deleteProfile(profile);
+            });
+        }
+
+        if (nameInput) nameInput.addEventListener('input', onFieldChanged);
 
         if (addLowBtn) {
             addLowBtn.addEventListener('click', () => {
@@ -630,6 +641,7 @@
                 rows.unshift(next);
                 renderRows();
                 pushActiveTuning();
+                onFieldChanged();
             });
         }
         if (addHighBtn) {
@@ -639,6 +651,7 @@
                 rows.push(next);
                 renderRows();
                 pushActiveTuning();
+                onFieldChanged();
             });
         }
 
@@ -647,6 +660,10 @@
                 clearError();
                 const name = nameInput ? nameInput.value.trim() : '';
                 if (!name) { showError('Enter a name for this tuning.'); return; }
+                if (BUILTIN_PRESETS.some((p) => p.label.trim().toLowerCase() === name.toLowerCase())) {
+                    showError('That name is used by a built-in tuning — pick another.');
+                    return;
+                }
                 if (rows.length < MIN_STRINGS || rows.length > MAX_STRINGS) {
                     showError('Tunings need between ' + MIN_STRINGS + ' and ' + MAX_STRINGS + ' strings.');
                     return;
@@ -675,9 +692,10 @@
                     savedId = id;
                 }
                 if (!savedId) { showError('Could not save — check each string is a valid note + octave.'); return; }
-                resetForm();
                 renderActiveDropdowns();
-                renderManageList();
+                // Re-open the saved entry: now a real custom tuning (Delete
+                // shown, Save disabled again until it's next changed).
+                loadPreset(readCustom().find((p) => p.id === savedId));
             });
         }
 
@@ -696,6 +714,7 @@
                 // clamp a now-impossible working capo).
                 syncAdjustControls();
                 pushActiveTuning();
+                onFieldChanged();
             });
         }
 
@@ -704,6 +723,7 @@
                 capoEnabled = capoEnabledCheckbox.checked;
                 syncAdjustControls();
                 pushActiveTuning();
+                onFieldChanged();
             });
         }
         if (capoSlider) {
@@ -712,6 +732,7 @@
                 capo = CR.resolveCapo(v, maxFret);
                 syncAdjustControls();
                 pushActiveTuning();
+                onFieldChanged();
             });
         }
         if (octaveSlider) {
@@ -720,12 +741,12 @@
                 octave = CR.resolveOctaveOffset(v);
                 syncAdjustControls();
                 pushActiveTuning();
+                onFieldChanged();
             });
         }
 
         renderActiveDropdowns();
-        renderManageList();
-        resetForm();
+        loadPreset();
     } // init()
     })();
     </script>

@@ -29,7 +29,7 @@ export function isValidMaxFret(v) {
     return MAX_FRET_OPTIONS.indexOf(v) !== -1;
 }
 
-// Capo (v0.4.0) — a per-tuning-profile fret the player clamps a capo on,
+// Capo — a per-tuning-profile fret the player clamps a capo on,
 // ON TOP of the tuning's own string pitches. One capo fret = one
 // half-step up per string, and the frets above (maxFret - capo) fall off
 // the far end of the neck. 0 means "no capo". Negative capos and capos
@@ -47,12 +47,12 @@ export function isValidCapo(v, maxFret) {
 export function resolveCapo(v, maxFret) {
     return isValidCapo(v, maxFret) ? v : 0;
 }
-// On/off gate for the capo above (v0.5.0) — off by default; only literal `true` counts.
+// On/off gate for the capo above — off by default; only literal `true` counts.
 export function resolveCapoEnabled(v) {
     return v === true;
 }
 
-// Octave offset (v0.4.0) — shifts the WHOLE CHART ±N octaves before
+// Octave offset — shifts the WHOLE CHART ±N octaves before
 // remapping, no key change involved. +1 makes an E-standard bass chart
 // land on a guitar profile's lowest four strings (E2 A2 D3 G3 sounding
 // an octave above the bass's E1 A1 D2 G2) note-for-note; -1 is the
@@ -333,25 +333,19 @@ export function arrangementClassFor(arrangementName) {
 // bass, EADGBE for rhythm/lead), then a caller-supplied custom-tuning
 // list, falling back to the class-default preset for an id that matches
 // neither — an unknown or deleted one — so a stale id can never leave a
-// caller without a usable tuning. (Pre-guitar versions fell back to a
-// hardcoded BEADG shape; the class default is now both more predictable —
-// it matches what a fresh install shows — and right for guitar profiles.)
-// `id` is the RESOLVED id (the fallback preset's own id when the input
-// id matched nothing) — screen.js keys its per-tuning capo/octave
-// overrides by it. `roles` is non-null only for a preset that carries an
-// explicit per-position role array (EADGBE today); custom tunings always
-// resolve roles: null since they carry concrete colors. `maxFret` on a
-// custom tuning falls back to DEFAULT_MAX_FRET when missing/invalid —
-// covers tunings saved before per-tuning max fret existed, and any
-// corrupted stored value. `capo`/`octaveOffset` (v0.4.0) default to 0
-// when missing/invalid — every built-in preset ships 0 for both, and
-// tunings saved before the fields existed read as 0; capo is validated
-// against the profile's OWN resolved maxFret, so shrinking a tuning's
-// max fret below a saved capo silently disables the capo rather than
-// leaving an impossible neck. `capoEnabled` (v0.5.0) defaults to false
-// the same way. Pure: the caller owns reading `id`/`customTunings` from
-// wherever they're persisted (screen.js: global settings storage;
-// settings.html: localStorage).
+// caller without a usable tuning. `id` is the RESOLVED id (the fallback
+// preset's own id when the input id matched nothing) — screen.js keys
+// its per-tuning capo/octave overrides by it. `roles` is non-null only
+// for a preset that carries an explicit per-position role array (EADGBE
+// today); custom tunings always resolve roles: null since they carry
+// concrete colors. `maxFret` on a custom tuning falls back to
+// DEFAULT_MAX_FRET when missing/invalid. `capo`/`octaveOffset`/
+// `capoEnabled` default to 0/0/false when missing/invalid; capo is
+// validated against the profile's OWN resolved maxFret, so shrinking a
+// tuning's max fret below a saved capo silently disables the capo rather
+// than leaving an impossible neck. Pure: the caller owns reading
+// `id`/`customTunings` from wherever they're persisted (screen.js:
+// global settings storage; settings.html: localStorage).
 export function resolveActiveTuning(id, customTunings, arrClass = 'bass') {
     const targetId = id || defaultTuningIdForClass(arrClass);
     // .slice() on preset strings/roles: they're shared module constants —

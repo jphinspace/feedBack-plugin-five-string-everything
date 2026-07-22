@@ -863,9 +863,8 @@ const SPOT_FRETS = [0, 10, 20];
         true);
 
     // Every resolution also reports the RESOLVED id plus capo/capoEnabled/
-    // octaveOffset (v0.4.0 capo/octaveOffset, v0.5.0 capoEnabled — all
-    // default off/0 unless the profile carries valid values) — folded
-    // into the expected shapes below via this tiny helper.
+    // octaveOffset (default off/0 unless the profile carries valid
+    // values) — folded into the expected shapes below via this tiny helper.
     const adj = (id, shape) => Object.assign({ id, capo: 0, capoEnabled: false, octaveOffset: 0 }, shape);
     check('resolveActiveTuning: no id (fresh install) resolves to EADG, live colors',
         resolveActiveTuning(undefined, []), adj('eadg', { strings: DEFAULT_TARGET_TUNING.slice(1), colors: null, roles: null, maxFret: 20 }));
@@ -1039,7 +1038,7 @@ const SPOT_FRETS = [0, 10, 20];
     check('remapChordTemplate at a 6-string target: the new 6th-string slot remaps correctly', remapped6.frets, [-1, -1, -1, -1, -1, 5]);
 }
 
-// ── Capo & octave offset (v0.4.0) ────────────────────────────────────
+// ── Capo & octave offset ────────────────────────────────────────────
 
 // Validation helpers.
 {
@@ -1144,7 +1143,7 @@ const SPOT_FRETS = [0, 10, 20];
 }
 
 // resolveActiveTuning: resolved id + capo/octaveOffset fields, and the
-// v0.4.0 ukulele presets.
+// ukulele presets.
 {
     const t = resolveActiveTuning('eadgbe', []);
     check('resolveActiveTuning reports the resolved id', t.id, 'eadgbe');

@@ -1,12 +1,12 @@
 {
     "id": "chart_retuner",
     "name": "Chart Retuner",
-    "version": "0.5.0",
+    "version": "0.6.0",
     "script": "screen.js",
     "scriptType": "module",
     "minHost": "0.3.0-alpha.1",
     "styles": "assets/plugin.css",
-    "settings": { "html": "settings.html", "category": "graphics" },
+    "settings": { "html": "settings.html" },
     "standards": ["capability-pipelines.v1"],
     "capabilities": {
         "chart-transform": {
